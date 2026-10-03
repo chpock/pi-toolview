@@ -340,13 +340,13 @@ function multilineLayout(dump, wide) {
   assert.doesNotMatch(summaries[0].lines.join(''), /\u202e|\u001b\[31m/u, 'top-level and nested controls cannot affect terminal presentation');
   assert.ok(lines(summaries[0]).length > (dump.width === 24 ? 30 : 4), 'long summary is not bounded by old argument or row caps');
   const expected = [
-    'tv_summary "needle \\"quoted\\"" in ["src dir","tests"] [query="always named", enabled=true, paths=["ordinary-path"], scope="ordinary-scope", target="ordinary-target", url="https://example.invalid/ordinary"] ✓',
-    'tv_summary "chosen target" [query="named", path=null, paths=["ordinary-path"], pattern=0, scope="ordinary-scope", url="ordinary-url"] ✓',
-    'tv_summary chosen-path [paths=["ordinary-path"], scope="ordinary-scope", target="ordinary-target", url="ordinary-url"] ✓',
-    'tv_summary https://example.invalid/chosen [paths=[], pattern=false, scope="ordinary-scope"] ✓',
-    'tv_summary [] [paths=["ordinary-path"]] ✓',
-    'tv_summary [] ✓',
-    'tv_summary "" in [] [query=""] ✓',
+    'tv_summary "needle \\"quoted\\"" [paths=["ordinary-path"], path=["src dir","tests"], target="ordinary-target", url="https://example.invalid/ordinary", scope="ordinary-scope", query="always named", enabled=true] ✓',
+    'tv_summary "chosen target" [paths=["ordinary-path"], path=null, url="ordinary-url", scope="ordinary-scope", query="named", pattern=0] ✓',
+    'tv_summary chosen-path [paths=["ordinary-path"], target="ordinary-target", url="ordinary-url", scope="ordinary-scope"] ✓',
+    'tv_summary https://example.invalid/chosen [paths=[], scope="ordinary-scope", pattern=false] ✓',
+    'tv_summary [paths=["ordinary-path"], scope=[]] ✓',
+    'tv_summary [paths=[]] ✓',
+    'tv_summary "" [path=[], query=""] ✓',
   ];
   for (const [index, expectedSummary] of expected.entries())
     assert.equal(summaryText(summaries[index + 1]), summaryExpected(expectedSummary), `primary selection case ${index + 1}`);

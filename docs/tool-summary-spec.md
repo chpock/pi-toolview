@@ -6,12 +6,12 @@ Status: accepted. This specification supersedes the original argument-preview he
 
 Given the explicitly supplied argument object:
 
-1. If `pattern` is a string, including `""`, it takes precedence. Show its quoted value. If `path` is a string or an array of strings, append ` in ` and the formatted path. Consume only those used fields. Other object candidates remain ordinary parameters in this branch.
-2. Otherwise choose the first string or array-of-strings value in this exact priority: `path`, `target`, `url`, `scope`, `paths`. Show it as the primary object and consume that field only. Other candidates remain ordinary parameters.
-3. Wrong-type values (including null, numbers and structured objects) remain named parameters; they are not discarded or interpreted as locations. Empty string and empty string array are valid display values.
-4. If neither rule applies, omit the primary description. Do not invent an ellipsis placeholder. `query` is always an ordinary named parameter.
+1. If `pattern` is a string, including `""`, it takes precedence. Show its quoted value. If `path` is a nonempty string, append ` in ` and the formatted path. Consume only those used fields. Other object candidates remain ordinary parameters in this branch.
+2. Otherwise choose the first nonempty string value in this exact priority: `path`, `target`, `url`, `scope`. Show it as the primary object and consume that field only. Other candidates remain ordinary parameters.
+3. Empty strings and all other types (including arrays, null, numbers, booleans and structured objects) remain named parameters; they are not discarded or interpreted as primary locations. A primary location must be a primitive string with supplied length greater than zero; no implicit trimming is performed. Strings containing spaces retain the existing quoting/sanitization rules.
+4. If neither rule applies, omit the primary description. Do not invent an ellipsis placeholder. `query` and `paths` are always ordinary named parameters. `paths` never becomes a primary object, including when it is the only supplied argument.
 
-Primary strings are unquoted unless empty or containing whitespace, double quotes, backslashes, square brackets or commas; such strings use JSON quoting. Pattern strings always use JSON quoting. String arrays use compact JSON.
+Primary strings are unquoted unless empty or containing whitespace, double quotes, backslashes, square brackets or commas; such strings use JSON quoting. Pattern strings always use JSON quoting. Arrays are ordinary parameter values and use compact JSON.
 
 ## 2. Remaining parameters
 
@@ -27,7 +27,8 @@ No recursive payload deletion is performed. All other supplied JSON fields parti
 Sort present priority fields in this order:
 
 ```text
-query, queries, op, action, symbol, symbols, command, subject,
+paths, path, target, url, scope, query, queries, op, action,
+symbol, symbols, command, subject,
 offset, limit, startLine, endLine
 ```
 
@@ -91,11 +92,14 @@ These examples omit colors, prefix and status; terminal wrapping is viewport-dep
 read src/app.ts [offset=5, limit=10]
 grep "needle" in src [include="*.ts"]
 aft_search [query="where is authentication handled", includeTests=true]
-aft_outline ["src","tests"]
+aft_outline [target=["src","tests"]]
 aft_zoom src/app.ts [symbols=["render","update"], callgraph=true]
 aft_callgraph src/app.ts [op="callers", symbol="render", depth=2]
-ast_grep_search "$X($$$)" [lang="typescript", paths=["src"]]
+ast_grep_search "$X($$$)" [paths=["src"], lang="typescript"]
+custom [paths=["src","tests"], query="find this"]
 aft_inspect src [sections="diagnostics"]
+aft_inspect [scope=["src/index.ts","tests/unit.test.ts"], sections="diagnostics"]
+custom "needle" [path=[], target="", query="find this"]
 TaskCreate [subject="Investigate rendering", description="Check native visibility"]
 TaskList
 Agent [description="Review rendering", subagent_type="reviewer"]

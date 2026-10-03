@@ -42,8 +42,8 @@ export function sanitize(value: string): string {
     .replace(/\s+/gu, " ")
     .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f]/gu, "");
 }
-const OBJECT_KEYS = ["path", "target", "url", "scope", "paths"];
-const IMPORTANT_KEYS = ["query", "queries", "op", "action", "symbol", "symbols", "command", "subject", "offset", "limit", "startLine", "endLine"];
+const OBJECT_KEYS = ["path", "target", "url", "scope"];
+const IMPORTANT_KEYS = ["paths", "path", "target", "url", "scope", "query", "queries", "op", "action", "symbol", "symbols", "command", "subject", "offset", "limit", "startLine", "endLine"];
 const PAYLOAD_KEYS = new Set(["content", "edits", "code", "input", "messages", "prompt", "newString", "oldString", "appendContent", "rewrite", "oldText", "newText"]);
 const SECRET_KEYS = new Set(["password", "passwd", "api_key", "apiKey", "authorization", "Authorization", "access_token", "refresh_token", "secret", "token"]);
 
@@ -52,11 +52,10 @@ function valueText(value: unknown): string {
     return sanitize(JSON.stringify(value, (_key, item: unknown) => typeof item === "string" ? sanitize(item) : item) ?? '"[unavailable]"');
   } catch { return '"[unavailable]"'; }
 }
-function location(value: unknown): value is string | string[] {
-  return typeof value === "string" || (Array.isArray(value) && value.every((item) => typeof item === "string"));
+function location(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
 }
-function objectText(value: string | string[]): string {
-  if (Array.isArray(value)) return valueText(value);
+function objectText(value: string): string {
   const text = sanitize(value);
   return !text || /[\s"\\\[\],]/u.test(text) ? valueText(text) : text;
 }
@@ -68,7 +67,7 @@ function argumentParts(args: Record<string, unknown>) {
     if (location(args.path)) { object = objectText(args.path); used.add("path"); }
   } else {
     const key = OBJECT_KEYS.find((key) => location(args[key]));
-    if (key) { object = objectText(args[key] as string | string[]); used.add(key); }
+    if (key) { object = objectText(args[key] as string); used.add(key); }
   }
   const rank = (key: string) => { const index = IMPORTANT_KEYS.indexOf(key); return index < 0 ? IMPORTANT_KEYS.length : index; };
   const entries = Object.entries(args).filter(([key, value]) => !used.has(key) && !PAYLOAD_KEYS.has(key) && value !== undefined);

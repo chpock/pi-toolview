@@ -382,13 +382,13 @@ test("standardized summaries cover active tool argument shapes without tool-name
   const cases: [string, Record<string, unknown>, string][] = [
     ["read", { limit: 10, path: "src/app.ts", offset: 5 }, 'src/app.ts [offset=5, limit=10]'],
     ["grep", { include: "*.ts", path: "src", pattern: "needle" }, '"needle" in src [include="*.ts"]'],
-    ["custom", { pattern: "", path: "", target: "other", query: "why" }, '"" in "" [query="why", target="other"]'],
+    ["custom", { pattern: "", path: "", target: "other", query: "why" }, '"" [path="", target="other", query="why"]'],
     ["aft_search", { includeTests: false, query: "where is auth", path: "/repo" }, '/repo [query="where is auth", includeTests=false]'],
-    ["aft_outline", { target: ["src", "tests"], files: true }, '["src","tests"] [files=true]'],
-    ["aft_inspect", { sections: "diagnostics", scope: ["src", "tests"] }, '["src","tests"] [sections="diagnostics"]'],
+    ["aft_outline", { target: ["src", "tests"], files: true }, '[target=["src","tests"], files=true]'],
+    ["aft_inspect", { sections: "diagnostics", scope: ["src", "tests"] }, '[scope=["src","tests"], sections="diagnostics"]'],
     ["aft_zoom", { path: "a.ts", symbols: ["render", "update"], callgraph: true }, 'a.ts [symbols=["render","update"], callgraph=true]'],
     ["aft_callgraph", { depth: 2, symbol: "render", path: "a.ts", op: "callers" }, 'a.ts [op="callers", symbol="render", depth=2]'],
-    ["ast_grep_search", { paths: ["src"], lang: "typescript", pattern: "$X($$$)" }, '"$X($$$)" [lang="typescript", paths=["src"]]'],
+    ["ast_grep_search", { paths: ["src"], lang: "typescript", pattern: "$X($$$)" }, '"$X($$$)" [paths=["src"], lang="typescript"]'],
     ["ast_grep_replace", { rewrite: "BULKY", pattern: "foo()", lang: "typescript" }, '"foo()" [lang="typescript"]'],
     ["TaskCreate", { description: "Investigate", subject: "Rendering" }, '[subject="Rendering", description="Investigate"]'],
     ["TaskUpdate", { status: "completed", taskId: "1" }, '[status="completed", taskId="1"]'],
@@ -397,7 +397,7 @@ test("standardized summaries cover active tool argument shapes without tool-name
     ["web_search", { numResults: 5, queries: ["one", "two"] }, '[queries=["one","two"], numResults=5]'],
     ["fetch_content", { url: "https://example.com", prompt: "BULKY", mode: "answer" }, 'https://example.com [mode="answer"]'],
     ["aft_safety", { name: "snap", op: "checkpoint", files: ["src/a.ts"] }, '[op="checkpoint", files=["src/a.ts"], name="snap"]'],
-    ["custom", { pattern: null, path: { id: 1 }, target: "valid", zero: 0, flag: false, empty: "", nullable: null }, 'valid [empty="", flag=false, nullable=null, path={"id":1}, pattern=null, zero=0]'],
+    ["custom", { pattern: null, path: { id: 1 }, target: "valid", zero: 0, flag: false, empty: "", nullable: null }, 'valid [path={"id":1}, empty="", flag=false, nullable=null, pattern=null, zero=0]'],
     ["custom", { url: "https://example.com", target: "target", path: "first" }, 'first [target="target", url="https://example.com"]'],
     ["custom", { path: "my file.ts", "odd key": [false, 0, null] }, '"my file.ts" ["odd key"=[false,0,null]]'],
     ["TaskList", {}, ''],
@@ -493,14 +493,54 @@ test("quoting preserves edge spaces, escapes punctuation and handles non-JSON va
   assert.equal(describeArgs("custom", { path: 'a"b\\c', query: 'a"b\\c' }), '"a\\"b\\\\c" [query="a\\"b\\\\c"]');
   const cyclic: Record<string, unknown> = {}; cyclic.self = cyclic;
   assert.equal(describeArgs("custom", { query: cyclic }), '[query="[unavailable]"]');
-  assert.equal(describeArgs("custom", { target: [], pattern: 0 }), '[] [pattern=0]');
+  assert.equal(describeArgs("custom", { target: [], pattern: 0 }), '[target=[], pattern=0]');
   assert.equal(describeArgs("custom", { scope: "src", paths: ["tests"], url: null }), 'src [paths=["tests"], url=null]');
 });
 
+test("primary locations require a nonempty string and otherwise lead named parameters", () => {
+  for (const key of ["path", "target", "url", "scope"]) {
+    assert.equal(describeArgs("custom", { [key]: "src", query: "q" }), 'src [query="q"]');
+    assert.equal(describeArgs("custom", { [key]: " src " }), '" src "');
+    assert.equal(describeArgs("custom", { [key]: " " }), '" "'); // no implicit trimming
+    for (const value of ["", [], ["src"], { root: "src" }, null, 0, false]) {
+      const args = { query: "q", [key]: value, paths: ["first"] };
+      const before = structuredClone(args);
+      const expected = `[paths=["first"], ${key}=${JSON.stringify(value)}, query="q"]`;
+      assert.equal(describeArgs("custom", args), expected);
+      assert.equal(describeArgs("custom", Object.fromEntries(Object.entries(args).reverse())), expected);
+      assert.deepEqual(args, before);
+    }
+  }
+  assert.equal(describeArgs("custom", { pattern: "x", path: "", target: "other", query: "q" }), '"x" [path="", target="other", query="q"]');
+  assert.equal(describeArgs("custom", { pattern: "", path: "a" }), '"" in a');
+  assert.equal(describeArgs("custom", { path: [], target: "", url: "https://example.com", scope: "src", query: "q" }), 'https://example.com [path=[], target="", scope="src", query="q"]');
+  const all = { query: "q", scope: null, url: "", target: [], path: "", paths: [], alpha: true };
+  assert.equal(describeArgs("custom", all), '[paths=[], path="", target=[], url="", scope=null, query="q", alpha=true]');
+  assert.equal(describeArgs("custom", Object.fromEntries(Object.entries(all).reverse())), '[paths=[], path="", target=[], url="", scope=null, query="q", alpha=true]');
+});
+
+test("paths remains a named parameter and precedes every other parameter", () => {
+  const cases: [Record<string, unknown>, string][] = [
+    [{ paths: ["src"] }, '[paths=["src"]]'],
+    [{ query: "q", paths: [] }, '[paths=[], query="q"]'],
+    [{ query: "q", paths: "src", path: "a", op: "search", z: 0 }, 'a [paths="src", query="q", op="search", z=0]'],
+    [{ paths: null, pattern: "x", path: ["a"], limit: 0 }, '"x" [paths=null, path=["a"], limit=0]'],
+    [{ scope: [], paths: ["src"], query: "q" }, '[paths=["src"], scope=[], query="q"]'],
+    [{ query: "q", paths: { root: "src" } }, '[paths={"root":"src"}, query="q"]'],
+    [{ Paths: ["src"], query: "q" }, '[query="q", Paths=["src"]]'],
+  ];
+  for (const [args, expected] of cases) {
+    const before = structuredClone(args);
+    assert.equal(describeArgs("custom", args), expected);
+    assert.equal(describeArgs("custom", Object.fromEntries(Object.entries(args).reverse())), expected);
+    assert.deepEqual(args, before);
+  }
+});
+
 test("important fields precede locale-independent alphabetical keys regardless of input order", () => {
-  const first = { zebra: 1, startLine: 2, query: "q", endLine: 3, alpha: 4, Alpha: 5, symbol: "s" };
+  const first = { zebra: 1, startLine: 2, query: "q", endLine: 3, alpha: 4, Alpha: 5, symbol: "s", paths: ["src"] };
   const second = Object.fromEntries(Object.entries(first).reverse());
-  const expected = '[query="q", symbol="s", startLine=2, endLine=3, Alpha=5, alpha=4, zebra=1]';
+  const expected = '[paths=["src"], query="q", symbol="s", startLine=2, endLine=3, Alpha=5, alpha=4, zebra=1]';
   assert.equal(describeArgs("custom", first), expected);
   assert.equal(describeArgs("custom", second), expected);
   for (const key of ["password", "passwd", "api_key", "apiKey", "authorization", "Authorization", "access_token", "refresh_token", "secret", "token"]) {
