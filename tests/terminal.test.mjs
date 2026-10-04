@@ -642,6 +642,90 @@ test('real CLI: complete multiline summaries, adaptive separation, continuation 
     }
   });
 
+test('real CLI: comma wrap points preserve array members and index lists in live and replay output',
+  { skip: stockOnly, timeout: 120000 }, async () => {
+    const terminals = [];
+    const start = async (name, options = {}) => {
+      const terminal = new PiTerminal(name, options); terminals.push(terminal);
+      await terminal.ready(); await terminal.resize(110, 80); return terminal;
+    };
+    const activity = (terminal) => {
+      const observed = terminal.events();
+      assert.equal(observed.filter((event) => event.type === 'call').length, 3);
+      assert.equal(observed.filter((event) => event.type === 'result').length, 3);
+      assert.equal(observed.filter((event) => event.type === 'model_context').length, 4);
+      return observed.filter((event) => ['call', 'result', 'model_context'].includes(event.type));
+    };
+    const check = async (dump, width, wholeMembers) => {
+      assert.equal(dump.tools.length, 3);
+      const args = persisted(dump).filter((entry) => entry.arguments).map((entry) => entry.arguments);
+      for (const [index, tool] of dump.tools.entries()) {
+        const rows = compactContent(tool);
+        const key = ['scope', 'target', 'drop'][index];
+        const expected = `tv_summary [${key}=${JSON.stringify(args[index][key])}] ✓`;
+        assert.equal(summaryText(tool), summaryExpected(expected));
+        await assertFits(tool.lines, width);
+        if (!wholeMembers) continue;
+        assert.match(rows[0], /^ → tv_summary \[/, 'parameters start on the first row');
+        if (Array.isArray(args[index][key])) {
+          assert.equal(rows.length, 3);
+          for (const member of args[index][key]) {
+            assert.equal(rows.filter((row) => row.includes(JSON.stringify(member))).length, 1,
+              'each fitting array member remains whole on one row');
+          }
+        } else {
+          assert.match(rows[0], /\[drop="1,2,3,/);
+          assert.ok(rows.length >= 2);
+          assert.ok(rows.slice(0, -1).every((row) => row.endsWith(',')), 'index list breaks after a comma');
+        }
+        const y = dump.screen.findIndex((row) => row === rows[0]);
+        assert.ok(y >= 0, 'compact call is present on the real terminal screen');
+        assert.deepEqual(dump.screen.slice(y, y + rows.length), rows);
+      }
+    };
+    try {
+      const stock = await start('comma-wrap-stock');
+      await stock.run('comma-wrap'); const native = await stock.capture('native');
+      const live = await start('comma-wrap-toolview', { toolview: true, workspace: stock.work });
+      await live.run('comma-wrap'); const wide = await live.capture('wide');
+      await check(wide, 110, true);
+      assert.deepEqual(activity(live), activity(stock), '3 calls/results and 4 model contexts are identical');
+      assert.deepEqual(persisted(wide), persisted(native), 'raw arguments and complete results remain identical');
+      const sessionBytes = readFileSync(wide.session);
+      await live.resize(36, 80); const narrow = await live.capture('narrow');
+      await check(narrow, 36, false);
+      assert.deepEqual(persisted(narrow), persisted(wide));
+      await live.resize(110, 80); const back = await live.capture('wide-again');
+      assert.deepEqual(toolLines(back), toolLines(wide));
+      stock.send('\x0f'); await stock.settle(); const nativeExpanded = await stock.capture('expanded');
+      live.send('\x0f'); await live.settle(); const expanded = await live.capture('expanded');
+      assert.ok(expanded.tools.every((tool) => tool.expanded));
+      assert.deepEqual(toolLines(expanded), toolLines(nativeExpanded));
+      live.send('\x0f'); await live.settle(); await check(await live.capture('recollapsed'), 110, true);
+      await live.command('/toolview off'); assert.deepEqual(toolLines(await live.capture('off')), toolLines(native));
+      await live.command('/toolview on'); await check(await live.capture('on'), 110, true);
+      const starts = live.events().filter((event) => event.type === 'start').length;
+      await live.command('/reload'); await live.event('start', starts + 1);
+      const reloaded = await live.capture('reloaded'); await check(reloaded, 110, true);
+      assert.deepEqual(activity(live), activity(stock), 'UI-only changes do not execute tools or modify model context');
+      assert.deepEqual(readFileSync(wide.session), sessionBytes, 'UI-only changes do not rewrite the session');
+      await live.close();
+      const replay = await start('comma-wrap-replay', { toolview: true, session: wide.session, workspace: stock.work });
+      const resumed = await replay.capture('replayed'); await check(resumed, 110, true);
+      assert.deepEqual(toolLines(resumed), toolLines(reloaded));
+      assert.deepEqual(persisted(resumed), persisted(wide));
+      assert.deepEqual(readFileSync(wide.session), sessionBytes);
+      writeFileSync(join(artifacts, 'comma-wrap-coverage.json'), JSON.stringify({
+        calls: 3, results: 3, modelContexts: 4, widths: [36, 110],
+        tools: 'Executed generic tv_summary fixture with user-provided array shapes and 60 comma-separated indices; no installed AFT/Magic Context execution',
+        lifecycle: ['live native control', 'resize round trip', 'Ctrl+O native equality', 'off/on', 'reload', 'same-session replay'],
+        identity: 'Exact calls/results/model contexts, persisted arguments/results, and unchanged session bytes',
+      }, null, 2));
+    } finally {
+      for (const terminal of terminals.reverse()) { await terminal.close(); terminal.dispose(); }
+    }
+  });
+
 test('real CLI: width-21 colored-segment boundary preserves content and exact indentation',
   { skip: stockOnly, timeout: 60000 }, async () => {
     const terminals = [];

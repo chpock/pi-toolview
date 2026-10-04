@@ -206,6 +206,19 @@ export default function terminalDriver(pi: ExtensionAPI) {
     { name: "tv_summary", arguments: { pattern: "", path: [], query: "" } },
     { name: "tv_noargs", arguments: {} },
   ];
+  const commaWrap: Pick<ToolCall, "name" | "arguments">[] = [
+    { name: "tv_summary", arguments: { scope: [
+      "experiments/gruvbox-dark-hard/semantic-implementation-review.md",
+      "experiments/gruvbox-dark-hard/semantic-implementation.md",
+      "experiments/gruvbox-dark-hard/semantic-analysis.md",
+    ] } },
+    { name: "tv_summary", arguments: { target: [
+      "agent/npm/node_modules/pi-subagents/src/runs/shared/single-output.js",
+      "agent/npm/node_modules/pi-subagents/src/shared/artifacts.js",
+      "agent/npm/node_modules/pi-subagents/src/runs/background/async-execution.js",
+    ] } },
+    { name: "tv_summary", arguments: { drop: Array.from({ length: 60 }, (_, i) => i + 1).join(",") } },
+  ];
   const suite: Pick<ToolCall, "name" | "arguments">[] = [
     { name: "read", arguments: { path: "a.txt", offset: 1, limit: 1 } },
     { name: "read", arguments: { path: "b.txt" } },
@@ -237,7 +250,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
         const scenario = prompt === "run cache-performance" ? "cache-performance" : prompt?.includes("bash-width") ? "bash-width" : prompt?.includes("bash-stream") ? "bash-stream" : prompt?.includes("bash-real") ? "bash-real" :
           prompt?.includes("bash-shape-exception-stream") ? "bash-shape-exception-stream" : prompt?.includes("bash-shape-exceptions") ? "bash-shape-exceptions" :
           prompt?.includes("bash-shape-stream") ? "bash-shape-stream" : prompt?.includes("bash-shapes") ? "bash-shapes" :
-          prompt?.includes("boundary") ? "boundary" : prompt?.includes("multiline") ? "multiline" : prompt?.includes("integration") ? "integration" :
+          prompt?.includes("comma-wrap") ? "comma-wrap" : prompt?.includes("boundary") ? "boundary" : prompt?.includes("multiline") ? "multiline" : prompt?.includes("integration") ? "integration" :
           prompt?.includes("pending") ? "pending" : prompt?.includes("fallback") ? "fallback" :
           prompt?.includes("future") ? "future" : "suite";
         const results = context.messages.slice(last + 1).filter((m) => m.role === "toolResult");
@@ -257,7 +270,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
             "printf 'LIVE_FINAL\\n'" } }] : scenario === "boundary" ? [
           { name: "read", arguments: { path: "abcdefghijklm", limit: 1 } },
           { name: "tv_summary", arguments: { path: "abcdefghijklm", query: "x".repeat(40) } },
-        ] : scenario === "multiline" ? multiline : scenario === "integration" ? [
+        ] : scenario === "comma-wrap" ? commaWrap : scenario === "multiline" ? multiline : scenario === "integration" ? [
           { name: "TaskCreate", arguments: { subject: "TERMINAL_LOCAL_TASK", description: "Offline installed renderer smoke; do not execute." } },
           { name: "TaskList", arguments: {} },
         ] : scenario === "pending" ? [

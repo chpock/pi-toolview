@@ -587,6 +587,102 @@ test("colored word-boundary wraps never add padding or blank clickable content r
   } finally { controller.restore(); }
 });
 
+test("array summaries wrap between members instead of splitting paths that fit", () => {
+  const paths = [
+    "experiments/gruvbox-dark-hard/semantic-implementation-review.md",
+    "experiments/gruvbox-dark-hard/semantic-implementation.md",
+    "experiments/gruvbox-dark-hard/semantic-analysis.md",
+  ];
+  const tool = new Tool("aft_inspect", { scope: paths });
+  const { controller } = setup([tool]);
+  try {
+    const before = structuredClone(tool.args);
+    const rows = tool.render(110).map(plain);
+    assert.equal(rows.length, 3);
+    assert.equal(rows[0], ` → aft_inspect [scope=[${JSON.stringify(paths[0])},`);
+    assert.equal(rows[1], `   ${JSON.stringify(paths[1])},`);
+    assert.equal(rows[2], `   ${JSON.stringify(paths[2])}]] ✓`);
+    assert.deepEqual(tool.args, before);
+    assert.equal(rows.map((row) => row.slice(3)).join(""), `aft_inspect ${describeArgs(tool.toolName, tool.args)} ✓`);
+    assert.deepEqual(tool.render(110).map(plain), rows);
+  } finally { controller.restore(); }
+});
+
+test("comma-separated string values can start on the tool-name row and wrap after commas", () => {
+  const tool = new Tool("ctx_reduce", { drop: "3,4,5,8,9,10,12,15,18,21" });
+  const { controller } = setup([tool]);
+  try {
+    assert.deepEqual(tool.render(36).map(plain), [
+      ' → ctx_reduce [drop="3,4,5,8,9,10,',
+      '   12,15,18,21"] ✓',
+    ]);
+    // Even a list that fits on its own must use the remaining first-row space.
+    tool.updateArgs({ drop: "3,4,5,8,9,10,12" });
+    assert.deepEqual(tool.render(30).map(plain), [
+      ' → ctx_reduce [drop="3,4,5,8,',
+      '   9,10,12"] ✓',
+    ]);
+    assert.equal(describeArgs(tool.toolName, tool.args), '[drop="3,4,5,8,9,10,12"]');
+  } finally { controller.restore(); }
+});
+
+test("comma-aware wrapping preserves nested JSON, quotes, colors, graphemes and width bounds", () => {
+  const tool = new Tool("custom", { target: ["a,b", ["文件/🦀/é", "comma,\u0301suffix"], { quoted: 'a,"b\\c' }], drop: "1-3,5,8-10" });
+  const root = new Root(); root.addChild(tool);
+  const controller = installToolview(root, () => ({ fg: (role, text) => {
+    const colors: Record<string, number> = { dim: 90, muted: 37, toolTitle: 97, success: 32 };
+    return `\x1b[${colors[role] ?? 31}m${text}\x1b[39m`;
+  } }));
+  try {
+    const expected = `custom ${describeArgs(tool.toolName, tool.args)} ✓`;
+    for (let width = 5; width <= 100; width++) {
+      const colored = tool.render(width);
+      const rows = colored.map(plain);
+      assert.ok(rows.every((row) => visibleWidth(row) <= width), `width ${width}`);
+      assert.ok(rows.slice(1).every((row) => row.startsWith("   ") && row.trim()));
+      assert.equal(rows.map((row) => row.slice(3)).join("").replace(/ /g, ""), expected.replace(/ /g, ""));
+      assert.ok(rows.every((row) => !row.slice(3).startsWith("\u0301")), "comma plus combining mark remains one grapheme");
+      assert.match(colored.at(-1)!, /\x1b\[32m✓\x1b\[39m$/);
+    }
+  } finally { controller.restore(); }
+});
+
+test("comma wrap points preserve native CJK breaks in primary descriptions and error explanations", () => {
+  const tool = new Tool("custom", { path: "甲乙丙丁", drop: "1,2" });
+  const { controller } = setup([tool]);
+  try {
+    assert.equal(plain(tool.render(17)[0]!), " → custom 甲乙丙");
+    tool.updateArgs({ drop: "1,2" });
+    tool.updateResult({ isError: true, content: [{ type: "text", text: "甲乙丙丁" }] });
+    assert.deepEqual(tool.render(27).map(plain), [
+      ' → custom [drop="1,2"] — 甲',
+      '   乙丙丁 ✗',
+    ]);
+    tool.updateArgs({ target: ["甲乙丙丁", "한글かなカナ"] });
+    for (let width = 5; width <= 40; width++) {
+      const rows = tool.render(width).map(plain);
+      assert.ok(rows.every((row) => visibleWidth(row) <= width));
+      assert.equal(rows.map((row) => row.slice(3)).join("").replace(/ /g, ""),
+        `custom ${describeArgs(tool.toolName, tool.args)} — 甲乙丙丁 ✗`.replace(/ /g, ""));
+    }
+  } finally { controller.restore(); }
+});
+
+test("comma wrapping still hard-wraps oversized array members and expands continuation clicks", () => {
+  const tool = new Tool("custom", { paths: ["x".repeat(90), "tail"] });
+  const { controller } = setup([tool]);
+  try {
+    const rows = tool.render(30).map(plain);
+    assert.ok(rows.length > 3);
+    assert.ok(rows.every((row) => visibleWidth(row) <= 30));
+    assert.match(rows.map((row) => row.slice(3)).join(""), /x{90}/);
+    assert.match(rows.at(-1)!, /"tail"\]\] ✓$/);
+    assert.equal(tool.handleMouse(mouse(2, 30))?.handled, true);
+    assert.equal(tool.expanded, true);
+    assert.deepEqual(tool.render(30), ["", "NATIVE custom", "FULL_OUTPUT"]);
+  } finally { controller.restore(); }
+});
+
 test("zero-width compact rendering cannot retain an adaptive separator", () => {
   const first = new Tool(), second = new Tool("read", { path: "b.txt" });
   const { controller } = setup([first, second]);

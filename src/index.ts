@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext, ThemeColor } from "@earendil-works/pi-coding-agent";
-import { Container, truncateToWidth, wrapTextWithAnsi, type Component, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
+import { Container, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { isAbsolute, resolve } from "node:path";
 import { renderBashCard } from "./bash-card.ts";
@@ -89,6 +89,55 @@ function argumentParts(args: Record<string, unknown>) {
     return `${label}=${valueText(SECRET_KEYS.has(key) ? "<redacted>" : value)}`;
   });
   return { pattern, object, params: params.length ? `[${params.join(", ")}]` : "" };
+}
+
+const summaryGraphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+// Match Pi 1.0.0's plain-text token boundaries; punctuation is otherwise part of a word.
+const summaryCjkBreak = /[\p{Script_Extensions=Han}\p{Script_Extensions=Hiragana}\p{Script_Extensions=Katakana}\p{Script_Extensions=Hangul}\p{Script_Extensions=Bopomofo}]/u;
+
+/** Commas in parameters are soft breaks, not inserted spaces or modified JSON. */
+function wrapSummary(text: string, width: number, parameterStart: number, parameterLength: number): string[] {
+  const parameters = text.slice(parameterStart, parameterStart + parameterLength);
+  if (!parameters.includes(",")) return wrapTextWithAnsi(text, width);
+  const tokens: string[] = [];
+  let word = "", wordIsSpace = false;
+  const flushWord = () => { if (word) tokens.push(word); word = ""; };
+  for (const { segment, index } of summaryGraphemes.segment(text)) {
+    if (summaryCjkBreak.test(segment)) {
+      flushWord(); tokens.push(segment); continue;
+    }
+    const space = segment === " ";
+    if (word && wordIsSpace !== space) flushWord();
+    word += segment;
+    wordIsSpace = space;
+    // A comma with a combining mark is not a standalone grapheme boundary.
+    if (segment === "," && index >= parameterStart && index < parameterStart + parameterLength) flushWord();
+  }
+  flushWord();
+  const rows: string[] = [];
+  let line = "", lineWidth = 0;
+  const flush = () => { if (line.trimEnd()) rows.push(line.trimEnd()); line = ""; lineWidth = 0; };
+  for (const token of tokens) {
+    const tokenWidth = visibleWidth(token);
+    const whitespace = token.trim() === "";
+    if (tokenWidth > width && !whitespace) {
+      flush();
+      const broken = wrapTextWithAnsi(token, width);
+      for (let i = 0; i < broken.length - 1; i++) rows.push(broken[i]!);
+      line = broken.at(-1)!;
+      lineWidth = visibleWidth(line);
+    } else if (lineWidth + tokenWidth > width) {
+      flush();
+      if (!whitespace) { line = token; lineWidth = tokenWidth; }
+    } else {
+      // Dropping leading wrap whitespace keeps rows source-substring compatible.
+      if (!line && whitespace) continue;
+      line += token;
+      lineWidth += tokenWidth;
+    }
+  }
+  flush();
+  return rows;
 }
 
 /** Pure, name-independent logical description; presentation never changes arguments. */
@@ -226,6 +275,7 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
       parts.push({ color: "muted", text: ` ${pattern}` });
       if (object) parts.push({ color: "dim", text: " in " }, { color: "muted", text: object });
     } else if (object) parts.push({ color: "muted", text: ` ${object}` });
+    const parameterStart = parts.reduce((length, part) => length + part.text.length, 0) + 1;
     if (params) parts.push({ color: "dim", text: ` ${params}` });
     const error = failed ? node.result?.content.find((item) => item.type === "text")?.text?.split(/[\r\n]/u)[0] : undefined;
     if (error) parts.push({ color: "toolTitle", text: ` — ${truncateToWidth(sanitize(error).trim(), 180)}` });
@@ -236,7 +286,7 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     let end = 0;
     const spans = parts.map((part) => { const start = end; end += part.text.length; return { ...part, start, end }; });
     let cursor = 0;
-    return wrapTextWithAnsi(plain, width - 3).map((line, index) => {
+    return wrapSummary(plain, width - 3, parameterStart, params.length).map((line, index) => {
       const start = plain.indexOf(line, cursor);
       if (start < 0) throw new Error("Wrapped text is not a source substring");
       cursor = start + line.length;
