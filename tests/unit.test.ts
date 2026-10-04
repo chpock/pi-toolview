@@ -577,7 +577,9 @@ test("colored word-boundary wraps never add padding or blank clickable content r
     return `\x1b[${colors[role] ?? 31}m${text}\x1b[39m`;
   } }));
   try {
-    assert.deepEqual(tool.render(21).map(plain), [' → read abcdefghijklm', '   [limit=1] ✓']);
+    assert.deepEqual(tool.render(21).map(plain), [' → read', '   abcdefghijklm', '   [limit=1] ✓']);
+    // The original colored-boundary geometry now occurs one column wider.
+    assert.deepEqual(tool.render(22).map(plain), [' → read abcdefghijklm', '   [limit=1] ✓']);
     tool.args = { path: "abcdefghijklm", query: "x".repeat(40) };
     const rows = tool.render(21).map(plain);
     assert.ok(rows.length > 2);
@@ -635,7 +637,7 @@ test("comma-aware wrapping preserves nested JSON, quotes, colors, graphemes and 
   } }));
   try {
     const expected = `custom ${describeArgs(tool.toolName, tool.args)} ✓`;
-    for (let width = 5; width <= 100; width++) {
+    for (let width = 6; width <= 100; width++) {
       const colored = tool.render(width);
       const rows = colored.map(plain);
       assert.ok(rows.every((row) => visibleWidth(row) <= width), `width ${width}`);
@@ -651,15 +653,16 @@ test("comma wrap points preserve native CJK breaks in primary descriptions and e
   const tool = new Tool("custom", { path: "甲乙丙丁", drop: "1,2" });
   const { controller } = setup([tool]);
   try {
-    assert.equal(plain(tool.render(17)[0]!), " → custom 甲乙丙");
+    assert.equal(plain(tool.render(16)[0]!), " → custom 甲乙");
+    assert.equal(plain(tool.render(18)[0]!), " → custom 甲乙丙");
     tool.updateArgs({ drop: "1,2" });
     tool.updateResult({ isError: true, content: [{ type: "text", text: "甲乙丙丁" }] });
-    assert.deepEqual(tool.render(27).map(plain), [
+    assert.deepEqual(tool.render(28).map(plain), [
       ' → custom [drop="1,2"] — 甲',
       '   乙丙丁 ✗',
     ]);
     tool.updateArgs({ target: ["甲乙丙丁", "한글かなカナ"] });
-    for (let width = 5; width <= 40; width++) {
+    for (let width = 6; width <= 40; width++) {
       const rows = tool.render(width).map(plain);
       assert.ok(rows.every((row) => visibleWidth(row) <= width));
       assert.equal(rows.map((row) => row.slice(3)).join("").replace(/ /g, ""),
@@ -680,6 +683,42 @@ test("comma wrapping still hard-wraps oversized array members and expands contin
     assert.equal(tool.handleMouse(mouse(2, 30))?.handled, true);
     assert.equal(tool.expanded, true);
     assert.deepEqual(tool.render(30), ["", "NATIVE custom", "FULL_OUTPUT"]);
+  } finally { controller.restore(); }
+});
+
+test("compact summaries reserve one right column before wrapping at every usable width", () => {
+  const tool = new Tool("custom", { path: "文件/🦀/é".repeat(8), drop: "1,2,3,5,8,13,21", query: "x".repeat(60) });
+  const next = new Tool("read", { path: "b.txt" });
+  const { controller } = setup([tool, next]);
+  try {
+    const args = structuredClone(tool.args);
+    for (const state of ["pending", "partial", "success", "error"]) {
+      tool.isPartial = state === "partial";
+      tool.result = state === "pending" ? undefined : {
+        isError: state === "error", content: [{ type: "text", text: state === "error" ? "Failure 文件" : "RAW_RESULT" }],
+      };
+      const marker = state === "pending" || state === "partial" ? "…" : state === "error" ? "✗" : "✓";
+      const result = structuredClone(tool.result);
+      for (let width = 0; width <= 90; width++) {
+        const rows = tool.render(width).map(plain);
+        if (!width) { assert.deepEqual(rows, []); continue; }
+        assert.ok(rows.every((row) => visibleWidth(row) <= Math.max(1, width - 1)), `right margin: ${state}, width ${width}`);
+        assert.match(rows.at(-1)!, new RegExp(`${marker}$`, "u"));
+        if (width <= 5) assert.deepEqual(rows, [marker], "tiny viewports preserve status without overflowing prefix");
+        else {
+          assert.match(rows[0]!, /^ → /u);
+          assert.ok(rows.slice(1).every((row) => /^ {3}\S/u.test(row)));
+          const expected = `custom ${describeArgs(tool.toolName, tool.args)}${state === "error" ? " — Failure 文件" : ""} ${marker}`;
+          assert.equal(rows.map((row) => row.slice(3)).join("").replace(/ /g, ""), expected.replace(/ /g, ""));
+        }
+        assert.deepEqual(tool.render(width).map(plain), rows, "cached layout retains right margin");
+      }
+      assert.deepEqual(tool.args, args);
+      assert.deepEqual(tool.result, result);
+    }
+    tool.isPartial = false; tool.result = { content: [] };
+    assert.equal(next.render(30)[0], "", "a narrowed multiline predecessor still owns one following separator");
+    assert.equal(next.render(1000).length, 1, "resize back removes the adaptive separator");
   } finally { controller.restore(); }
 });
 

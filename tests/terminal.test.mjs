@@ -585,11 +585,11 @@ test('real CLI: complete multiline summaries, adaptive separation, continuation 
       await t.test('live component render at width zero has no rows', () => {
         for (const tool of compactTools) assert.deepEqual(tool.tinyLines['0'], [], `width zero has no rows: ${tool.id}`);
       });
-      await t.test('live component render at widths 1–4 has status only', async () => {
+      await t.test('live component render at widths 1–5 has status only', async () => {
         for (const tool of compactTools) {
-          for (const width of [1, 2, 3, 4]) {
+          for (const width of [1, 2, 3, 4, 5]) {
             assert.deepEqual(tool.tinyLines[width].map(plain).filter((row) => row.trim()), ['✓'], `width ${width} displays only status`);
-            await assertFits(tool.tinyLines[width], width);
+            await assertFits(tool.tinyLines[width], Math.max(1, width - 1));
           }
         }
       });
@@ -631,7 +631,7 @@ test('real CLI: complete multiline summaries, adaptive separation, continuation 
       assert.deepEqual(regularBack.tools.map((tool) => tool.lines), regularWide.tools.map((tool) => tool.lines));
       regular.send('\x0f'); await regular.settle(); assert.ok((await regular.capture('expanded')).tools.every((tool) => tool.expanded));
       writeFileSync(join(artifacts, 'multiline-coverage.json'), JSON.stringify({
-        calls: 19, results: 19, modelContexts: 20, widths: [0, 1, 2, 3, 4, 24, 100],
+        calls: 19, results: 19, modelContexts: 20, widths: [0, 1, 2, 3, 4, 5, 24, 100],
         executed: [...new Set(activity.filter((event) => event.type === 'call').map((event) => event.name))],
         input: ['fullscreen SGR separator ignored', 'fullscreen SGR last continuation expands exact read', 'native mouse collapse', 'separator-owner native coordinate forwarding', 'Ctrl+O fullscreen/regular'],
         lifecycle: ['wide→narrow→wide fullscreen/regular', 'off/on', 'reload', 'same-session stock replay'],
@@ -664,7 +664,17 @@ test('real CLI: comma wrap points preserve array members and index lists in live
         const key = ['scope', 'target', 'drop'][index];
         const expected = `tv_summary [${key}=${JSON.stringify(args[index][key])}] ✓`;
         assert.equal(summaryText(tool), summaryExpected(expected));
-        await assertFits(tool.lines, width);
+        await assertFits(tool.lines, width - 1);
+        // Narrow summaries share the same title row; locate the complete call, not its first matching title.
+        const y = dump.screen.findIndex((row, index) => row === rows[0] &&
+          rows.every((expected, offset) => dump.screen[index + offset] === expected));
+        assert.ok(y >= 0, 'complete compact call is present on the real terminal screen');
+        assert.deepEqual(dump.screen.slice(y, y + rows.length), rows);
+        for (let offset = 0; offset < rows.length; offset++) {
+          const x = width - 1;
+          assert.ok(['', ' '].includes(dump.cells[y + offset][x].text), 'the rightmost screen cell remains blank');
+          assert.equal(dump.cells[y + offset][x].bgMode, 0, 'the reserved column keeps the terminal-default background');
+        }
         if (!wholeMembers) continue;
         assert.match(rows[0], /^ → tv_summary \[/, 'parameters start on the first row');
         if (Array.isArray(args[index][key])) {
@@ -678,9 +688,6 @@ test('real CLI: comma wrap points preserve array members and index lists in live
           assert.ok(rows.length >= 2);
           assert.ok(rows.slice(0, -1).every((row) => row.endsWith(',')), 'index list breaks after a comma');
         }
-        const y = dump.screen.findIndex((row) => row === rows[0]);
-        assert.ok(y >= 0, 'compact call is present on the real terminal screen');
-        assert.deepEqual(dump.screen.slice(y, y + rows.length), rows);
       }
     };
     try {
@@ -716,7 +723,7 @@ test('real CLI: comma wrap points preserve array members and index lists in live
       assert.deepEqual(persisted(resumed), persisted(wide));
       assert.deepEqual(readFileSync(wide.session), sessionBytes);
       writeFileSync(join(artifacts, 'comma-wrap-coverage.json'), JSON.stringify({
-        calls: 3, results: 3, modelContexts: 4, widths: [36, 110],
+        calls: 3, results: 3, modelContexts: 4, widths: [36, 110], rightMargin: 1,
         tools: 'Executed generic tv_summary fixture with user-provided array shapes and 60 comma-separated indices; no installed AFT/Magic Context execution',
         lifecycle: ['live native control', 'resize round trip', 'Ctrl+O native equality', 'off/on', 'reload', 'same-session replay'],
         identity: 'Exact calls/results/model contexts, persisted arguments/results, and unchanged session bytes',
@@ -760,7 +767,7 @@ test('real CLI: width-21 colored-segment boundary preserves content and exact in
         assert.ok(rows.length > 1, 'both boundary calls wrap');
         assert.equal(summaryText(tool), summaryExpected(expected[index]), 'all content, quotes and status survive segment boundary');
         assert.equal(summaryText(tool), summaryText(wide.tools[index]), 'wide and boundary logical content are identical');
-        await assertFits(tool.lines, 21);
+        await assertFits(tool.lines, 20);
         const y = narrow.screen.findIndex((row) => row === rows[0]);
         assert.ok(y >= 0, 'boundary compact call appears on actual ANSI-parsed screen');
         assert.deepEqual(narrow.screen.slice(y, y + rows.length), rows, 'every boundary content row appears on actual screen without extra blank rows');
@@ -768,9 +775,14 @@ test('real CLI: width-21 colored-segment boundary preserves content and exact in
         for (let offset = 0; offset < rows.length; offset++) {
           const x = rows[offset].search(/\S/u);
           assert.equal(narrow.cells[y + offset][x].bgMode, 0, 'boundary summary retains default background');
+          assert.ok(['', ' '].includes(narrow.cells[y + offset][20].text), 'the rightmost column is blank on the actual boundary screen');
         }
       }
-      assert.deepEqual(lines(narrow.tools[0]), [' → read abcdefghijklm', '   [limit=1] ✓'], 'primary fills width-3 exactly; parameter block starts at column three');
+      assert.deepEqual(lines(narrow.tools[0]), [' → read', '   abcdefghijklm', '   [limit=1] ✓'], 'right margin is reserved before wrapping; continuation starts at column three');
+      await live.resize(22); const boundaryWithMargin = await live.capture('boundary-with-margin');
+      assert.deepEqual(lines(boundaryWithMargin.tools[0]), [' → read abcdefghijklm', '   [limit=1] ✓'], 'original colored segment boundary still works with one right column reserved');
+      for (const tool of boundaryWithMargin.tools) await assertFits(tool.lines, 21);
+      await live.resize(21); assert.deepEqual(toolLines(await live.capture('boundary-again')), toolLines(narrow));
       assert.equal(leadingBlanks(narrow.tools[1]), 1, 'following multiline call receives exactly one separator');
       assert.deepEqual(persisted(narrow), persisted(wide));
       await live.command('/toolview off'); const off = await live.capture('disabled');
@@ -781,9 +793,9 @@ test('real CLI: width-21 colored-segment boundary preserves content and exact in
       assert.deepEqual(resizedBack.tools.map((tool) => tool.lines), wide.tools.map((tool) => tool.lines), 'boundary resize restores exact wide rendering');
       assert.deepEqual(activity(live), activity(stock), 'boundary UI changes do not execute tools again');
       writeFileSync(join(artifacts, 'boundary-coverage.json'), JSON.stringify({
-        calls: 2, results: 2, modelContexts: 3, widths: [100, 21, 100],
+        calls: 2, results: 2, modelContexts: 3, widths: [100, 21, 22, 21, 100], rightMargin: 1,
         arguments: [{ name: 'read', path: 'abcdefghijklm', limit: 1 }, { name: 'tv_summary', path: 'abcdefghijklm', query: 'x'.repeat(40) }],
-        checked: ['actual ANSI-parsed content rows', 'exactly three-space continuation', 'no blank content rows', 'complete argument text', 'row widths', 'native off control', 'resize back'],
+        checked: ['actual ANSI-parsed content rows', 'exactly three-space continuation', 'no blank content rows', 'one blank rightmost screen cell', 'original colored-boundary geometry at width22', 'complete argument text', 'row widths', 'native off control', 'resize back'],
       }, null, 2));
     } finally {
       for (const terminal of terminals.reverse()) { await terminal.close(); terminal.dispose(); }

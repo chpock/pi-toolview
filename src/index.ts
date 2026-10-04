@@ -264,10 +264,11 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
 
   function summaryRows(node: ToolNode, width: number, theme: Palette): string[] {
     if (width < 1) return [];
+    const available = width - 1; // Reserve the right margin before laying out any text.
     const failed = !node.isPartial && node.result?.isError;
     const marker = node.isPartial || !node.result ? "…" : failed ? "✗" : "✓";
     const statusColor = failed ? "error" : marker === "✓" ? "success" : "muted";
-    if (width < 5) return [theme.fg(statusColor, marker)];
+    if (available < 5) return [theme.fg(statusColor, marker)];
     const prefix = theme.fg("dim", " → ");
     const parts: { color?: ThemeColor; text: string }[] = [{ color: "toolTitle", text: sanitize(node.toolName).trim() }];
     const { pattern, object, params } = argumentParts(node.args);
@@ -286,7 +287,7 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     let end = 0;
     const spans = parts.map((part) => { const start = end; end += part.text.length; return { ...part, start, end }; });
     let cursor = 0;
-    return wrapSummary(plain, width - 3, parameterStart, params.length).map((line, index) => {
+    return wrapSummary(plain, available - 3, parameterStart, params.length).map((line, index) => {
       const start = plain.indexOf(line, cursor);
       if (start < 0) throw new Error("Wrapped text is not a source substring");
       cursor = start + line.length;
