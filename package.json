@@ -5,7 +5,7 @@
   "type": "module",
   "license": "MIT",
   "keywords": ["pi-package"],
-  "files": ["src", "docs/tool-summary-spec.md", "README.md", "LICENSE"],
+  "files": ["src", "docs/tool-summary-spec.md", "docs/bash-card-spec.md", "docs/card-frame-spec.md", "docs/render-cache-spec.md", "README.md", "LICENSE"],
   "pi": { "extensions": ["./src/index.ts"] },
   "scripts": {
     "check": "tsc --noEmit",

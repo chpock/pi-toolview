@@ -1,6 +1,6 @@
 # Tool summary specification
 
-Status: accepted. This specification supersedes the original argument-preview heuristic and one-row-only layout. It applies to compact tool calls, independent of tool name. Native cards, expansion, images, hidden renderers, execution and persisted data remain native.
+Status: accepted. This specification supersedes the original argument-preview heuristic and one-row-only layout. It applies to compact tool calls, independent of tool name. Native cards, ordinary-tool expansion, images and hidden renderers retain native behavior; execution and persisted data are unchanged. The separate [bash card specification](bash-card-spec.md) governs bash's default collapsed/expanded card; these summary rules apply to bash only when explicitly forced compact.
 
 ## 1. Primary description
 
@@ -83,6 +83,8 @@ A content row is a row belonging to the tool visualization, excluding an extensi
 ## 7. Input and native delegation
 
 A fullscreen primary click on **any content row** of a completed compact call expands that call. Separator rows, pending/partial calls and wheel events do not trigger expansion. Coordinates forwarded to native handlers account for any added separator. Ctrl+O, native collapse, reload, enable/disable and history reconstruction continue to use Pi's existing mechanisms.
+
+Custom rows and neighbor metadata follow the [bounded render-cache contract](render-cache-spec.md). Unchanged UI frames reuse formatting/wrapping; width/state/theme changes rebuild affected content without a multi-width history. Visibility remains native-authoritative.
 
 ## 8. Representative logical summaries
 
