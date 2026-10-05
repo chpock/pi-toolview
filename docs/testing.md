@@ -64,19 +64,20 @@ The harness writes fresh evidence under `.test-artifacts/terminal-<timestamp>-<p
 
 | Area | Required controls |
 | --- | --- |
-| Compact summaries | Exact primary/parameter ordering and values; payload/secret rules; comma/CJK/grapheme wrapping; continuation origins and one-cell right margin; tiny/zero widths; complete failure colors; no result bodies/badges by default; native expansion |
+| Compact summaries | Exact edit path-only/generic fallback and action-first parameter order; visible payloads and exact masking; 256-grapheme values and 1024-grapheme total preview, balanced abbreviations and bounded source-value visits; comma/CJK/grapheme wrapping; continuation origins and one-cell right margin; tiny/zero widths; complete failure colors; no result bodies/badges by default; native expansion |
 | Shared frame and Bash | Complete multiline commands; comments/workdir; ten-row visual preview and overflow; partial/final metadata; exact separated footer exception; tabs/Unicode/controls; panel/stripe/margins in both themes; selection-safe whole-panel clicks; regular/fullscreen controls |
 | User cards | Original Markdown transformations and semantic styles at equal content widths; OSC 133 zones; physical geometry/colors; native selection and copied text; no user expansion; off/on/reload and replay |
 | Edit cards | Actual built-in successes/failures; argument-streaming and executing gates; final failure summaries; old/new syntax including multiline tokens and hidden opening context; metadata formats/hunks/numbers; context cap and omission rules; one-sided unified/mixed split; exact Multiply colors; empty-pane/right-padding paint; native click expansion |
 | Edit computation | Complete minified source and bounded ANSI output; monotonic grapheme/ANSI work; per-build colors; validation-only uncached spacing/rejected input; malformed native fallback; large changed blocks without argument-spread overflow |
 | Lifecycle/compatibility | Existing/future/history components; hidden/image/native safeguards; exact-name overrides; reload/shutdown/later-owner restoration; native TUI renderer replacement; active-adapter first-installer collection |
 
-CLI edit controls cover dark/light themes, narrow/unified/wide layouts and regular/fullscreen same-session replay. Unit controls additionally cover file-type dispatch beyond the CLI TypeScript/HTML files, alternate metadata shapes, impossible tiny glyphs and native image-protocol fallback. These are distinct layers, not exhaustive parser or graphical-terminal coverage.
+CLI edit controls cover dark/light themes, narrow/unified/wide layouts and regular/fullscreen same-session replay. Unit controls additionally cover file-type dispatch beyond the CLI TypeScript/HTML files, alternate metadata shapes, impossible tiny glyphs and native image-protocol fallback. These are distinct layers, not exhaustive parser or graphical-terminal coverage. Compact-preview CLI fixtures use CJK and combining characters for physical Unicode checks; joined-emoji preservation is additionally asserted in unit/source rows. The default headless Unicode 6 provider measures a joined family emoji as four cells while Pi measures two, so exact physical joined-emoji width is not claimed by this harness.
 
 ## Performance counter discipline
 
 Use observable work counters, not timings as the sole proof:
 
+- Compact argument formatting must serialize only bounded string prefixes and visit only the displayed prefix of structured values; path-only edits must not enumerate/read ignored fields. Unicode caps preserve whole graphemes/escapes. These counters do not claim that Pi's native argument processing or root key enumeration becomes bounded.
 - An unchanged retained frame must build no custom body and repeat no custom highlighting/wrapping/color work. Updating one tool rebuilds that tool; actual width/theme changes legitimately rebuild affected layouts. Height-only changes/scrolling should reuse retained bodies.
 - Proven stock edit custom states must make no discarded native visibility render calls. Unpatched/expanded native controls must remain positive. Custom/mixed/reused-Box self-render visibility must remain native-authoritative, with no phantom neighbor spacing.
 - Ordinary and card limits/recency are independent. Card pressure must not evict/rebuild ordinary views. Check per-pool zero/limit reduction, oversized skips, clear/off/shutdown and exact aggregate arithmetic. Lookup misses are not body builds: metadata-only spacing may miss without materializing a diff.

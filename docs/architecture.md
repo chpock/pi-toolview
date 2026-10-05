@@ -9,6 +9,7 @@ For user-facing behavior and controls, start with the [README](../README.md). Ex
 | Module | Responsibility |
 | --- | --- |
 | `src/index.ts` | The sole live-host adapter, presentation selection, compact summaries, transcript separation, normalized tool clicks, invalidation, animation and extension lifecycle |
+| `src/summary-args.ts` | Pure bounded argument previews, edit path-only formatting, field priority, Unicode/control handling and display-only secret masking |
 | `src/bash-card.ts` | Bash command/comments, bounded collapsed output preview, available expanded output and metadata-derived footer |
 | `src/edit-card.ts` | Persisted-diff validation, source highlighting, context projection, numbered unified/split content and validation-only measurement |
 | `src/user-card.ts` | Reframing native Markdown output and terminal navigation zones without reparsing user text |
@@ -54,7 +55,7 @@ One narrow Pi 1.0.0 exception avoids discarded native edit rows. Every visit ver
 
 ## Data and rendering boundaries
 
-- Compact summaries format supplied arguments independently of third-party schemas. Payload omission, top-level secret masking and control sanitization are display-only; native expansion and saved/model data are not redacted.
+- Compact summaries format supplied arguments independently of third-party schemas. The exact `edit` path-only rule, field priorities, bounded grapheme/container previews, top-level secret masking and control sanitization are display-only; there is no generic payload suppression. Native expansion and saved/model data are not abbreviated or redacted.
 - Bash consumes already-returned text and persisted status metadata. It never infers process status from text, reads output files or reconstructs upstream truncation. Its one approved semantic display exception removes an exact separated duplicate of its own metadata-derived final footer.
 - Edit consumes persisted `details.patch`/`details.diff`, never input proposals or a file reread. It highlights old/new supplied source independently with Pi's public file-language resolver and highlighter before projecting context. It preserves multiline token state and hunk boundaries. OpenCode supplies the format reference, not an identical syntax engine or screenshot guarantee.
 - User cards call the original renderer at the frame's content width plus twice the native horizontal padding, remove only known geometric padding, and relocate OSC 133 zones. Markdown transformations, token styles, links and source text are retained. Native image-protocol rows and impossible tiny-width glyphs fall back at the real width.

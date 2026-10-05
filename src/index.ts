@@ -1,6 +1,5 @@
 import { createEditToolDefinition, highlightCode, getLanguageFromPath, type ExtensionAPI, type ExtensionContext, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import { Box, Container, Markdown, visibleWidth, wrapTextWithAnsi, type Component, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
-import { stripVTControlCharacters } from "node:util";
 import { isAbsolute, resolve } from "node:path";
 import { renderBashCard } from "./bash-card.ts";
 import { editPath, measureEditCard, renderEditCard } from "./edit-card.ts";
@@ -8,6 +7,8 @@ import { renderUserCard } from "./user-card.ts";
 import { cardGeometry, insidePanel } from "./card-frame.ts";
 import type { CardTheme } from "./card-theme.ts";
 import { RenderCache, type CacheEntry, type CacheStats } from "./render-cache.ts";
+import { argumentParts, summaryName } from "./summary-args.ts";
+export { describeArgs, sanitize } from "./summary-args.ts";
 
 /** The private contract verified against Pi 1.0.0; never import a second internal class. */
 interface ToolNode extends Component {
@@ -80,48 +81,6 @@ const SHOW_COMPLETION_MARKERS = false;
 const SPINNER_FRAMES = Array.from("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏");
 const SPINNER_INTERVAL_MS = 100;
 
-/** Untrusted labels may not inject colors, terminal commands, bidi controls, or additional rows. */
-export function sanitize(value: string): string {
-  return stripVTControlCharacters(value)
-    .replace(/\s+/gu, " ")
-    .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f]/gu, "");
-}
-const OBJECT_KEYS = ["path", "target", "url", "scope"];
-const IMPORTANT_KEYS = ["paths", "path", "target", "url", "scope", "query", "queries", "op", "action", "symbol", "symbols", "command", "subject", "offset", "limit", "startLine", "endLine"];
-const PAYLOAD_KEYS = new Set(["content", "edits", "code", "input", "messages", "prompt", "newString", "oldString", "appendContent", "rewrite", "oldText", "newText"]);
-const SECRET_KEYS = new Set(["password", "passwd", "api_key", "apiKey", "authorization", "Authorization", "access_token", "refresh_token", "secret", "token"]);
-
-function valueText(value: unknown): string {
-  try {
-    return sanitize(JSON.stringify(value, (_key, item: unknown) => typeof item === "string" ? sanitize(item) : item) ?? '"[unavailable]"');
-  } catch { return '"[unavailable]"'; }
-}
-function location(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0;
-}
-function objectText(value: string): string {
-  const text = sanitize(value);
-  return !text || /[\s"\\\[\],]/u.test(text) ? valueText(text) : text;
-}
-function argumentParts(args: Record<string, unknown>) {
-  const used = new Set<string>();
-  let pattern: string | undefined, object: string | undefined;
-  if (typeof args.pattern === "string") {
-    pattern = valueText(args.pattern); used.add("pattern");
-    if (location(args.path)) { object = objectText(args.path); used.add("path"); }
-  } else {
-    const key = OBJECT_KEYS.find((key) => location(args[key]));
-    if (key) { object = objectText(args[key] as string); used.add(key); }
-  }
-  const rank = (key: string) => { const index = IMPORTANT_KEYS.indexOf(key); return index < 0 ? IMPORTANT_KEYS.length : index; };
-  const entries = Object.entries(args).filter(([key, value]) => !used.has(key) && !PAYLOAD_KEYS.has(key) && value !== undefined);
-  entries.sort(([a], [b]) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0));
-  const params = entries.map(([key, value]) => {
-    const label = /^[A-Za-z_$][A-Za-z0-9_$]*$/u.test(key) ? key : valueText(key);
-    return `${label}=${valueText(SECRET_KEYS.has(key) ? "<redacted>" : value)}`;
-  });
-  return { pattern, object, params: params.length ? `[${params.join(", ")}]` : "" };
-}
 
 const summaryGraphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 // Match Pi 1.0.0's plain-text token boundaries; punctuation is otherwise part of a word.
@@ -172,12 +131,6 @@ function wrapSummary(text: string, width: number, parameterStart: number, parame
   return rows;
 }
 
-/** Pure, name-independent logical description; presentation never changes arguments. */
-export function describeArgs(_name: string, args: Record<string, unknown>): string {
-  const { pattern, object, params } = argumentParts(args);
-  const primary = pattern ? `${pattern}${object ? ` in ${object}` : ""}` : object ?? "";
-  return [primary, params].filter(Boolean).join(" ");
-}
 
 function candidate(node: Component): node is ToolNode {
   const tool = node as Partial<ToolNode>;
@@ -430,8 +383,8 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
       return { rows: [prefix], prefixLength: prefix.length };
     }
     const prefix = theme.fg(failed ? "error" : "dim", ` ${glyph} `);
-    const parts: { color?: ThemeColor; text: string }[] = [{ color: "toolTitle", text: sanitize(node.toolName).trim() }];
-    const { pattern, object, params } = argumentParts(node.args);
+    const parts: { color?: ThemeColor; text: string }[] = [{ color: "toolTitle", text: summaryName(node.toolName) }];
+    const { pattern, object, params } = argumentParts(node.toolName, node.args);
     if (pattern) {
       parts.push({ color: "muted", text: ` ${pattern}` });
       if (object) parts.push({ color: "dim", text: " in " }, { color: "muted", text: object });

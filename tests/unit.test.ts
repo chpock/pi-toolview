@@ -15,6 +15,7 @@ import { measureEditCard, renderEditCard } from "../src/edit-card.ts";
 import { generateDiffString, generateUnifiedPatch } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/edit-diff.js";
 import type { CardTheme } from "../src/card-theme.ts";
 import { RenderCache } from "../src/render-cache.ts";
+import { PRIORITY_FIELDS, VALUE_TEXT_LIMIT, SUMMARY_TEXT_LIMIT } from "../src/summary-args.ts";
 import { UserMessageComponent } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/user-message.js";
 import { initTheme, theme as nativeTheme } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { sliceByColumn } from "@earendil-works/pi-tui";
@@ -405,7 +406,7 @@ test("terminal controls, multiline text and bidi formatting cannot escape the su
   } finally { controller.restore(); }
 });
 
-test("generic descriptions retain useful fields and omit known bulky payloads", () => {
+test("generic descriptions retain useful fields and bound bulky payload previews", () => {
   assert.match(describeArgs("read", { path: "file", offset: 5, limit: 10 }), /file.*5.*10/);
   assert.match(describeArgs("grep", { pattern: "abc", path: "src" }), /abc.*src/);
   assert.match(describeArgs("aft_zoom", { path: "a.ts", symbols: ["first", "second"] }), /a.ts.*first.*second/);
@@ -691,26 +692,26 @@ test("colored completed summary wrapping preserves content and terminal-width bo
   } finally { controller.restore(); }
 });
 
-test("standardized summaries cover active tool argument shapes without tool-name heuristics", () => {
+test("shared summaries cover active tool argument shapes and the exact edit-path rule", () => {
   const cases: [string, Record<string, unknown>, string][] = [
     ["read", { limit: 10, path: "src/app.ts", offset: 5 }, 'src/app.ts [offset=5, limit=10]'],
     ["grep", { include: "*.ts", path: "src", pattern: "needle" }, '"needle" in src [include="*.ts"]'],
-    ["custom", { pattern: "", path: "", target: "other", query: "why" }, '"" [path="", target="other", query="why"]'],
+    ["custom", { pattern: "", path: "", target: "other", query: "why" }, '"" [query="why", path="", target="other"]'],
     ["aft_search", { includeTests: false, query: "where is auth", path: "/repo" }, '/repo [query="where is auth", includeTests=false]'],
     ["aft_outline", { target: ["src", "tests"], files: true }, '[target=["src","tests"], files=true]'],
     ["aft_inspect", { sections: "diagnostics", scope: ["src", "tests"] }, '[scope=["src","tests"], sections="diagnostics"]'],
     ["aft_zoom", { path: "a.ts", symbols: ["render", "update"], callgraph: true }, 'a.ts [symbols=["render","update"], callgraph=true]'],
     ["aft_callgraph", { depth: 2, symbol: "render", path: "a.ts", op: "callers" }, 'a.ts [op="callers", symbol="render", depth=2]'],
     ["ast_grep_search", { paths: ["src"], lang: "typescript", pattern: "$X($$$)" }, '"$X($$$)" [paths=["src"], lang="typescript"]'],
-    ["ast_grep_replace", { rewrite: "BULKY", pattern: "foo()", lang: "typescript" }, '"foo()" [lang="typescript"]'],
+    ["ast_grep_replace", { rewrite: "BULKY", pattern: "foo()", lang: "typescript" }, '"foo()" [lang="typescript", rewrite="BULKY"]'],
     ["TaskCreate", { description: "Investigate", subject: "Rendering" }, '[subject="Rendering", description="Investigate"]'],
-    ["TaskUpdate", { status: "completed", taskId: "1" }, '[status="completed", taskId="1"]'],
-    ["Agent", { prompt: "BULKY", subagent_type: "reviewer", description: "Review" }, '[description="Review", subagent_type="reviewer"]'],
-    ["ctx_memory", { content: "BULKY", category: "CONSTRAINTS", action: "write" }, '[action="write", category="CONSTRAINTS"]'],
+    ["TaskUpdate", { status: "completed", taskId: "1" }, '[taskId="1", status="completed"]'],
+    ["Agent", { prompt: "BULKY", subagent_type: "reviewer", description: "Review" }, '[description="Review", subagent_type="reviewer", prompt="BULKY"]'],
+    ["ctx_memory", { content: "BULKY", category: "CONSTRAINTS", action: "write" }, '[action="write", category="CONSTRAINTS", content="BULKY"]'],
     ["web_search", { numResults: 5, queries: ["one", "two"] }, '[queries=["one","two"], numResults=5]'],
-    ["fetch_content", { url: "https://example.com", prompt: "BULKY", mode: "answer" }, 'https://example.com [mode="answer"]'],
+    ["fetch_content", { url: "https://example.com", prompt: "BULKY", mode: "answer" }, 'https://example.com [mode="answer", prompt="BULKY"]'],
     ["aft_safety", { name: "snap", op: "checkpoint", files: ["src/a.ts"] }, '[op="checkpoint", files=["src/a.ts"], name="snap"]'],
-    ["custom", { pattern: null, path: { id: 1 }, target: "valid", zero: 0, flag: false, empty: "", nullable: null }, 'valid [path={"id":1}, empty="", flag=false, nullable=null, pattern=null, zero=0]'],
+    ["custom", { pattern: null, path: { id: 1 }, target: "valid", zero: 0, flag: false, empty: "", nullable: null }, 'valid [path={"id":1}, pattern=null, empty="", flag=false, nullable=null, zero=0]'],
     ["custom", { url: "https://example.com", target: "target", path: "first" }, 'first [target="target", url="https://example.com"]'],
     ["custom", { path: "my file.ts", "odd key": [false, 0, null] }, '"my file.ts" ["odd key"=[false,0,null]]'],
     ["TaskList", {}, ''],
@@ -721,7 +722,7 @@ test("standardized summaries cover active tool argument shapes without tool-name
   }
 });
 
-test("payload suppression and exact top-level masking preserve remaining structure and source data", () => {
+test("payload previews and exact top-level masking preserve remaining structure and source data", () => {
   const args = { content: "PAYLOAD", edits: [], code: "PAYLOAD", input: "PAYLOAD", messages: [],
     prompt: "PAYLOAD", newString: "PAYLOAD", oldString: "PAYLOAD", appendContent: "PAYLOAD",
     rewrite: "PAYLOAD", oldText: "PAYLOAD", newText: "PAYLOAD", api_key: "SECRET", password: "SECRET",
@@ -729,7 +730,10 @@ test("payload suppression and exact top-level masking preserve remaining structu
     nested: { content: "visible", text: "a\nb" }, query: "a\nb", omitted: undefined };
   const before = structuredClone(args);
   const output = describeArgs("custom", args);
-  assert.doesNotMatch(output, /PAYLOAD|SECRET|omitted/);
+  assert.doesNotMatch(output, /SECRET|omitted/);
+  for (const key of ["content", "code", "input", "prompt", "newString", "oldString", "appendContent", "rewrite", "oldText", "newText"])
+    assert.ok(output.includes(`${key}="PAYLOAD"`));
+  assert.ok(output.includes("edits=[]") && output.includes("messages=[]"));
   assert.match(output, /api_key="<redacted>"/);
   assert.match(output, /Authorization="<redacted>"/);
   assert.match(output, /maxTokens=0/);
@@ -818,28 +822,28 @@ test("primary locations require a nonempty string and otherwise lead named param
     for (const value of ["", [], ["src"], { root: "src" }, null, 0, false]) {
       const args = { query: "q", [key]: value, paths: ["first"] };
       const before = structuredClone(args);
-      const expected = `[paths=["first"], ${key}=${JSON.stringify(value)}, query="q"]`;
+      const expected = `[query="q", paths=["first"], ${key}=${JSON.stringify(value)}]`;
       assert.equal(describeArgs("custom", args), expected);
       assert.equal(describeArgs("custom", Object.fromEntries(Object.entries(args).reverse())), expected);
       assert.deepEqual(args, before);
     }
   }
-  assert.equal(describeArgs("custom", { pattern: "x", path: "", target: "other", query: "q" }), '"x" [path="", target="other", query="q"]');
+  assert.equal(describeArgs("custom", { pattern: "x", path: "", target: "other", query: "q" }), '"x" [query="q", path="", target="other"]');
   assert.equal(describeArgs("custom", { pattern: "", path: "a" }), '"" in a');
-  assert.equal(describeArgs("custom", { path: [], target: "", url: "https://example.com", scope: "src", query: "q" }), 'https://example.com [path=[], target="", scope="src", query="q"]');
+  assert.equal(describeArgs("custom", { path: [], target: "", url: "https://example.com", scope: "src", query: "q" }), 'https://example.com [query="q", path=[], target="", scope="src"]');
   const all = { query: "q", scope: null, url: "", target: [], path: "", paths: [], alpha: true };
-  assert.equal(describeArgs("custom", all), '[paths=[], path="", target=[], url="", scope=null, query="q", alpha=true]');
-  assert.equal(describeArgs("custom", Object.fromEntries(Object.entries(all).reverse())), '[paths=[], path="", target=[], url="", scope=null, query="q", alpha=true]');
+  assert.equal(describeArgs("custom", all), '[query="q", paths=[], path="", target=[], url="", scope=null, alpha=true]');
+  assert.equal(describeArgs("custom", Object.fromEntries(Object.entries(all).reverse())), '[query="q", paths=[], path="", target=[], url="", scope=null, alpha=true]');
 });
 
-test("paths remains a named parameter and precedes every other parameter", () => {
+test("paths remains named after action/query fields and before locations/unknown parameters", () => {
   const cases: [Record<string, unknown>, string][] = [
     [{ paths: ["src"] }, '[paths=["src"]]'],
-    [{ query: "q", paths: [] }, '[paths=[], query="q"]'],
-    [{ query: "q", paths: "src", path: "a", op: "search", z: 0 }, 'a [paths="src", query="q", op="search", z=0]'],
+    [{ query: "q", paths: [] }, '[query="q", paths=[]]'],
+    [{ query: "q", paths: "src", path: "a", op: "search", z: 0 }, 'a [op="search", query="q", paths="src", z=0]'],
     [{ paths: null, pattern: "x", path: ["a"], limit: 0 }, '"x" [paths=null, path=["a"], limit=0]'],
-    [{ scope: [], paths: ["src"], query: "q" }, '[paths=["src"], scope=[], query="q"]'],
-    [{ query: "q", paths: { root: "src" } }, '[paths={"root":"src"}, query="q"]'],
+    [{ scope: [], paths: ["src"], query: "q" }, '[query="q", paths=["src"], scope=[]]'],
+    [{ query: "q", paths: { root: "src" } }, '[query="q", paths={"root":"src"}]'],
     [{ Paths: ["src"], query: "q" }, '[query="q", Paths=["src"]]'],
   ];
   for (const [args, expected] of cases) {
@@ -853,7 +857,7 @@ test("paths remains a named parameter and precedes every other parameter", () =>
 test("important fields precede locale-independent alphabetical keys regardless of input order", () => {
   const first = { zebra: 1, startLine: 2, query: "q", endLine: 3, alpha: 4, Alpha: 5, symbol: "s", paths: ["src"] };
   const second = Object.fromEntries(Object.entries(first).reverse());
-  const expected = '[paths=["src"], query="q", symbol="s", startLine=2, endLine=3, Alpha=5, alpha=4, zebra=1]';
+  const expected = '[query="q", paths=["src"], symbol="s", startLine=2, endLine=3, Alpha=5, alpha=4, zebra=1]';
   assert.equal(describeArgs("custom", first), expected);
   assert.equal(describeArgs("custom", second), expected);
   for (const key of ["password", "passwd", "api_key", "apiKey", "authorization", "Authorization", "access_token", "refresh_token", "secret", "token"]) {
@@ -2606,7 +2610,10 @@ test("edit uses ordinary summaries until final success and follows the shared sp
     assert.doesNotMatch(pending.join(""), /┃|← Edited/);
     assert.equal(starts.mock.calls.length, 0, "argument streaming has no animation clock");
     assert.equal(edit.handleMouse(mouse(0, 140)), undefined, "argument streaming cannot expand");
-    assert.equal(next.render(24)[0], "", "the actual multiline summary determines separation");
+    assert.equal(next.render(24)[0], " → read next.txt", "ignored query/payloads cannot make the short edit summary multiline");
+    edit.updateArgs({ ...edit.args, path: "directory/long-file-name/example.ts" });
+    assert.equal(next.render(24)[0], "", "a genuinely wrapped path still determines separation");
+    edit.updateArgs({ ...edit.args, path: "example.ts" });
     edit.markExecutionStarted();
     assert.ok(spinnerFrames.includes(plain(edit.render(140)[0]!).trim()[0]!));
     assert.equal(starts.mock.calls.length, 1);
@@ -2926,4 +2933,150 @@ test("actual SDK mixed card working set stays warm and never evicts ordinary lay
   assert.equal(result.observations[0].ordinary.entries, 200); assert.equal(result.observations[0].cards.entries, 27);
   mkdirSync(".test-artifacts/split-cache-proof", { recursive: true });
   writeFileSync(".test-artifacts/split-cache-proof/sdk.json", JSON.stringify(result, null, 2));
+});
+
+// Bounded compact argument formatting is independent of result bodies/card content.
+const summarySegments = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+const summaryLength = (text: string) => [...summarySegments.segment(text)].length;
+
+test("bounded compact edit path bypasses every other argument and preserves lifecycle/native safeguards", (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const args = { path: "src/my file.ts", pattern: "not the title", get edits(): never { return assert.fail("path-only edit must not inspect payloads"); },
+    get query(): never { return assert.fail("path-only edit must not inspect ordinary fields"); } };
+  assert.equal(describeArgs("edit", args), '"src/my file.ts"');
+  const tool = new Tool("edit", args); tool.result = undefined; tool.executionStarted = false;
+  const { controller } = setup([tool]);
+  try {
+    assert.deepEqual(tool.render(80), [' ⚙ edit "src/my file.ts"']);
+    tool.markExecutionStarted();
+    assert.equal(plain(tool.render(80)[0]!), ' ⠋ edit "src/my file.ts"');
+    t.mock.timers.tick(100);
+    assert.equal(plain(tool.render(80)[0]!), ' ⠙ edit "src/my file.ts"');
+    tool.updateResult({ isError: true, content: [{ type: "text", text: "NATIVE_ERROR" }] });
+    assert.deepEqual(tool.render(80), [' ⚙ edit "src/my file.ts"']);
+    tool.setExpanded(true);
+    assert.deepEqual(tool.render(80), ["", "NATIVE edit", "FULL_OUTPUT"]);
+    tool.setExpanded(false); tool.updateArgs({ path: "example.ts", query: "ignored", edits: [] });
+    tool.updateResult({ content: [], details: { diff: editDiff } });
+    assert.ok(tool.render(80).some(row => plain(row).includes("← Edited example.ts")), "success still uses the existing diff card");
+  } finally { controller.restore(); }
+  for (const path of [undefined, "", null, false, 0, [], { file: "a" }]) {
+    const fallback = { ...(path === undefined ? {} : { path }), query: "fallback", newText: "visible" };
+    assert.equal(describeArgs("edit", fallback), describeArgs("custom", fallback));
+  }
+});
+
+test("bounded compact priorities expose former payloads after unknown fields and retain exact secret masking", () => {
+  const payloads = ["content", "edits", "code", "input", "messages", "prompt", "newString", "oldString", "appendContent", "rewrite", "oldText", "newText"];
+  for (const key of payloads) assert.equal(describeArgs("custom", { [key]: "VISIBLE" }), `[${key}="VISIBLE"]`);
+  const args = { newText: "new", extra: "unknown", background: true, limit: 2, paths: ["src"], description: "why", query: "q", command: "run", action: "write", op: "apply" };
+  const expected = '[op="apply", action="write", command="run", query="q", description="why", paths=["src"], limit=2, background=true, extra="unknown", newText="new"]';
+  assert.equal(describeArgs("custom", args), expected);
+  assert.equal(describeArgs("custom", Object.fromEntries(Object.entries(args).reverse())), expected);
+  for (const key of ["password", "passwd", "api_key", "apiKey", "authorization", "Authorization", "access_token", "refresh_token", "secret", "token"])
+    assert.equal(describeArgs("custom", { [key]: "SECRET".repeat(1000) }), `[${key}="<redacted>"]`);
+});
+
+test("bounded compact values cap serialized strings, arrays and objects at 256 graphemes without splitting Unicode", () => {
+  assert.equal(describeArgs("custom", { content: "x".repeat(254) }), `[content="${"x".repeat(254)}"]`);
+  assert.equal(describeArgs("custom", { content: "x".repeat(255) }), `[content="${"x".repeat(253)}…"]`);
+  const glyph = "👩‍👩‍👧‍👦é";
+  for (const value of [glyph.repeat(300), ["x".repeat(500), "TAIL"], { first: { body: "x".repeat(500) }, tail: "TAIL" }, Array(300).fill("item")]) {
+    const before = structuredClone(value);
+    const rendered = describeArgs("custom", { query: value }).slice("[query=".length, -1);
+    assert.ok(summaryLength(rendered) <= 256, `${summaryLength(rendered)} graphemes`);
+    assert.ok(rendered.includes("…"));
+    assert.deepEqual(value, before);
+    assert.ok(!rendered.endsWith("\\"), "do not cut an escape sequence");
+  }
+  const unicode = describeArgs("custom", { query: glyph.repeat(300) });
+  assert.ok(!unicode.includes("�"));
+  assert.ok(unicode.includes("👩‍👩‍👧‍👦é"), "keep joining marks and combining clusters intact");
+  assert.ok(unicode.endsWith('…"]'));
+  assert.equal(describeArgs("custom", { token: undefined }), "", "undefined secret fields are not supplied values");
+  const path = "p".repeat(256);
+  assert.equal(describeArgs("edit", { path }), path);
+  assert.equal(describeArgs("edit", { path: path + "p" }), "p".repeat(255) + "…");
+});
+
+test("bounded compact total text caps name plus description at 1024 graphemes before wrapping and keeps failure colors", () => {
+  const args = Object.fromEntries(Array.from({ length: 60 }, (_, i) => [`field${String(i).padStart(2, "0")}`, "v".repeat(180)]));
+  const before = structuredClone(args);
+  const tool = new Tool("custom", args), root = new Root(); root.addChild(tool);
+  const paints: string[] = [];
+  const theme = { fg: (role: string, text: string) => { paints.push(role); return text; } };
+  const controller = installToolview(root, () => theme);
+  try {
+    const rows = tool.render(5000);
+    assert.equal(rows.length, 1);
+    assert.ok(summaryLength(rows[0]!.slice(3)) <= 1024);
+    assert.ok(rows[0]!.includes("…"));
+    assert.match(rows[0]!, /\]$/u, "parameter previews remain bracketed");
+    assert.equal(rows[0]!.slice(3), `custom ${describeArgs("custom", args)}`);
+    const builds = controller.cacheStats().builds;
+    assert.strictEqual(tool.render(5000), rows, "warm completed no-gap frames reuse retained rows");
+    assert.equal(controller.cacheStats().builds, builds);
+    const narrow = tool.render(24);
+    assert.ok(narrow.every(row => visibleWidth(row) <= 23));
+    assert.equal(narrow.map(row => row.slice(3)).join("").replace(/ /gu, ""), rows[0]!.slice(3).replace(/ /gu, ""));
+    tool.updateResult({ isError: true, content: [{ type: "text", text: "DO_NOT_SHOW" }] });
+    paints.length = 0; tool.render(24);
+    assert.ok(paints.length > 0 && paints.every(role => role === "error"));
+    assert.deepEqual(tool.args, before);
+  } finally { controller.restore(); }
+});
+
+test("bounded compact formatting never serializes full large strings or reads omitted structured values", (t) => {
+  const huge = "x".repeat(1_000_000);
+  const stringify = t.mock.method(JSON, "stringify");
+  const preview = describeArgs("custom", { query: huge });
+  assert.ok(preview.includes("…"));
+  assert.ok(stringify.mock.calls.every(call => typeof call.arguments[0] !== "string" || call.arguments[0].length < 600), "only bounded string prefixes may enter JSON serialization");
+  assert.equal(stringify.mock.callCount(), 1, "serialize the bounded prefix once, not once per grapheme");
+  assert.equal((stringify.mock.calls[0]!.arguments[0] as string).length, 256);
+  let visited = 0;
+  const values = Array.from({ length: 2000 }, (_, i) => i);
+  for (let i = 0; i < values.length; i++) Object.defineProperty(values, i, { get() { visited++; return "value"; }, enumerable: true });
+  const output = describeArgs("custom", { query: values });
+  assert.ok(output.includes("…"));
+  assert.equal(visited, 32, "read 31 complete elements and one abbreviated element, never the other 1968");
+  let rootReads = 0;
+  const deferred: Record<string, unknown> = {};
+  for (let i = 0; i < 20; i++) Object.defineProperty(deferred, `field${String(i).padStart(2, "0")}`, {
+    enumerable: true, get() { rootReads++; return huge; },
+  });
+  Object.defineProperty(deferred, "zzTail", { enumerable: true, get() { return assert.fail("overall budget must stop before omitted parameter values"); } });
+  assert.ok(describeArgs("custom", deferred).includes("…"));
+  assert.equal(rootReads, 4, "three complete fields plus one overflow candidate; no later field values fetched");
+});
+
+
+test("bounded compact object previews mark both an omitted value and subsequent members", () => {
+  const value = { a: "x".repeat(239), b: 123456, c: 0 };
+  assert.equal(describeArgs("custom", { query: value }), `[query={"a":"${"x".repeat(239)}","b":…,…}]`);
+});
+
+test("bounded compact budgets hold across escaped strings, deep containers and priority inventory", () => {
+  assert.equal(VALUE_TEXT_LIMIT, 256); assert.equal(SUMMARY_TEXT_LIMIT, 1024);
+  assert.equal(new Set(PRIORITY_FIELDS).size, PRIORITY_FIELDS.length, "one unique rank per known parameter name");
+  const literal = ['"', "\\", "\\u", "界", "é", "👩‍👩‍👧‍👦", "\ud800", "lone", "\udfff"].join("");
+  assert.equal(JSON.parse(describeArgs("custom", { query: literal }).slice("[query=".length, -1)), literal, "escaped wire offsets retain paired/unpaired UTF-16 and literal backslashes");
+  const text = literal + "\n\x1b[31mred\x1b[0m";
+  let deep: unknown = "leaf";
+  for (let i = 0; i < 200; i++) deep = { nested: [deep] };
+  const values = [text.repeat(400), deep, { ["key".repeat(200)]: "value" }, Array.from({ length: 100 }, (_, i) => ({ item: text.repeat(i + 1), index: i }))];
+  for (const value of values) {
+    const output = describeArgs("custom", { query: value });
+    const preview = output.slice("[query=".length, -1);
+    assert.ok(summaryLength(preview) <= 256);
+    assert.ok(preview.includes("…"));
+    assert.doesNotMatch(preview, /\x1b|\u202e/u);
+  }
+  const title = "tool".repeat(300), args = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`key${i}`, text.repeat(40)]));
+  const tool = new Tool(title, args), { controller } = setup([tool]);
+  try {
+    const logical = tool.render(5000)[0]!.slice(3);
+    assert.ok(summaryLength(logical) <= 1024);
+    assert.ok(logical.startsWith("tool".repeat(63) + "too…"));
+  } finally { controller.restore(); }
 });

@@ -1,49 +1,50 @@
 # Tool summary specification
 
-This specification defines compact tool calls, independent of tool name. Native cards, ordinary-tool expansion, images and hidden renderers retain native behavior; execution and persisted data are unchanged. The separate [bash card specification](bash-card-spec.md) governs bash's default collapsed/expanded card; these summary rules apply to bash only when explicitly forced compact. The separate [edit card specification](edit-card-spec.md) governs edit's default collapsed presentation; these summary rules apply to edit by default before completion and on final failure, and to every state when explicitly forced compact.
+This specification defines compact tool calls, with one exact-name short-view rule for `edit`. Native cards, ordinary-tool expansion, images and hidden renderers retain native behavior; execution and persisted data are unchanged. The separate [bash card specification](bash-card-spec.md) governs bash's default collapsed/expanded card; these summary rules apply to bash only when explicitly forced compact. The separate [edit card specification](edit-card-spec.md) governs edit's default collapsed presentation; these summary rules apply to edit by default before completion and on final failure, and to every state when explicitly forced compact.
 
 ## 1. Primary description
 
 Given the explicitly supplied argument object:
 
-1. If `pattern` is a string, including `""`, it takes precedence. Show its quoted value. If `path` is a nonempty string, append ` in ` and the formatted path. Consume only those used fields. Other object candidates remain ordinary parameters in this branch.
-2. Otherwise choose the first nonempty string value in this exact priority: `path`, `target`, `url`, `scope`. Show it as the primary object and consume that field only. Other candidates remain ordinary parameters.
-3. Empty strings and all other types (including arrays, null, numbers, booleans and structured objects) remain named parameters; they are not discarded or interpreted as primary locations. A primary location must be a primitive string with supplied length greater than zero; no implicit trimming is performed. Strings containing spaces retain the existing quoting/sanitization rules.
-4. If neither rule applies, omit the primary description. Do not invent an ellipsis placeholder. `query` and `paths` are always ordinary named parameters. `paths` never becomes a primary object, including when it is the only supplied argument.
+1. For exact, case-sensitive tool name `edit`, a nonempty primitive string `path` takes precedence over everything else, including `pattern`. Show only `edit <formatted path>`: do not enumerate, sort, read or format any other argument. This applies wherever compact presentation is selected, including a forced-compact successful edit. Absent, empty or non-string `path` falls through to the generic rules below. Native/diff-card routing is unchanged.
+2. Otherwise, if `pattern` is a string, including `""`, it takes precedence. Show its quoted value. If `path` is a nonempty string, append ` in ` and the formatted path. Consume only those used fields. Other object candidates remain ordinary parameters in this branch.
+3. Otherwise choose the first nonempty string value in this exact priority: `path`, `target`, `url`, `scope`. Show it as the primary object and consume that field only. Other candidates remain ordinary parameters.
+4. Empty strings and all other types (including arrays, null, numbers, booleans and structured objects) remain named parameters; they are not discarded or interpreted as primary locations. A primary location must be a primitive string with supplied length greater than zero; no implicit trimming is performed.
+5. If neither generic primary rule applies, omit the primary description. Do not invent an ellipsis placeholder. `query` and `paths` remain named parameters; `paths` never becomes a primary object.
 
-Primary strings are unquoted unless empty or containing whitespace, double quotes, backslashes, square brackets or commas; such strings use JSON quoting. Pattern strings always use JSON quoting. Arrays are ordinary parameter values and use compact JSON.
+Primary strings are unquoted unless empty or containing whitespace, double quotes, backslashes, square brackets or commas; such strings use JSON quoting. Pattern strings always use JSON quoting. Formatting operates within the budgets below, not on the complete unbounded input.
 
 ## 2. Remaining parameters
 
-Remove consumed primary fields and these exact top-level payload fields:
+Remove only consumed primary fields. There is **no payload suppression list**, at either top-level or nested levels. `content`, `edits`, `code`, `input`, `messages`, `prompt`, replacement text and the other former payload names participate as low-priority fields. Runtime `undefined` is omitted because it is not a supplied JSON value. Explicit false, zero, empty string and null are retained. Schema defaults are not added.
 
-```text
-content, edits, code, input, messages, prompt, newString, oldString,
-appendContent, rewrite, oldText, newText
-```
+The single `PRIORITY_FIELDS` inventory in [the pure argument formatter](../src/summary-args.ts) contains exact top-level names from the built-in, file/search, context, web, agent and management tools. Its declared order is the exact ordering contract; categories below explain that order without maintaining a second exhaustive inventory:
 
-No recursive payload deletion is performed. All other supplied JSON fields participate. Runtime `undefined` is omitted because it is not a supplied JSON value. Explicit false, zero, empty string and null are retained. Schema defaults are not added.
+| Order | Purpose | Representative names, in relative order |
+| --- | --- | --- |
+| 1 | Action and intent | `op`, `action`, `command`, `query`, `queries`, `subject`, `description`, `agent`, `subagent_type`, `task`, `workflow` |
+| 2 | Targets and identity | `paths`, `path`, `target`, `targets`, `url`, `urls`, `scope`, `files`, `symbol`, `symbols`, `ids`, `note_ids` |
+| 3 | Selection and ranges | `pattern`, `include`, `globs`, `lang`, `filter`, `status`, `category`, `startLine`, `endLine`, `offset`, `limit`, `topK` |
+| 4 | Modes and auxiliary settings | `mode`, `sections`, `provider`, `model`, timeouts, `wait`, `background`, `includeTests`, budgets and output/control settings |
+| 5 | Unknown fields | Locale-independent, case-sensitive JavaScript string comparison (UTF-16 code-unit order) |
+| 6 | Large content fields | `content`, `edits`, `code`, `input`, `messages`, `prompt`, `newString`, `oldString`, `appendContent`, `rewrite`, `oldText`, `newText` |
 
-Sort present priority fields in this order:
-
-```text
-paths, path, target, url, scope, query, queries, op, action,
-symbol, symbols, command, subject,
-offset, limit, startLine, endLine
-```
-
-Then sort all remaining keys by locale-independent, case-sensitive JavaScript string comparison (UTF-16 code-unit order). Matching is exact and case-sensitive. There is no maximum field count.
+Matching is exact and case-sensitive. Unknown fields rank after known operational settings but before the content tail. There is no separate field-count limit; the total text budget limits the visible ordered prefix. A supplied key is not reprioritized by its value or tool schema.
 
 Render as `[key=value, key=value]`. Omit the entire block when no parameters remain. Identifier-like keys (`[A-Za-z_$][A-Za-z0-9_$]*`) are bare; other keys use JSON quoting.
 
-## 3. Values, masking and sanitization
+## 3. Values, budgets, masking and sanitization
 
-- Strings use JSON double quotes; numbers, booleans and null use JSON literals.
-- Arrays and objects use compact JSON, preserving their structure and nested key order. No flattening occurs.
-- Before display, remove terminal control sequences and invisible directional controls; collapse string whitespace to single spaces. This affects presentation only. Nested string values are sanitized too.
-- Values that fail JSON serialization (including cyclic graphs), or have no JSON representation, use the visible quoted placeholder `"[unavailable]"`. Exotic JavaScript objects are outside the JSON tool-input contract; valid JSON argument values have no arbitrary length cap.
-- Mask values of these exact top-level keys as `"<redacted>"`: `password`, `passwd`, `api_key`, `apiKey`, `authorization`, `Authorization`, `access_token`, `refresh_token`, `secret`, `token`.
-- Masking is not recursive and does not inspect URL credentials or free text. It is a presentation precaution, not a security boundary. Native expansion and model/session data are not redacted by this extension. Fields such as `maxTokens` are not matched by substring.
+- `VALUE_TEXT_LIMIT = 256` caps each displayed value, including a whole array/object, primary description, parameter label and tool-name preview, in **Unicode graphemes**. Quotes, JSON escapes, container delimiters and abbreviation `…` count toward the value budget. These constants live in `src/summary-args.ts`; they are not runtime settings.
+- `SUMMARY_TEXT_LIMIT = 1024` caps the tool-name text plus its argument description, including spaces and parameter punctuation, before terminal wrapping. Prefix glyph/spinner, indentation, an outside separator and optional status indicators are not part of this budget. Retain a prefix of complete parameter previews; if the next field cannot fit, stop and append `…` inside the outer brackets. Do not read later field values or skip a large earlier field to display later small ones.
+- Strings use JSON double quotes; numbers, booleans and null use JSON literals when they fit. Arrays and objects use compact JSON-shaped previews, retaining source order and nesting. Truncated containers retain delimiters and use a standalone `…` for an omitted suffix; an abbreviated preview is not necessarily valid JSON. Quoted strings retain their closing quote and never split an escape or a combining/emoji grapheme.
+- Preparation is bounded as well as output: read only a bounded grapheme prefix of each input string **before** control cleanup and JSON escaping, and recursively visit only the visible prefix of container values. Do not stringify a full large array/object or scan/sanitize a full large string and then slice its result. Raw-prefix limits may abbreviate a long input whose whitespace/control cleanup would otherwise produce a shorter value. Root key enumeration/sorting remains proportional to the supplied key count; this is not an O(1) or whole-host CPU guarantee.
+- Remove terminal control sequences and invisible directional controls from displayed string prefixes; collapse whitespace to single spaces. Preserve Unicode joining marks needed by emoji and scripts. Nested strings use the same rules. Formatting never modifies the original argument object or its strings.
+- Encountered cyclic graphs or scalar serialization failures use the visible quoted placeholder `"[unavailable]"` within the same budget. Exotic JavaScript objects are outside the JSON tool-input contract; omitted branches are not inspected just to validate them.
+- Mask values of these exact top-level keys as `"<redacted>"` **before** value formatting: `password`, `passwd`, `api_key`, `apiKey`, `authorization`, `Authorization`, `access_token`, `refresh_token`, `secret`, `token`. Undefined values remain omitted. There is no payload hiding beyond the dedicated edit-path rule.
+- Masking is not recursive and does not inspect URL credentials or free text. It is a presentation precaution, not a security boundary. Native expansion and model/session data remain complete and unredacted by this extension. Fields such as `maxTokens` are not matched by substring. Native cards, Bash output/commands, edit diff bodies and user messages do not acquire these compact-text budgets.
+
+An abbreviation ellipsis belongs to the call description and is independent of `SHOW_COMPLETION_MARKERS`: disabling pending/completion markers does not disable visible truncation indicators.
 
 ## 4. Colors and status
 
@@ -52,7 +53,7 @@ Use current theme roles at render time:
 | Segment | Role |
 | --- | --- |
 | Leading spinner during execution; otherwise ` → ` for exact tool name `read`, ` ⚙ ` for every other compact tool | `dim` |
-| Exact tool name | `toolTitle` |
+| Tool-name preview | `toolTitle` |
 | Primary pattern/object | `muted` |
 | ` in ` connector | `dim` |
 | Parameter block including punctuation | `dim` |
@@ -68,7 +69,7 @@ After Pi marks actual execution as started, a visible compact call uses a one-co
 
 ## 5. Wrapping and indentation
 
-- Build the complete logical description and status, then wrap to the actual terminal viewport before applying colors. Spaces remain ordinary word-wrap points. Within the named-parameter block, standalone comma graphemes are additional soft break points immediately after the comma: this covers JSON array/object separators and comma-separated string values such as `drop="3,4,5,8,9,10"`. No spaces, newlines or other characters are inserted into values; primary descriptions keep ordinary word wrapping. Fill available first-row space using these break points rather than moving an entire comma-separated value to the next row. An individual fragment longer than a full content row still wraps at grapheme boundaries. A comma plus a combining mark is not split. Do not truncate arguments or discard later fields to keep one row.
+- Build the bounded logical description and optional status, then wrap to the actual terminal viewport before applying colors. Spaces remain ordinary word-wrap points. Within the named-parameter block, standalone comma graphemes are additional soft break points immediately after the comma: this covers JSON array/object separators and comma-separated string values such as `drop="3,4,5,8,9,10"`. No spaces, newlines or other characters are inserted into values; primary descriptions keep ordinary word wrapping. Fill available first-row space using these break points rather than moving an entire comma-separated value to the next row. An individual fragment longer than a full content row still wraps at grapheme boundaries. A comma plus a combining mark is not split. Do not introduce further truncation or field omission merely to keep one terminal row; wrap the already-budgeted preview.
 - Reserve at least one blank terminal column at the right edge before wrapping: the effective summary viewport is `width - 1` and the text budget after indentation is `width - 4`. Do not add padding to argument values or reduce the width passed to native renderers. Short rows may leave more space; full rows still leave the last column blank.
 - At normal widths the first row begins ` → ` only for the exact, case-sensitive tool name `read`; every other compact tool begins ` ⚙ ` (literal U+2699 without an emoji variation selector). During actual execution the glyph position instead contains a one-column spinner frame. All prefixes occupy three columns and use the same `dim` role, overridden by `error` for completed failures. Native tool representations and the separate Bash-card prompt are unchanged. Tool-name text starts at zero-based column 3. Every continuation row has exactly three spaces of indentation, aligned with the tool name, **not** with the parameter block or its opening bracket.
 - A visible pending indicator (or a completion badge when explicitly enabled in source) is at the end of the final content row and may itself wrap onto a continuation row. With status markers disabled, both pending and completed rows end at the call description, without trailing separator spaces. Brackets/quotes are retained across rows because content is wrapped rather than cut.
@@ -104,18 +105,21 @@ aft_outline [target=["src","tests"]]
 aft_zoom src/app.ts [symbols=["render","update"], callgraph=true]
 aft_callgraph src/app.ts [op="callers", symbol="render", depth=2]
 ast_grep_search "$X($$$)" [paths=["src"], lang="typescript"]
-custom [paths=["src","tests"], query="find this"]
+custom [query="find this", paths=["src","tests"]]
 aft_inspect src [sections="diagnostics"]
 aft_inspect [scope=["src/index.ts","tests/unit.test.ts"], sections="diagnostics"]
-custom "needle" [path=[], target="", query="find this"]
+custom "needle" [query="find this", path=[], target=""]
 TaskCreate [subject="Investigate rendering", description="Check native visibility"]
 TaskList
-Agent [description="Review rendering", subagent_type="reviewer"]
-ctx_memory [action="write", category="CONSTRAINTS"]
+Agent [description="Review rendering", subagent_type="reviewer", prompt="Inspect current source"]
+ctx_memory [action="write", category="CONSTRAINTS", content="Durable project fact"]
+edit src/app.ts
+edit [oldText="before", newText="after"]
+write src/app.ts [content="export const result = 1;"]
 custom [query="find this", limit=0, api_key="<redacted>", enabled=false]
 ```
 
-All tools use the same rules. Native card policy is a separate choice; these formatting rules also apply when a normally native tool is explicitly forced compact.
+Generic formatting is shared by all tools, except the exact `edit` path-only rule. Native card policy is a separate choice; these formatting rules also apply when a normally native tool is explicitly forced compact.
 
 ## Verification
 

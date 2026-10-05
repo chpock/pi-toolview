@@ -286,6 +286,18 @@ export default function terminalDriver(pi: ExtensionAPI) {
     ] } },
     { name: "tv_summary", arguments: { drop: Array.from({ length: 60 }, (_, i) => i + 1).join(",") } },
   ];
+  const boundedSummaries: Pick<ToolCall, "name" | "arguments">[] = [
+    { name: "tv_summary", arguments: { op: "inspect", action: "preview", command: "echo", query: "STRING_BEGIN_" + "x".repeat(1000),
+      paths: ["src"], symbol: "render", limit: 0, wait: false, mystery: "UNKNOWN", api_key: "COMPACT_SECRET_NEVER_VISIBLE",
+      content: "CONTENT_VISIBLE", edits: [{ oldText: "OLD_VISIBLE", newText: "NEW_VISIBLE" }] } },
+    { name: "tv_summary", arguments: { content: "界é".repeat(300), newText: "ONE_REPLACEMENT" } },
+    { name: "tv_summary", arguments: { query: Array(100).fill("ARRAY_ENTRY") } },
+    { name: "tv_summary", arguments: { query: { list: Array(100).fill("OBJECT_ENTRY"), tail: "OBJECT_TAIL" }, unknownTail: "DISPLAY_TAIL" } },
+    { name: "tv_summary", arguments: Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`field${String(i).padStart(2, "0")}`, "v".repeat(180)])) },
+    { name: "edit", arguments: { path: "missing-bounded.ts", pattern: "EDIT_PATTERN_IGNORED", query: "EDIT_QUERY_IGNORED",
+      oldText: "OLD_PROPOSAL_IGNORED".repeat(100), newText: "NEW_PROPOSAL_IGNORED".repeat(100) } },
+    { name: "write", arguments: { path: "bounded-write.txt", content: "WRITE_BODY_" + "w".repeat(1000) } },
+  ];
   const compactErrors: Pick<ToolCall, "name" | "arguments">[] = [
     { name: "read", arguments: { path: "missing/" + "r".repeat(90) + ".txt", offset: 3, limit: 7 } },
     { name: "tv_summary", arguments: { pattern: "needle", path: "src/文件/" + "p".repeat(40), query: "a,b,c,".repeat(8), fixtureError: true } },
@@ -344,7 +356,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
         const scenario = prompt?.includes("run edit-performance") ? "edit-performance" : prompt?.includes("run edit-cards") ? "edit-cards" : prompt?.includes("run user-card") ? "user-card" : prompt === "run cache-performance" ? "cache-performance" : prompt?.includes("bash-width") ? "bash-width" : prompt?.includes("bash-stream") ? "bash-stream" : prompt?.includes("bash-real") ? "bash-real" :
           prompt?.includes("bash-shape-exception-stream") ? "bash-shape-exception-stream" : prompt?.includes("bash-shape-exceptions") ? "bash-shape-exceptions" :
           prompt?.includes("bash-shape-stream") ? "bash-shape-stream" : prompt?.includes("bash-shapes") ? "bash-shapes" :
-          prompt?.includes("compact-errors") ? "compact-errors" : prompt?.includes("comma-wrap") ? "comma-wrap" : prompt?.includes("boundary") ? "boundary" : prompt?.includes("multiline") ? "multiline" : prompt?.includes("integration") ? "integration" :
+          prompt?.includes("bounded-summaries") ? "bounded-summaries" : prompt?.includes("compact-errors") ? "compact-errors" : prompt?.includes("comma-wrap") ? "comma-wrap" : prompt?.includes("boundary") ? "boundary" : prompt?.includes("multiline") ? "multiline" : prompt?.includes("integration") ? "integration" :
           prompt?.includes("pending") ? "pending" : prompt?.includes("fallback") ? "fallback" :
           prompt?.includes("future") ? "future" : "suite";
         const results = context.messages.slice(last + 1).filter((m) => m.role === "toolResult");
@@ -367,7 +379,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
             "printf 'LIVE_FINAL\\n'" } }] : scenario === "boundary" ? [
           { name: "read", arguments: { path: "abcdefghijklm", limit: 1 } },
           { name: "tv_summary", arguments: { path: "abcdefghijklm", query: "x".repeat(40) } },
-        ] : scenario === "compact-errors" ? compactErrors : scenario === "comma-wrap" ? commaWrap : scenario === "multiline" ? multiline : scenario === "integration" ? [
+        ] : scenario === "bounded-summaries" ? boundedSummaries : scenario === "compact-errors" ? compactErrors : scenario === "comma-wrap" ? commaWrap : scenario === "multiline" ? multiline : scenario === "integration" ? [
           { name: "TaskCreate", arguments: { subject: "TERMINAL_LOCAL_TASK", description: "Offline installed renderer smoke; do not execute." } },
           { name: "TaskList", arguments: {} },
         ] : scenario === "pending" ? [

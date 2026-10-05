@@ -355,6 +355,23 @@ function nativeAfterMultiline(tool, control) {
   assert.deepEqual(tool.lines, expected, `native ${tool.name} unchanged except missing separator`);
   assert.equal(leadingBlanks(tool), 1, `exactly one native separator: ${tool.name}`);
 }
+const summaryGraphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+const summarySize = (text) => [...summaryGraphemes.segment(text)].length;
+// Independent fixture oracle: serialized prefixes have no escape boundary at the cutoff.
+function fixtureQuotedPreview(text) {
+  const quoted = [...summaryGraphemes.segment(JSON.stringify(text))].map(({ segment }) => segment);
+  return quoted.length <= 256 ? quoted.join('') : quoted.slice(0, 254).join('') + '…"';
+}
+function fixtureBoundedSummary(name, primary, parameters) {
+  const title = name + (primary ? ' ' + primary : '');
+  const retained = [];
+  for (const [index, parameter] of parameters.entries()) {
+    const candidate = [...retained, parameter, ...(index + 1 < parameters.length ? ['…'] : [])];
+    if (summarySize(title + ' [' + candidate.join(', ') + ']') > 1024) { retained.push('…'); break; }
+    retained.push(parameter);
+  }
+  return title + (retained.length ? ' [' + retained.join(', ') + ']' : '');
+}
 function multilineLayout(dump, wide) {
   const reads = byName(dump, 'read');
   const empty = byName(dump, 'tv_noargs');
@@ -380,24 +397,27 @@ function multilineLayout(dump, wide) {
   assert.equal(summaryText(reads[2]), summaryExpected('read long-directory/' + 'r'.repeat(180) + '.txt [offset=1, limit=1]'));
   const query = 'quoted "query"\\value 界 é ' + 'UNBREAKABLE'.repeat(30) + ' END_QUERY_VISIBLE';
   const parameters = [
-    `query=${JSON.stringify(query)}`, 'queries=["first","second"]', 'op="trace"', 'action="inspect"', 'symbol="symbol"', 'symbols=["one","two"]',
-    'command="command"', 'subject="subject"', 'offset=0', 'limit=0', 'startLine=0', 'endLine=0',
+    'op="trace"', 'action="inspect"', 'command="command"', `query=${fixtureQuotedPreview(query)}`, 'queries=["first","second"]', 'subject="subject"',
+    'symbol="symbol"', 'symbols=["one","two"]', 'startLine=0', 'endLine=0', 'offset=0', 'limit=0', 'maxTokens=0',
     'AFirst="FIRST_ALPHA_VISIBLE"', 'Authorization="<redacted>"', 'Content="CASE_SENSITIVE_PAYLOAD_VISIBLE"', 'Token="CASE_SENSITIVE_TOKEN_VISIBLE"',
-    'access_token="<redacted>"', 'apiKey="<redacted>"', 'api_key="<redacted>"', 'authorization="<redacted>"', 'count=0', 'empty=""', 'enabled=false', 'maxTokens=0',
+    'access_token="<redacted>"', 'apiKey="<redacted>"', 'api_key="<redacted>"', 'authorization="<redacted>"', 'count=0', 'empty=""', 'enabled=false',
     'nested={"input":"NESTED_PAYLOAD_VISIBLE","token":"NESTED_TOKEN_VISIBLE","values":[false,0,"nested quoted value"],"clean":"clean nestedvalue"}',
     'nothing=null', '"odd key"="QUOTED_KEY"', 'passwd="<redacted>"', 'password="<redacted>"', 'refresh_token="<redacted>"', 'sanitized="white space redend"', 'secret="<redacted>"', 'token="<redacted>"', 'zLast="LAST_FIELD_VISIBLE"',
+    'content="PAYLOAD_CONTENT_HIDDEN"', 'edits=["PAYLOAD_EDITS_HIDDEN"]', 'code="PAYLOAD_CODE_HIDDEN"', 'input="PAYLOAD_INPUT_HIDDEN"',
+    'messages=["PAYLOAD_MESSAGES_HIDDEN"]', 'prompt="PAYLOAD_PROMPT_HIDDEN"', 'newString="PAYLOAD_NEWSTRING_HIDDEN"', 'oldString="PAYLOAD_OLDSTRING_HIDDEN"',
+    'appendContent="PAYLOAD_APPEND_HIDDEN"', 'rewrite="PAYLOAD_REWRITE_HIDDEN"', 'oldText="PAYLOAD_OLDTEXT_HIDDEN"', 'newText="PAYLOAD_NEWTEXT_HIDDEN"',
   ];
-  assert.equal(summaryText(summaries[0]), summaryExpected('tv_summary [' + parameters.join(', ') + ']'), 'complete priority/alpha ordering, JSON values, exact payload exclusion and top-level masking');
+  assert.equal(summaryText(summaries[0]), summaryExpected(fixtureBoundedSummary('tv_summary', '', parameters)), 'action-first/alpha/content ordering, capped values, overall budget and exact masking');
   assert.doesNotMatch(summaries[0].lines.join(''), /\u202e|\u001b\[31m/u, 'top-level and nested controls cannot affect terminal presentation');
-  assert.ok(lines(summaries[0]).length > (dump.width === 24 ? 30 : 4), 'long summary is not bounded by old argument or row caps');
+  assert.ok(lines(summaries[0]).length > (dump.width === 24 ? 30 : 4), 'bounded logical text still wraps normally rather than acquiring a row cap');
   const expected = [
-    'tv_summary "needle \\"quoted\\"" [paths=["ordinary-path"], path=["src dir","tests"], target="ordinary-target", url="https://example.invalid/ordinary", scope="ordinary-scope", query="always named", enabled=true]',
-    'tv_summary "chosen target" [paths=["ordinary-path"], path=null, url="ordinary-url", scope="ordinary-scope", query="named", pattern=0]',
+    'tv_summary "needle \\"quoted\\"" [query="always named", paths=["ordinary-path"], path=["src dir","tests"], target="ordinary-target", url="https://example.invalid/ordinary", scope="ordinary-scope", enabled=true]',
+    'tv_summary "chosen target" [query="named", paths=["ordinary-path"], path=null, url="ordinary-url", scope="ordinary-scope", pattern=0]',
     'tv_summary chosen-path [paths=["ordinary-path"], target="ordinary-target", url="ordinary-url", scope="ordinary-scope"]',
     'tv_summary https://example.invalid/chosen [paths=[], scope="ordinary-scope", pattern=false]',
     'tv_summary [paths=["ordinary-path"], scope=[]]',
     'tv_summary [paths=[]]',
-    'tv_summary "" [path=[], query=""]',
+    'tv_summary "" [query="", path=[]]',
   ];
   for (const [index, expectedSummary] of expected.entries())
     assert.equal(summaryText(summaries[index + 1]), summaryExpected(expectedSummary), `primary selection case ${index + 1}`);
@@ -583,7 +603,7 @@ test('real CLI: complete multiline summaries, adaptive separation, continuation 
       const summary = byName(wide, 'tv_summary')[0];
       const summaryRow = wide.screen.findIndex((row) => row === lines(summary)[0]);
       assert.ok(summaryRow >= 0);
-      assert.deepEqual(wide.screen.slice(summaryRow, summaryRow + lines(summary).length), lines(summary), 'all fields appear on the actual wide screen');
+      assert.deepEqual(wide.screen.slice(summaryRow, summaryRow + lines(summary).length), lines(summary), 'all bounded preview rows appear on the actual wide screen');
       const styleReference = new Terminal({ cols: 10, rows: 2, allowProposedApi: true });
       try {
         await new Promise((done) => styleReference.write(wide.summaryStyles.dim, done));
@@ -806,7 +826,7 @@ test('real CLI: failed summaries are wholly error-colored, hide bodies and final
       const expected = [
         `read ${args[0].path} [offset=3, limit=7]`,
         `tv_summary "needle" in ${args[1].path} [query=${JSON.stringify(args[1].query)}, fixtureError=true]`,
-        `tv_summary [target=${JSON.stringify(args[2].target)}, query="named", fixtureError=true]`,
+        `tv_summary [query="named", target=${JSON.stringify(args[2].target)}, fixtureError=true]`,
         'tv_summary [query="SUCCESS_CALL"]',
       ];
       assert.deepEqual(dump.tools.map((tool) => tool.isError === true), [true, true, true, false]);
@@ -2910,4 +2930,102 @@ test('real CLI: minified edit keeps linear ANSI size, warm work, exact traffic a
         snapshots, identity: 'exact traffic, persisted metadata, session bytes and regular/fullscreen replay',
         scope: 'actual built-in edit/read; no cache policy change, truncation or timing threshold' }, null, 2));
     } finally { for (const terminal of terminals.reverse()) { await terminal.close(); terminal.dispose(); } }
+  });
+
+
+test('real CLI: bounded argument previews, path-only edits and visible payloads preserve native data and replay',
+  { skip: stockOnly, timeout: 180000 }, async () => {
+    const terminals = [], flags = ['--toolview-compact', 'write'];
+    const start = async (name, options = {}) => {
+      const terminal = new PiTerminal(name, options); terminals.push(terminal);
+      await terminal.ready(); await terminal.resize(100, 180); return terminal;
+    };
+    const activity = (terminal) => {
+      const events = terminal.events();
+      assert.equal(events.filter(event => event.type === 'call').length, 7);
+      assert.equal(events.filter(event => event.type === 'result').length, 7);
+      assert.equal(events.filter(event => event.type === 'model_context').length, 8);
+      return events.filter(event => ['call', 'result', 'model_context'].includes(event.type));
+    };
+    const expected = [
+      fixtureBoundedSummary('tv_summary', '', [
+        'op="inspect"', 'action="preview"', 'command="echo"', `query=${fixtureQuotedPreview('STRING_BEGIN_' + 'x'.repeat(1000))}`,
+        'paths=["src"]', 'symbol="render"', 'limit=0', 'wait=false', 'api_key="<redacted>"', 'mystery="UNKNOWN"',
+        'content="CONTENT_VISIBLE"', 'edits=[{"oldText":"OLD_VISIBLE","newText":"NEW_VISIBLE"}]',
+      ]),
+      `tv_summary [content=${fixtureQuotedPreview('界é'.repeat(300))}, newText="ONE_REPLACEMENT"]`,
+      `tv_summary [query=[${Array(18).fill('"ARRAY_ENTRY"').join(',')},…]]`,
+      `tv_summary [query={"list":[${Array(16).fill('"OBJECT_ENTRY"').join(',')},…],…}, unknownTail="DISPLAY_TAIL"]`,
+      fixtureBoundedSummary('tv_summary', '', Array.from({ length: 30 }, (_, i) => `field${String(i).padStart(2, '0')}="${'v'.repeat(180)}"`)),
+      'edit missing-bounded.ts',
+      `write bounded-write.txt [content=${fixtureQuotedPreview('WRITE_BODY_' + 'w'.repeat(1000))}]`,
+    ];
+    let checkedErrorCells = 0;
+    const check = async (dump) => {
+      assert.equal(dump.tools.length, 7);
+      for (const [index, tool] of dump.tools.entries()) {
+        compactContent(tool);
+        assert.equal(summaryText(tool), summaryExpected(expected[index]), `bounded preview ${index}`);
+        assert.ok(summarySize(expected[index]) <= 1024);
+        const rows = lines(tool), start = dump.screen.findIndex((row, y) => row === rows[0] && rows.every((line, offset) => dump.screen[y + offset] === line));
+        assert.ok(start >= 0, `complete physical row block ${index} at ${dump.width}`);
+        for (let y = start; y < start + rows.length; y++) assert.ok(['', ' '].includes(dump.cells[y][dump.width - 1].text), 'one blank right column');
+        await assertFits(tool.lines, dump.width - 1);
+      }
+      assert.doesNotMatch(dump.tools.map(tool => tool.lines.join('')).join(''), /COMPACT_SECRET_NEVER_VISIBLE|EDIT_PATTERN_IGNORED|EDIT_QUERY_IGNORED|PROPOSAL_IGNORED/u);
+      assert.ok(dump.tools[5].isError, 'actual built-in edit failed');
+      checkedErrorCells += await errorSummaryColors(dump, dump.tools[5]);
+    };
+    try {
+      const stock = await start('bounded-stock');
+      await stock.run('bounded-summaries'); const native = await stock.capture('native');
+      stock.send('\x0f'); await stock.settle(); const nativeExpanded = await stock.capture('expanded');
+      const live = await start('bounded-toolview', { toolview: true, flags, workspace: stock.work });
+      await live.run('bounded-summaries'); const wide = await live.capture('wide'); await check(wide);
+      assert.deepEqual(activity(live), activity(stock), '7 actual calls/results and 8 model contexts remain exact');
+      assert.deepEqual(persisted(wide), persisted(native));
+      assert.equal(readFileSync(join(live.work, 'bounded-write.txt'), 'utf8'), 'WRITE_BODY_' + 'w'.repeat(1000));
+      assert.equal(wide.tools[0].args.query.length, 1013, 'original unabridged string remains in component arguments');
+      assert.equal(wide.tools[2].args.query.length, 100, 'original array remains complete');
+      const bytes = readFileSync(wide.session);
+      await live.resize(24, 180); await check(await live.capture('narrow'));
+      await live.resize(100, 180); const back = await live.capture('wide-again'); await check(back);
+      assert.deepEqual(toolLines(back), toolLines(wide));
+      await live.command('/tv-theme light'); await check(await live.capture('light'));
+      await live.command('/tv-theme dark'); await check(await live.capture('dark'));
+      live.send('\x0f'); await live.settle(); const expanded = await live.capture('expanded');
+      assert.ok(expanded.tools.every(tool => tool.expanded));
+      assert.deepEqual(toolLines({ tools: expanded.tools.filter(tool => tool.name !== 'edit') }),
+        toolLines({ tools: nativeExpanded.tools.filter(tool => tool.name !== 'edit') }), 'full generic/write native details are unchanged');
+      assert.match(expanded.tools[5].lines.map(plain).join('\n'), /missing-bounded.ts/u);
+      live.send('\x0f'); await live.settle(); await check(await live.capture('recollapsed'));
+      await live.command('/toolview off'); const off = await live.capture('off');
+      assert.deepEqual(toolLines({ tools: off.tools.filter(tool => tool.name !== 'edit') }),
+        toolLines({ tools: native.tools.filter(tool => tool.name !== 'edit') }));
+      await live.command('/toolview on'); await check(await live.capture('on'));
+      const starts = live.events().filter(event => event.type === 'start').length;
+      await live.command('/reload'); await live.event('start', starts + 1);
+      const reloaded = await live.capture('reloaded'); await check(reloaded);
+      assert.deepEqual(activity(live), activity(stock));
+      assert.deepEqual(readFileSync(wide.session), bytes, 'UI operations leave session bytes untouched');
+      await live.close();
+      const replay = await start('bounded-replay', { toolview: true, flags, session: wide.session, workspace: stock.work });
+      const resumed = await replay.capture('replayed'); await check(resumed);
+      assert.deepEqual(toolLines(resumed), toolLines(reloaded));
+      assert.deepEqual(persisted(resumed), persisted(wide));
+      assert.equal(replay.events().filter(event => ['call', 'result', 'model_context'].includes(event.type)).length, 0);
+      const nativeReplay = await start('bounded-native-replay', { session: wide.session, workspace: stock.work });
+      const sameSessionNative = await nativeReplay.capture('replayed');
+      await replay.command('/toolview off');
+      assert.deepEqual(toolLines(await replay.capture('off')), toolLines(sameSessionNative), 'same-session native control includes unchanged edit details');
+      assert.deepEqual(readFileSync(wide.session), bytes);
+      writeFileSync(join(artifacts, 'bounded-summary-coverage.json'), JSON.stringify({
+        calls: 7, results: 7, modelContexts: 8, widths: [24, 100], valueLimit: 256, summaryLimit: 1024, checkedErrorCells,
+        checks: ['action/target/control/unknown/content ordering', 'visible payloads', 'quoted Unicode/string and container caps', 'total text budget',
+          'path-only actual edit failure', 'physical complete row blocks', 'dark/light error cells', 'native expansion', 'off/on/reload', 'same-session replay'],
+        identity: 'Exact raw args/results/model contexts and unchanged session bytes; no tools re-executed during replay',
+      }, null, 2));
+    } finally {
+      for (const terminal of terminals.reverse()) { await terminal.close(); terminal.dispose(); }
+    }
   });
