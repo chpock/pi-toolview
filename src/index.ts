@@ -1,8 +1,9 @@
 import type { ExtensionAPI, ExtensionContext, ThemeColor } from "@earendil-works/pi-coding-agent";
-import { Container, visibleWidth, wrapTextWithAnsi, type Component, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
+import { Container, Markdown, visibleWidth, wrapTextWithAnsi, type Component, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { isAbsolute, resolve } from "node:path";
 import { renderBashCard } from "./bash-card.ts";
+import { renderUserCard } from "./user-card.ts";
 import { insidePanel } from "./card-frame.ts";
 import type { CardTheme } from "./card-theme.ts";
 import { RenderCache, type CacheEntry, type CacheStats } from "./render-cache.ts";
@@ -25,6 +26,23 @@ interface ToolNode extends Component {
   getRenderContext(): unknown;
   getRenderShell(): string;
 }
+interface UserNode extends Container {
+  text: string;
+  outputPad: number;
+  markdownTheme: object;
+  markdownTransformers: unknown[];
+  rebuild(): void;
+  setOutputPad(padding: number): void;
+}
+type UserRender = (this: UserNode, width: number) => string[];
+const userCandidate = (node: Component): node is UserNode =>
+  node instanceof Container && node.constructor.name === "UserMessageComponent";
+const compatibleUser = (node: UserNode) => typeof node.text === "string" &&
+  Number.isSafeInteger(node.outputPad) && node.outputPad >= 0 &&
+  typeof node.markdownTheme === "object" && node.markdownTheme !== null && Array.isArray(node.markdownTransformers) &&
+  typeof node.rebuild === "function" && typeof node.setOutputPad === "function" &&
+  node.children.length === 1 && node.children[0] instanceof Markdown;
+
 type LiveTui = Component & {
   requestRender(): void;
   hasActiveSelection?(): boolean;
@@ -235,7 +253,9 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
   }
   let states = new WeakMap<ToolNode, { signature: unknown[]; entry: CacheEntry<Layout> }>();
   const forget = (node: ToolNode) => { cache.drop(states.get(node)?.entry); states.delete(node); };
-  const clearCache = () => { cache.clear(); states = new WeakMap(); };
+  let userStates = new WeakMap<UserNode, { signature: unknown[]; entry: CacheEntry<Layout> }>();
+  const forgetUser = (node: UserNode) => { cache.drop(userStates.get(node)?.entry); userStates.delete(node); };
+  const clearCache = () => { cache.clear(); states = new WeakMap(); userStates = new WeakMap(); };
   const cards = new Set([...DEFAULT_CARDS, ...options.cards ?? []]);
   const overrides = new Set(options.compact ?? []);
   const nativeOverrides = new Set(options.cards ?? []);
@@ -245,6 +265,10 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     updates: { name: string; original?: PropertyDescriptor; wrapper: (...args: unknown[]) => unknown }[];
   }>();
 
+  const userPatches = new Map<object, {
+    render: PropertyDescriptor; patchedRender: UserRender;
+    updates: { name: string; original?: PropertyDescriptor; wrapper: (...args: unknown[]) => unknown }[];
+  }>();
   const refresh = () => { tui.invalidate(); tui.requestRender(); };
   function memo<T extends Layout>(node: ToolNode, kind: string, width: number, theme: Palette, directory: string | undefined, build: () => T): T {
     const signature = [kind, width, theme, theme.fg, kind === "bash" ? undefined : node.args, node.result, node.expanded, node.isPartial,
@@ -273,7 +297,7 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     clearCache,
     setCacheLimitMiB: (value) => cache.setLimit(value * 1024 * 1024),
     restore() {
-      if (!active && !patches.size) return;
+      if (!active && !patches.size && !userPatches.size) return;
       active = false;
       stopSpinner(); animated.clear(); animationRefs = new WeakMap();
       clearCache();
@@ -290,6 +314,16 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
         }
       }
       patches.clear();
+      for (const [prototype, patch] of userPatches) {
+        if (Object.getOwnPropertyDescriptor(prototype, "render")?.value === patch.patchedRender)
+          Object.defineProperty(prototype, "render", patch.render);
+        for (const update of patch.updates) {
+          if (Object.getOwnPropertyDescriptor(prototype, update.name)?.value !== update.wrapper) continue;
+          if (update.original) Object.defineProperty(prototype, update.name, update.original);
+          else Reflect.deleteProperty(prototype, update.name);
+        }
+      }
+      userPatches.clear();
       refresh();
     },
   };
@@ -373,7 +407,7 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     const render = candidate(node) ? patches.get(Object.getPrototypeOf(node))?.render.value as Render | undefined : undefined;
     return render ? render.call(node as ToolNode, width) : node.render(width);
   }
-  function previousLayout(node: ToolNode, width: number) {
+  function previousLayout(node: Component, width: number): { compact: boolean; tool: boolean; height: number; separator?: boolean } | undefined {
     const position = parents.get(node);
     const siblings = position?.parent.children ?? [];
     let current = position?.index ?? -1;
@@ -382,8 +416,10 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
       const previous = siblings[index];
       if (width > 0 && bashCard(previous, width)) return { compact: false, tool: true, height: 3 };
       if (compact(previous, width)) return { compact: true, tool: true, height: summaryLayout(previous, width).rows.length };
-      const lines = nativeRows(previous, width);
-      if (lines.length) return { compact: false, tool: candidate(previous), height: lines.length - (lines[0] === "" ? 1 : 0) };
+      // User cards contribute cached content metadata, not recursive predecessor rendering.
+      const userRender = userCandidate(previous) ? userPatches.get(Object.getPrototypeOf(previous))?.render.value as UserRender | undefined : undefined;
+      const lines = userRender ? userLayout(previous as UserNode, width, userRender).rows : nativeRows(previous, width);
+      if (lines.length) return { compact: false, tool: candidate(previous), height: lines.length - (lines[0] === "" ? 1 : 0), separator: lines.at(-1) === "" };
     }
     return undefined;
   }
@@ -476,10 +512,60 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     for (const update of updates) Object.defineProperty(prototype, update.name,
       { configurable: true, writable: true, ...update.original, value: update.wrapper });
   }
+  function userLayout(node: UserNode, width: number, originalRender: UserRender): Layout {
+    const theme = getTheme();
+    const signature = [width, theme, theme.fg, theme.bg, node.text, node.outputPad, node.children[0], node.markdownTheme, node.markdownTransformers];
+    const state = userStates.get(node);
+    if (state && signature.every((value, index) => value === state.signature[index])) {
+      const value = cache.get(state.entry); if (value) return value;
+    } else { cache.drop(state?.entry); cache.get(undefined); }
+    const value = renderUserCard(width, node.outputPad, theme, (size) => originalRender.call(node, size));
+    userStates.set(node, { signature, entry: cache.put(value, value.rows) });
+    return value;
+  }
+  function installUser(node: UserNode) {
+    if (!compatibleUser(node)) { fail("User-message component contract is incompatible; native rendering retained"); return; }
+    patchUserPrototype(Object.getPrototypeOf(node) as object);
+  }
+  // Like tool hooks, these persistent closures are built without an installer-node parameter.
+  function patchUserPrototype(prototype: object) {
+    if (userPatches.has(prototype)) return;
+    const render = Object.getOwnPropertyDescriptor(prototype, "render");
+    if (!render?.writable || !render.configurable || typeof render.value !== "function") {
+      fail("User-message rendering cannot be safely replaced; native rendering retained"); return;
+    }
+    const originalRender = render.value as UserRender;
+    const patchedRender: UserRender = function (width) {
+      if (!active) return originalRender.call(this, width);
+      if (width < 1) return [];
+      try {
+        if (!compatibleUser(this)) throw new Error("User-message component contract changed");
+        const rows = userLayout(this, width, originalRender).rows;
+        const previous = rows.length ? previousLayout(this, width) : undefined;
+        return previous && !previous.separator ? ["", ...rows] : rows;
+      } catch {
+        fail("Toolview could not render this user message; native rendering restored");
+        return originalRender.call(this, width);
+      }
+    };
+    const updates = ["rebuild", "setOutputPad", "invalidate"].map((name) => {
+      const original = Object.getOwnPropertyDescriptor(prototype, name);
+      const method = (prototype as Record<string, unknown>)[name];
+      if (typeof method !== "function" || (original && (!original.writable || !original.configurable)) || (!original && !Object.isExtensible(prototype)))
+        throw new Error("User-message invalidation methods cannot be wrapped");
+      const wrapper = function (this: UserNode, ...args: unknown[]) { forgetUser(this); return method.apply(this, args); };
+      return { name, original, wrapper };
+    });
+    userPatches.set(prototype, { render, patchedRender, updates });
+    Object.defineProperty(prototype, "render", { ...render, value: patchedRender });
+    for (const update of updates) Object.defineProperty(prototype, update.name,
+      { configurable: true, writable: true, ...update.original, value: update.wrapper });
+  }
   function visit(node: Component, parent?: Container, index = -1) {
     if (!active) return;
     if (parent) parents.set(node, { parent, index });
     if (candidate(node)) install(node);
+    else if (userCandidate(node)) installUser(node);
     if (node instanceof Container) node.children.forEach((child, index) => visit(child, node, index));
   }
   function patchedAdd(this: Container, child: Component) {

@@ -12,6 +12,13 @@ export default function terminalDriver(pi: ExtensionAPI) {
   const record = (event: object) => appendFileSync(join(output, "events.jsonl"), JSON.stringify(event) + "\n");
   const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
   // Opt-in UI-clock observations only: real timers/render requests, no model/session mutation.
+  const userDiagnostics = process.env.TOOLVIEW_TEST_USER_CARDS === "1";
+  const userWork = { transforms: 0, widths: [] as number[] };
+  if (userDiagnostics) pi.registerMarkdownTransformer((text, context) => {
+    if (context.messageType !== "user") return text;
+    userWork.transforms++; userWork.widths.push(context.availableWidth);
+    return text + "\n\nTRANSFORMED_USER";
+  });
   const spinnerDiagnostics = process.env.TOOLVIEW_TEST_SPINNER_DIAGNOSTICS === "1";
   const spinnerStats = { starts: 0, stops: 0, active: 0, maxActive: 0, ticks: 0, requests: 0, intervals: [] as number[] };
   let insideSpinnerTick = false;
@@ -293,19 +300,22 @@ export default function terminalDriver(pi: ExtensionAPI) {
         const user: any = context.messages[last];
         const prompt = typeof user?.content === "string" ? user.content :
           user?.content?.filter((c: any) => c.type === "text").map((c: any) => c.text).join("");
-        const scenario = prompt === "run cache-performance" ? "cache-performance" : prompt?.includes("bash-width") ? "bash-width" : prompt?.includes("bash-stream") ? "bash-stream" : prompt?.includes("bash-real") ? "bash-real" :
+        const scenario = prompt?.includes("run user-card") ? "user-card" : prompt === "run cache-performance" ? "cache-performance" : prompt?.includes("bash-width") ? "bash-width" : prompt?.includes("bash-stream") ? "bash-stream" : prompt?.includes("bash-real") ? "bash-real" :
           prompt?.includes("bash-shape-exception-stream") ? "bash-shape-exception-stream" : prompt?.includes("bash-shape-exceptions") ? "bash-shape-exceptions" :
           prompt?.includes("bash-shape-stream") ? "bash-shape-stream" : prompt?.includes("bash-shapes") ? "bash-shapes" :
           prompt?.includes("compact-errors") ? "compact-errors" : prompt?.includes("comma-wrap") ? "comma-wrap" : prompt?.includes("boundary") ? "boundary" : prompt?.includes("multiline") ? "multiline" : prompt?.includes("integration") ? "integration" :
           prompt?.includes("pending") ? "pending" : prompt?.includes("fallback") ? "fallback" :
           prompt?.includes("future") ? "future" : "suite";
         const results = context.messages.slice(last + 1).filter((m) => m.role === "toolResult");
-        record({ type: "model_context", results: results.map((m: any) => ({
+        record({ type: "model_context", ...(userDiagnostics ? { user: prompt } : {}), results: results.map((m: any) => ({
           name: m.toolName, content: m.content, isError: m.isError, details: m.details,
         })) });
         if (scenario.startsWith("bash-shape") && !bashShape) throw new Error("bash-shape scenario requires explicit isolated opt-in");
         if (["cache-performance", "bash-width", "bash-real", "bash-stream", "suite", "multiline"].includes(scenario) && bashShape) throw new Error("Built-in scenario cannot run with bash-shape opt-in");
-        const calls: Pick<ToolCall, "name" | "arguments">[] = scenario === "cache-performance" ? cacheSuite : scenario === "bash-width" ? bashWidth : scenario === "bash-real" ? bashReal : scenario === "bash-shapes" ? bashShapes :
+        const calls: Pick<ToolCall, "name" | "arguments">[] = scenario === "user-card" ? [
+          { name: "bash", arguments: { command: "printf 'USER_BASH_OUTPUT\\n'" } },
+          { name: "read", arguments: { path: "a.txt" } },
+        ] : scenario === "cache-performance" ? cacheSuite : scenario === "bash-width" ? bashWidth : scenario === "bash-real" ? bashReal : scenario === "bash-shapes" ? bashShapes :
           scenario === "bash-shape-exceptions" ? bashExceptions :
           scenario === "bash-shape-exception-stream" ? [{ name: "bash", arguments: { command: "shape exception-stream", fixtureCase: "exception-stream" } }] :
           scenario === "bash-shape-stream" ? [{ name: "bash", arguments: { command: "shape stream", description: "Streaming comment", fixtureCase: "stream" } }] :
@@ -464,13 +474,14 @@ export default function terminalDriver(pi: ExtensionAPI) {
         frameStyles: {
           border: ctx.ui.theme.fg("borderMuted", "┃"),
           errorBorder: ctx.ui.theme.fg("error", "┃"),
+          userBorder: ctx.ui.theme.fg("customMessageLabel", "┃"),
         },
         registrations: pi.getAllTools().map((tool) => tool.name),
         commands: pi.getCommands().map((command) => command.name),
         errorStyle: ctx.ui.theme.fg("error", "TERMINAL_ERROR"),
-        summaryStyles: Object.fromEntries((["dim", "toolTitle", "muted", "toolOutput", "error"] as const)
+        summaryStyles: Object.fromEntries((["dim", "toolTitle", "muted", "toolOutput", "error", "userMessageText"] as const)
           .map((role) => [role, ctx.ui.theme.fg(role, "X")])),
-        backgroundStyles: Object.fromEntries((["toolPendingBg", "toolSuccessBg", "toolErrorBg"] as const)
+        backgroundStyles: Object.fromEntries((["toolPendingBg", "toolSuccessBg", "toolErrorBg", "userMessageBg"] as const)
           .map((role) => [role, ctx.ui.theme.bg(role, "X")])),
         // Read actual command notifications, not production globals, private hooks or test events.
         cacheDiagnostics: nodes.flatMap((node) => {
@@ -482,6 +493,13 @@ export default function terminalDriver(pi: ExtensionAPI) {
         }),
         extensionIssues: nodes.filter((node) => node.constructor.name === "ThemedText")
           .map((node) => node.render(width)).filter((rows: string[]) => rows.some((row) => row.includes("[Extension issues]"))),
+        ...(userDiagnostics ? { userWork: { ...userWork, widths: [...userWork.widths] } } : {}),
+        users: nodes.filter((node) => node.constructor.name === "UserMessageComponent").map((node) => ({
+          text: node.text, outputPad: node.outputPad, lines: node.render(width),
+          ...(userDiagnostics && name.startsWith("native-user") ? {
+            contentControl: node.render(Math.max(1, width - 5) + 2 * node.outputPad),
+          } : {}),
+        })),
         tools: tools.map((node) => ({ name: node.toolName, id: node.toolCallId,
           expanded: node.expanded, executionStarted: node.executionStarted, isError: node.result?.isError,
           content: node.result?.content, details: node.result?.details, structuredContent: node.result?.structuredContent,

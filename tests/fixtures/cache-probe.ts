@@ -4,6 +4,7 @@ import { stripVTControlCharacters } from "node:util";
 import { Container, ScrollView } from "@earendil-works/pi-tui";
 import { renderLayoutFrame } from "../../node_modules/@earendil-works/pi-tui/dist/layout.js";
 import { ToolExecutionComponent } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/tool-execution.js";
+import { UserMessageComponent } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/user-message.js";
 import { initTheme, theme } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { installToolview } from "../../src/index.ts";
 
@@ -114,5 +115,21 @@ try {
     observations.push({ animatedFirstInstallerCollected: true, spinnerFramesObserved: glyphs.size,
       spinnerBuilds: builds, spinnerCacheBuildsUnchanged: true });
   } finally { spinnerController.restore(); }
-  console.log(JSON.stringify(observations));
+   const userRoot = new Root(), userViewport = new ScrollView(userRoot, { scrollbar: "hidden", primary: true });
+   let user: UserMessageComponent | undefined = new UserMessageComponent("FIRST_USER_INSTALLER\n\n**native Markdown**");
+   userRoot.addChild(user);
+   const userController = installToolview(userRoot as never, () => theme);
+   try {
+     const draw = () => renderLayoutFrame(userViewport, 80, 24, () => {}).lines;
+     draw(); assert.equal(userController.cacheStats().builds, 1);
+     draw(); assert.equal(userController.cacheStats().builds, 1);
+     const reference = new WeakRef(user);
+     userRoot.removeChild(user); user = undefined; draw();
+     for (let i = 0; i < 12; i++) {
+       await new Promise<void>((resolve) => setImmediate(resolve)); globalThis.gc!();
+     }
+     assert.equal(reference.deref(), undefined, "active user hooks/cache must not retain their first installer");
+     observations.push({ firstUserInstallerCollected: true, userCache: userController.cacheStats() });
+   } finally { userController.restore(); }
+   console.log(JSON.stringify(observations));
 } finally { controller.restore(); Intl.Segmenter.prototype.segment = original; }
