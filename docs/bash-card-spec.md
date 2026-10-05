@@ -1,6 +1,6 @@
 # Bash card specification
 
-Status: accepted. This is the default presentation for the exact tool name `bash`; other shell/tool names keep their existing policy. It supplements [tool-summary-spec.md](tool-summary-spec.md), whose argument-summary rules do not apply inside this card.
+This is the default presentation for the exact tool name `bash`; other shell/tool names keep their existing policy. It supplements [tool-summary-spec.md](tool-summary-spec.md), whose argument-summary rules do not apply inside this card.
 
 ## 1. Scope and policy
 
@@ -72,4 +72,4 @@ The [bounded render-cache contract](render-cache-spec.md) governs reuse/invalida
 
 ## 7. Verification gate
 
-Require first-red component tests, strict TypeScript, existing summary/lifecycle regressions, fresh real-Pi CLI traffic with keyboard/mouse/reload/history controls and an independent fresh-file review. Cover exact command indentation/wrapping, optional comments and equivalent workdirs, whitespace-only output, 10/11 visual-row boundary, partial/final replacement, literal status/task-looking output, exact/mismatching/unseparated/partial terminal footer duplicates without raw-data changes, preview-edge versus interior/expanded blank rows, metadata footer combinations, semantic colors/backgrounds, adaptive spacing, native opt-out, compact override, hidden/image fallback and unchanged result/session data. Separate actual built-in execution from deterministic AFT-shaped fixtures and do not claim the latter executes the installed AFT runtime.
+Follow the shared [testing and coverage guide](testing.md), retaining existing summary/lifecycle controls. Cover exact command indentation/wrapping, optional comments and equivalent workdirs, whitespace-only output, 10/11 visual-row boundary, partial/final replacement, literal status/task-looking output, exact/mismatching/unseparated/partial terminal footer duplicates without raw-data changes, preview-edge versus interior/expanded blank rows, metadata footer combinations, semantic colors/backgrounds, adaptive spacing, native opt-out, compact override, hidden/image fallback and unchanged result/session data. Separate actual built-in execution from deterministic AFT-shaped fixtures and do not claim the latter executes the installed AFT runtime.

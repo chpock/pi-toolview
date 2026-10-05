@@ -45,8 +45,11 @@ export function frameRows(geometry: CardGeometry, body: readonly string[], paint
     const border = geometry.borderWidth ? paint.border("┃") : "";
     const panel = " ".repeat(geometry.paddingLeft) + row +
       " ".repeat(geometry.contentWidth - size + geometry.paddingRight);
+    // Child background/full resets are not a stack: reopen the panel after each one.
+    // Keep the reset itself (including its foreground effects) and all child colors.
+    const painted = panel.split(/(?<=\x1b\[(?:0|49)m)/u).map((part) => paint.panel(part)).join("");
     // Reset inherited background before the stripe; only the body receives panel paint.
-    return "\x1b[49m" + " ".repeat(geometry.marginLeft) + border + paint.panel(panel) + " ".repeat(geometry.marginRight);
+    return "\x1b[49m" + " ".repeat(geometry.marginLeft) + border + painted + " ".repeat(geometry.marginRight);
   });
 }
 

@@ -34,7 +34,7 @@ function frame(label: string, width = 80) {
   observations.push(observed); return observed;
 }
 try {
-  const cold = frame("cold"); assert.equal(cold.segments, 88); assert.equal(cold.builds, 8);
+   const cold = frame("cold"); assert.equal(cold.segments, 88); assert.equal(cold.builds, 8);
   for (const label of ["unchanged-1", "unchanged-2", "scroll"]) {
     if (label === "scroll") viewport.scrollBy(1);
     const same = frame(label); assert.equal(same.segments, 0); assert.equal(same.builds, 8); assert.equal(same.visibleRows, 24);
@@ -47,9 +47,9 @@ try {
   const expanded = frame("expand", 81); assert.equal(expanded.segments, 1000); assert.equal(expanded.builds, 18);
   assert.equal(frame("same-expand", 81).segments, 0);
   tools[0]!.setExpanded(false); assert.equal(frame("collapse", 81).segments, 11);
-  controller.setCacheLimitMiB(0); assert.equal(controller.cacheStats().retainedBytes, 0);
+  controller.setCacheLimitMiB(0); controller.setCardCacheLimitMiB(0); assert.equal(controller.cacheStats().retainedBytes, 0);
   const disabled = frame("zero-budget", 81); assert.equal(disabled.segments, 88); assert.equal(disabled.entries, 0);
-  controller.setCacheLimitMiB(8); frame("refill", 81);
+  controller.setCacheLimitMiB(8); controller.setCardCacheLimitMiB(128); frame("refill", 81);
   // Remove one node while its cached rendered data can still be in the bounded recency list.
   // Refresh host mouse layout, which independently owns references to formerly rendered children.
   const detach = () => {

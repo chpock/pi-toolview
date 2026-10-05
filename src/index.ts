@@ -1,10 +1,11 @@
-import type { ExtensionAPI, ExtensionContext, ThemeColor } from "@earendil-works/pi-coding-agent";
-import { Container, Markdown, visibleWidth, wrapTextWithAnsi, type Component, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
+import { createEditToolDefinition, highlightCode, getLanguageFromPath, type ExtensionAPI, type ExtensionContext, type ThemeColor } from "@earendil-works/pi-coding-agent";
+import { Box, Container, Markdown, visibleWidth, wrapTextWithAnsi, type Component, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { isAbsolute, resolve } from "node:path";
 import { renderBashCard } from "./bash-card.ts";
+import { editPath, measureEditCard, renderEditCard } from "./edit-card.ts";
 import { renderUserCard } from "./user-card.ts";
-import { insidePanel } from "./card-frame.ts";
+import { cardGeometry, insidePanel } from "./card-frame.ts";
 import type { CardTheme } from "./card-theme.ts";
 import { RenderCache, type CacheEntry, type CacheStats } from "./render-cache.ts";
 
@@ -25,6 +26,9 @@ interface ToolNode extends Component {
   setExpanded(expanded: boolean): void;
   getRenderContext(): unknown;
   getRenderShell(): string;
+  callRendererComponent?: Component;
+  getCallRenderer?(): unknown;
+  getResultRenderer?(): unknown;
 }
 interface UserNode extends Container {
   text: string;
@@ -56,16 +60,21 @@ export interface ToolviewOptions {
   compact?: readonly string[];
   warn?: (reason: string) => void;
   cacheMiB?: number;
+  cardCacheMiB?: number;
 }
+export interface ToolviewCacheStats extends CacheStats { ordinary: CacheStats; cards: CacheStats }
 export interface ToolviewController {
   readonly active: boolean;
   readonly reason: string | undefined;
   restore(): void;
-  cacheStats(): CacheStats;
+  cacheStats(): ToolviewCacheStats;
   clearCache(): void;
   setCacheLimitMiB(value: number): void;
+  setCardCacheLimitMiB(value: number): void;
 }
 const DEFAULT_CARDS = ["bash", "powershell", "write", "edit"];
+// The public factory exposes the stable stock renderer functions; no execution or file I/O.
+const { renderCall: stockEditCall, renderResult: stockEditResult } = createEditToolDefinition(".");
 // Controls all trailing status markers, including the pending ellipsis, not the leading spinner.
 const SHOW_COMPLETION_MARKERS = false;
 const SPINNER_FRAMES = Array.from("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏");
@@ -199,7 +208,8 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
   let reason: string | undefined;
   const parents = new WeakMap<Component, { parent: Container; index: number }>();
   const cache = new RenderCache((options.cacheMiB ?? 8) * 1024 * 1024);
-  type Layout = { rows: string[] };
+  const cardCache = new RenderCache((options.cardCacheMiB ?? 128) * 1024 * 1024, 2048, 128 * 1024 * 1024);
+  type Layout = { rows: string[]; framed?: boolean; native?: boolean };
   type SummaryLayout = Layout & { prefixLength: number };
   const animated = new Set<WeakRef<ToolNode>>();
   let animationRefs = new WeakMap<ToolNode, WeakRef<ToolNode>>();
@@ -251,11 +261,11 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
       spinnerTimer.unref?.();
     }
   }
-  let states = new WeakMap<ToolNode, { signature: unknown[]; entry: CacheEntry<Layout> }>();
-  const forget = (node: ToolNode) => { cache.drop(states.get(node)?.entry); states.delete(node); };
+  let states = new WeakMap<ToolNode, { signature: unknown[]; entry: CacheEntry<Layout>; pool: RenderCache }>();
+  const forget = (node: ToolNode) => { const state = states.get(node); state?.pool.drop(state.entry); states.delete(node); };
   let userStates = new WeakMap<UserNode, { signature: unknown[]; entry: CacheEntry<Layout> }>();
   const forgetUser = (node: UserNode) => { cache.drop(userStates.get(node)?.entry); userStates.delete(node); };
-  const clearCache = () => { cache.clear(); states = new WeakMap(); userStates = new WeakMap(); };
+  const clearCache = () => { cache.clear(); cardCache.clear(); states = new WeakMap(); userStates = new WeakMap(); };
   const cards = new Set([...DEFAULT_CARDS, ...options.cards ?? []]);
   const overrides = new Set(options.compact ?? []);
   const nativeOverrides = new Set(options.cards ?? []);
@@ -270,22 +280,50 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     updates: { name: string; original?: PropertyDescriptor; wrapper: (...args: unknown[]) => unknown }[];
   }>();
   const refresh = () => { tui.invalidate(); tui.requestRender(); };
-  function memo<T extends Layout>(node: ToolNode, kind: string, width: number, theme: Palette, directory: string | undefined, build: () => T): T {
-    const signature = [kind, width, theme, theme.fg, kind === "bash" ? undefined : node.args, node.result, node.expanded, node.isPartial,
+  function layoutSignature(node: ToolNode, kind: string, width: number, theme: Palette, directory: string | undefined): unknown[] {
+    return [kind, width, theme, theme.fg, kind === "bash" ? undefined : node.args, node.result, node.expanded, node.isPartial,
       node.toolName, node.result?.isError, (node.result?.details as { exit_code?: unknown } | undefined)?.exit_code,
-      node.args.command, node.args.description, node.args.workdir, directory];
+      node.args.command, node.args.description, node.args.workdir, directory,
+      kind === "edit" ? theme.colors : undefined, kind === "edit" ? theme.style : undefined, kind === "edit" ? theme.bg : undefined];
+  }
+  function memo<T extends Layout>(node: ToolNode, kind: string, width: number, theme: Palette, directory: string | undefined, build: () => T): T {
+    const signature = layoutSignature(node, kind, width, theme, directory);
     const state = states.get(node);
-    if (state && signature.every((value, index) => value === state.signature[index])) {
-      const value = cache.get(state.entry); if (value) return value as T;
-    } else { cache.drop(state?.entry); cache.get(undefined); }
+    const matches = state && signature.every((value, index) => value === state.signature[index]);
+    if (matches) {
+      const value = state.pool.get(state.entry); if (value) return value as T;
+    } else { state?.pool.drop(state.entry); }
     const value = build();
-    states.set(node, { signature, entry: cache.put(value, value.rows) });
+    // Select by the materialized presentation, not tool name: inline/native edit fallback is ordinary.
+    const pool = kind === "bash" || (kind === "edit" && value.framed && !value.native) ? cardCache : cache;
+    if (!matches) pool.get(undefined); // Attribute exactly one miss to the target pool.
+    states.set(node, { signature, pool, entry: pool.put(value, value.rows) });
     return value;
   }
   const bashLayout = (node: ToolNode, width: number) => {
     const theme = getTheme(), directory = bashDirectory(node) ?? undefined;
     return memo(node, "bash", width, theme, directory, () => renderBashCard(node, directory, width, theme));
   };
+  const editLayout = (node: ToolNode, width: number) => {
+    const theme = getTheme();
+    const context = node.getRenderContext() as { cwd?: unknown } | undefined;
+    const cwd = typeof context?.cwd === "string" ? context.cwd : undefined;
+    return memo(node, "edit", width, theme, cwd, () => renderEditCard(node, cwd, width, theme,
+      theme.colors && theme.style ? (code, path) => highlightCode(code, getLanguageFromPath(path)) : undefined) ??
+      { rows: nativeRows(node, width), framed: false, native: true });
+  };
+  function editMeasure(node: ToolNode, width: number) {
+    const theme = getTheme();
+    const context = node.getRenderContext() as { cwd?: unknown } | undefined;
+    const cwd = typeof context?.cwd === "string" ? context.cwd : undefined;
+    const state = states.get(node), signature = layoutSignature(node, "edit", width, theme, cwd);
+    // Read only the existing exact layout. Never admit another cache entry or retain measurement data.
+    if (state && signature.every((value, index) => value === state.signature[index])) {
+      const layout = state.pool.get(state.entry) as ReturnType<typeof renderEditCard>;
+      if (layout) return layout.native ? undefined : { framed: layout.framed, height: layout.rows.length };
+    }
+    return measureEditCard(node, cwd, width);
+  }
   const summaryLayout = (node: ToolNode, width: number) => {
     const theme = getTheme();
     return memo(node, "summary", width, theme, undefined, () => summaryRows(node, width, theme));
@@ -293,9 +331,16 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
   const controller: ToolviewController = {
     get active() { return active; },
     get reason() { return reason; },
-    cacheStats: () => cache.stats(),
+    cacheStats: () => {
+      const ordinary = cache.stats(), cards = cardCache.stats();
+      return { ordinary, cards,
+        retainedBytes: ordinary.retainedBytes + cards.retainedBytes, limitBytes: ordinary.limitBytes + cards.limitBytes,
+        entries: ordinary.entries + cards.entries, hits: ordinary.hits + cards.hits, misses: ordinary.misses + cards.misses,
+        builds: ordinary.builds + cards.builds, evictions: ordinary.evictions + cards.evictions, skips: ordinary.skips + cards.skips };
+    },
     clearCache,
     setCacheLimitMiB: (value) => cache.setLimit(value * 1024 * 1024),
+    setCardCacheLimitMiB: (value) => cardCache.setLimit(value * 1024 * 1024),
     restore() {
       if (!active && !patches.size && !userPatches.size) return;
       active = false;
@@ -333,25 +378,44 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     controller.restore();
     options.warn?.(message);
   };
+  const editSucceeded = (node: ToolNode) => node.toolName === "edit" && !!node.result && !node.isPartial && !node.result.isError;
   const eligible = (node: Component): node is ToolNode => active && candidate(node) &&
-    !node.hideComponent && !node.expanded && (overrides.has(node.toolName) || !cards.has(node.toolName)) &&
+    !node.hideComponent && !node.expanded && (overrides.has(node.toolName) || !cards.has(node.toolName) ||
+      (node.toolName === "edit" && !nativeOverrides.has("edit") && !editSucceeded(node))) &&
     !node.result?.content.some((content) => content.type === "image");
   const compact = (node: Component, width: number): node is ToolNode => {
     if (!eligible(node)) return false;
-    if (node.getRenderShell() !== "self") return true;
-    // Pi's self shell can render zero rows while hideComponent remains false.
-    // Visibility belongs to the native renderer and can depend on viewport width.
-    const nativeRender = patches.get(Object.getPrototypeOf(node))?.render.value as Render;
-    return nativeRender.call(node, width).length > 0;
+    return nativeVisible(node, width);
   };
+  function nativeVisible(node: ToolNode, width: number): boolean {
+    if (node.getRenderShell() !== "self") return true;
+    // Stock edit always supplies a heading in an ordinary Box. Its native factory can reuse
+    // a previous custom Box, so both renderer identities AND the current component must qualify.
+    // Check every visit; no retained visibility proof or native-state mutation.
+    if (typeof stockEditCall === "function" && typeof stockEditResult === "function" &&
+      node.constructor.name === "ToolExecutionComponent" && node.toolName === "edit" &&
+      typeof node.getCallRenderer === "function" && node.getCallRenderer() === stockEditCall &&
+      typeof node.getResultRenderer === "function" && node.getResultRenderer() === stockEditResult &&
+      node.callRendererComponent instanceof Box && Object.getPrototypeOf(node.callRendererComponent) === Box.prototype &&
+      node.callRendererComponent.render === Box.prototype.render &&
+      node.callRendererComponent.clear === Box.prototype.clear && node.callRendererComponent.addChild === Box.prototype.addChild) return true;
+    // Unknown self shells can be empty/width-dependent even when hideComponent is false.
+    return nativeRows(node, width).length > 0;
+  }
 
   function bashCard(node: Component, width: number): boolean {
     if (!active || !candidate(node) || node.toolName !== "bash" || node.hideComponent ||
       overrides.has("bash") || nativeOverrides.has("bash") || typeof node.args.command !== "string" ||
       node.result?.content.some((part) => part.type === "image") || bashDirectory(node) === null) return false;
-    return node.getRenderShell() !== "self" || nativeRows(node, width).length > 0;
+    return nativeVisible(node, width);
   }
 
+  function editCard(node: Component, width: number): boolean {
+    if (!active || !candidate(node) || !editSucceeded(node) || node.hideComponent || node.expanded ||
+      overrides.has("edit") || nativeOverrides.has("edit") || !editPath(node.args) ||
+      node.result?.content.some((part) => part.type === "image")) return false;
+    return nativeVisible(node, width);
+  }
 
   function summaryRows(node: ToolNode, width: number, theme: Palette): SummaryLayout {
     if (width < 1) return { rows: [], prefixLength: 0 };
@@ -415,6 +479,10 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     for (let index = current - 1; index >= 0; index--) {
       const previous = siblings[index];
       if (width > 0 && bashCard(previous, width)) return { compact: false, tool: true, height: 3 };
+      if (width > 0 && candidate(previous) && editCard(previous, width)) {
+        const measure = editMeasure(previous, width);
+        if (measure?.height) return { compact: !measure.framed, tool: true, height: measure.height };
+      }
       if (compact(previous, width)) return { compact: true, tool: true, height: summaryLayout(previous, width).rows.length };
       // User cards contribute cached content metadata, not recursive predecessor rendering.
       const userRender = userCandidate(previous) ? userPatches.get(Object.getPrototypeOf(previous))?.render.value as UserRender | undefined : undefined;
@@ -454,17 +522,21 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
           if (!rows.length) return rows;
           return previousLayout(this, width) ? ["", ...rows] : rows;
         }
+        if (editCard(this, width)) {
+          removeAnimation(this);
+          const layout = editLayout(this, width);
+          const offset = layout.native ? nativeGap(this, width, layout.rows) : layout.framed ? (previousLayout(this, width) ? 1 : 0) : gap(this, width);
+          return offset ? [""].concat(layout.rows) : layout.rows;
+        }
         if (!eligible(this)) {
           removeAnimation(this);
           const lines = originalRender.call(this, width);
           return nativeGap(this, width, lines) ? ["", ...lines] : lines;
         }
         if (width < 1) { removeAnimation(this); return []; }
-        if (this.getRenderShell() === "self") {
-          const lines = originalRender.call(this, width);
-          if (!lines.length) { removeAnimation(this); return lines; }
-        }
-        return [...Array(gap(this, width)).fill(""), ...paintSummary(this, width)];
+        if (!nativeVisible(this, width)) { removeAnimation(this); return []; }
+        const offset = gap(this, width), rows = paintSummary(this, width);
+        return offset ? ["", ...rows] : rows;
       }
       catch { fail("Toolview could not render this component; native rendering restored"); return originalRender.call(this, width); }
     };
@@ -478,6 +550,22 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
         this.setExpanded(!this.expanded);
         tui.requestRender();
         return { handled: true };
+      }
+      if (event.width > 0 && editCard(this, event.width)) {
+        const rejected = !this.result || this.isPartial || tui.hasActiveSelection?.() || event.type !== "click" || event.button !== "left";
+        if (rejected) {
+          // Unsupported metadata must still delegate; supported cards need no body to reject an event.
+          if (editMeasure(this, event.width)) return undefined;
+        } else {
+          const layout = editLayout(this, event.width);
+          if (!layout.native) {
+            const offset = layout.framed ? (previousLayout(this, event.width) ? 1 : 0) : gap(this, event.width);
+            const hit = layout.framed ? insidePanel(cardGeometry(event.width), layout.rows.length, event.x, event.y - offset) :
+              this.result?.isError && event.y >= offset && event.y < offset + layout.rows.length;
+            if (!hit) return undefined;
+            this.setExpanded(true); tui.requestRender(); return { handled: true };
+          }
+        }
       }
       if (!compact(this, event.width)) {
         const offset = nativeGap(this, event.width, originalRender.call(this, event.width));
@@ -594,11 +682,12 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
 export default function toolview(pi: ExtensionAPI) {
   pi.registerFlag("toolview-card", { type: "string", description: "Additional comma-separated tool names that retain native cards" });
   pi.registerFlag("toolview-compact", { type: "string", description: "Comma-separated tool names that use compact summaries instead of native cards" });
-  pi.registerFlag("toolview-cache-mb", { type: "string", description: "Retained render-cache budget in MiB (0–64; default 8)" });
-  let cacheMiB: number | undefined;
-  function cacheLimit(text: string): number {
+  pi.registerFlag("toolview-cache-mb", { type: "string", description: "Ordinary render-cache budget in MiB (0–64; default 8)" });
+  pi.registerFlag("toolview-card-cache-mb", { type: "string", description: "Bash/edit-diff render-cache budget in MiB (0–128; default 128)" });
+  let cacheMiB: number | undefined, cardCacheMiB: number | undefined;
+  function cacheLimit(text: string, maximum = 64): number {
     const value = Number(text);
-    if (!text.trim() || !Number.isFinite(value) || value < 0 || value > 64) throw new RangeError("Cache limit must be 0–64 MiB");
+    if (!text.trim() || !Number.isFinite(value) || value < 0 || value > maximum) throw new RangeError(`Cache limit must be 0–${maximum} MiB`);
     return value;
   }
   let controller: ToolviewController | undefined;
@@ -610,11 +699,15 @@ export default function toolview(pi: ExtensionAPI) {
       try { cacheMiB = cacheLimit(String(pi.getFlag("toolview-cache-mb") ?? "8")); }
       catch { ctx.ui.notify("Pi Toolview: invalid --toolview-cache-mb; using 8 MiB", "warning"); cacheMiB = 8; }
     }
+    if (cardCacheMiB === undefined) {
+      try { cardCacheMiB = cacheLimit(String(pi.getFlag("toolview-card-cache-mb") ?? "128"), 128); }
+      catch { ctx.ui.notify("Pi Toolview: invalid --toolview-card-cache-mb; using 128 MiB", "warning"); cardCacheMiB = 128; }
+    }
     // A public widget factory exposes the actual live tree, including bundled CLI classes.
     // Remove the empty widget immediately: it is not part of our layout.
     ctx.ui.setWidget("pi-toolview-capture", (tui) => {
       controller = installToolview(tui, () => ctx.ui.theme, {
-        cards: names("toolview-card"), compact: names("toolview-compact"), cacheMiB,
+        cards: names("toolview-card"), compact: names("toolview-compact"), cacheMiB, cardCacheMiB,
         warn: (message) => ctx.ui.notify(`Pi Toolview disabled: ${message}`, "warning"),
       });
       return { render: () => [], invalidate() {} };
@@ -634,8 +727,11 @@ export default function toolview(pi: ExtensionAPI) {
         else if (words.length === 3 && words[1] === "limit") {
           try { const value = cacheLimit(words[2]); controller.setCacheLimitMiB(value); cacheMiB = value; }
           catch { ctx.ui.notify("Pi Toolview: cache limit must be 0–64 MiB", "warning"); return; }
+        } else if (words.length === 4 && words[1] === "cards" && words[2] === "limit") {
+          try { const value = cacheLimit(words[3], 128); controller.setCardCacheLimitMiB(value); cardCacheMiB = value; }
+          catch { ctx.ui.notify("Pi Toolview: card cache limit must be 0–128 MiB", "warning"); return; }
         } else if (words.length !== 1) {
-          ctx.ui.notify("Usage: /toolview cache [clear|limit <MiB>]", "warning"); return;
+          ctx.ui.notify("Usage: /toolview cache [clear|limit <MiB>|cards limit <MiB>]", "warning"); return;
         }
         ctx.ui.notify(`Pi Toolview cache: ${JSON.stringify({ ...controller.cacheStats(),
           processHeapUsedBytes: process.memoryUsage().heapUsed, processMemoryScope: "whole Pi process, not Toolview" })}`, "info");
@@ -643,7 +739,7 @@ export default function toolview(pi: ExtensionAPI) {
       }
       if (command === "off") { enabled = false; controller?.restore(); }
       else if (command === "on") { enabled = true; start(ctx); }
-      else if (command !== "status") { ctx.ui.notify("Usage: /toolview on|off|status|cache [clear|limit <MiB>]", "warning"); return; }
+      else if (command !== "status") { ctx.ui.notify("Usage: /toolview on|off|status|cache [clear|limit <MiB>|cards limit <MiB>]", "warning"); return; }
       const status = controller?.active ? "on" : ctx.mode !== "tui" ? "unavailable outside terminal mode" : controller?.reason ?? "off";
       ctx.ui.notify(`Pi Toolview: ${status}`, "info");
     },

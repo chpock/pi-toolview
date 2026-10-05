@@ -1,10 +1,26 @@
 // Offline real-CLI fixture: built-ins stay real unless the isolated bash-shape opt-in is set.
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { ToolExecutionComponent, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createAssistantMessageEventStream, Type, type ToolCall } from "@earendil-works/pi-ai";
 import { Container, Text } from "@earendil-works/pi-tui";
 import { appendFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
+
+// Counter-only native wrapper; unwrap the prior fixture on reload instead of stacking observers.
+const nativeProbeKey = Symbol.for("toolview-test:native-render-original");
+function observeNativeRenders(counts: Record<string, number>) {
+  const current = ToolExecutionComponent.prototype.render as typeof ToolExecutionComponent.prototype.render & {
+    [nativeProbeKey]?: typeof ToolExecutionComponent.prototype.render;
+  };
+  const original = current[nativeProbeKey] ?? current;
+  function observed(this: ToolExecutionComponent, width: number) {
+    const name = Reflect.get(this, "toolName");
+    if (typeof name === "string") counts[name] = (counts[name] ?? 0) + 1;
+    return original.call(this, width);
+  }
+  Object.defineProperty(observed, nativeProbeKey, { value: original });
+  ToolExecutionComponent.prototype.render = observed;
+}
 
 export default function terminalDriver(pi: ExtensionAPI) {
   const output = process.env.TOOLVIEW_TEST_OUTPUT!;
@@ -12,6 +28,10 @@ export default function terminalDriver(pi: ExtensionAPI) {
   const record = (event: object) => appendFileSync(join(output, "events.jsonl"), JSON.stringify(event) + "\n");
   const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
   // Opt-in UI-clock observations only: real timers/render requests, no model/session mutation.
+  const editPerformance = process.env.TOOLVIEW_TEST_EDIT_PERFORMANCE === "1";
+  const editDiagnostics = process.env.TOOLVIEW_TEST_EDIT_CARDS === "1" || editPerformance;
+  const nativeRenderCalls: Record<string, number> = {};
+  if (editDiagnostics) observeNativeRenders(nativeRenderCalls);
   const userDiagnostics = process.env.TOOLVIEW_TEST_USER_CARDS === "1";
   const userWork = { transforms: 0, widths: [] as number[] };
   if (userDiagnostics) pi.registerMarkdownTransformer((text, context) => {
@@ -272,6 +292,27 @@ export default function terminalDriver(pi: ExtensionAPI) {
     { name: "tv_summary", arguments: { target: ["src/" + "t".repeat(50), "tests/文件/" + "u".repeat(40)], query: "named", fixtureError: true } },
     { name: "tv_summary", arguments: { query: "SUCCESS_CALL" } },
   ];
+  const editSuite: Pick<ToolCall, "name" | "arguments">[] = [
+    { name: "edit", arguments: { path: "edit-example.ts", edits: [
+      { oldText: "export const before = 10;", newText: "export const after = 20;\nconst inserted = 30;" },
+      { oldText: 'const context7 = 7;', newText: 'const rewritten = 70;' },
+      { oldText: 'const label = "old";', newText: 'const label = "new";' },
+      { oldText: 'const multiline = `first', newText: 'const multiline = `changed' },
+    ] } },
+    { name: "edit", arguments: { path: "edit-long.ts", oldText: 'const before = "' + "before 界é ".repeat(14) + '";',
+      newText: 'const after = "' + "after 界é ".repeat(22) + '";' } },
+    { name: "edit", arguments: { path: "edit-example.ts", oldText: "NONEXISTENT_EDIT", newText: "FAILURE_PROPOSAL" } },
+    { name: "edit", arguments: { path: "missing-edit.ts", oldText: "before", newText: "after" } },
+    { name: "edit", arguments: { path: "index.html",
+      oldText: '  <style>\n    :root { --bg: #0b1020; }\n    body { background: radial-gradient(ellipse at 50% 8%, #202b52 0, #10172c 38%, var(--bg) 75%); }\n    .app { width: min(100%, 760px); }\n  </style>\n</head>',
+       newText: '  <link rel="stylesheet" href="styles.css">' } },
+    { name: "edit", arguments: { path: "edit-direction.ts", oldText: "const retained = 1;\n", newText: "const retained = 1;\nconst addOnly = 4;\n" } },
+    { name: "edit", arguments: { path: "edit-direction.ts", oldText: "const removeOnly = 2;\n", newText: "" } },
+  ];
+  const editPerformanceSuite: Pick<ToolCall, "name" | "arguments">[] = [
+    { name: "edit", arguments: { path: "edit-minified.ts", oldText: "x+=1;".repeat(3200), newText: "x+=2;".repeat(3200) } },
+    { name: "read", arguments: { path: "a.txt", offset: 1, limit: 1 } },
+  ];
   const suite: Pick<ToolCall, "name" | "arguments">[] = [
     { name: "read", arguments: { path: "a.txt", offset: 1, limit: 1 } },
     { name: "read", arguments: { path: "b.txt" } },
@@ -300,7 +341,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
         const user: any = context.messages[last];
         const prompt = typeof user?.content === "string" ? user.content :
           user?.content?.filter((c: any) => c.type === "text").map((c: any) => c.text).join("");
-        const scenario = prompt?.includes("run user-card") ? "user-card" : prompt === "run cache-performance" ? "cache-performance" : prompt?.includes("bash-width") ? "bash-width" : prompt?.includes("bash-stream") ? "bash-stream" : prompt?.includes("bash-real") ? "bash-real" :
+        const scenario = prompt?.includes("run edit-performance") ? "edit-performance" : prompt?.includes("run edit-cards") ? "edit-cards" : prompt?.includes("run user-card") ? "user-card" : prompt === "run cache-performance" ? "cache-performance" : prompt?.includes("bash-width") ? "bash-width" : prompt?.includes("bash-stream") ? "bash-stream" : prompt?.includes("bash-real") ? "bash-real" :
           prompt?.includes("bash-shape-exception-stream") ? "bash-shape-exception-stream" : prompt?.includes("bash-shape-exceptions") ? "bash-shape-exceptions" :
           prompt?.includes("bash-shape-stream") ? "bash-shape-stream" : prompt?.includes("bash-shapes") ? "bash-shapes" :
           prompt?.includes("compact-errors") ? "compact-errors" : prompt?.includes("comma-wrap") ? "comma-wrap" : prompt?.includes("boundary") ? "boundary" : prompt?.includes("multiline") ? "multiline" : prompt?.includes("integration") ? "integration" :
@@ -312,7 +353,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
         })) });
         if (scenario.startsWith("bash-shape") && !bashShape) throw new Error("bash-shape scenario requires explicit isolated opt-in");
         if (["cache-performance", "bash-width", "bash-real", "bash-stream", "suite", "multiline"].includes(scenario) && bashShape) throw new Error("Built-in scenario cannot run with bash-shape opt-in");
-        const calls: Pick<ToolCall, "name" | "arguments">[] = scenario === "user-card" ? [
+        const calls: Pick<ToolCall, "name" | "arguments">[] = scenario === "edit-performance" ? editPerformanceSuite : scenario === "edit-cards" ? editSuite : scenario === "user-card" ? [
           { name: "bash", arguments: { command: "printf 'USER_BASH_OUTPUT\\n'" } },
           { name: "read", arguments: { path: "a.txt" } },
         ] : scenario === "cache-performance" ? cacheSuite : scenario === "bash-width" ? bashWidth : scenario === "bash-real" ? bashReal : scenario === "bash-shapes" ? bashShapes :
@@ -347,7 +388,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
           await wait(60);
           message.content[0] = call;
           stream.push({ type: "toolcall_delta", contentIndex: 0, delta: JSON.stringify(call.arguments), partial: message });
-          if ((scenario === "pending" || scenario === "bash-stream") && step === 0) {
+          if ((scenario === "pending" || scenario === "bash-stream" || scenario === "edit-cards") && step === 0) {
             record({ type: "provider_gate" });
             await gate("provider-go", options?.signal);
           }
@@ -386,8 +427,16 @@ export default function terminalDriver(pi: ExtensionAPI) {
     });
     ctx.ui.setWidget("terminal-driver", undefined);
   });
-  pi.on("tool_call", (event) => {
+  let editExecutionGated = false;
+  pi.on("tool_call", async (event) => {
     record({ type: "call", name: event.toolName, input: event.input });
+    // Await after native execution-start, without replacing the actual built-in edit implementation.
+    if (!editExecutionGated && process.env.TOOLVIEW_TEST_EDIT_CARDS === "1" && event.toolName === "edit" &&
+      event.input.path === "edit-example.ts" && Array.isArray(event.input.edits)) {
+      editExecutionGated = true;
+      record({ type: "edit_execution_gate" });
+      await gate("edit-execution-go");
+    }
     // Installed-profile requests are restricted to the two audited, real local task tools.
     if (process.env.TOOLVIEW_TEST_PROFILE === "installed" && !["TaskCreate", "TaskList"].includes(event.toolName)) {
       record({ type: "unsafe_call_blocked", name: event.toolName });
@@ -470,6 +519,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
       writeFileSync(join(output, `${name}.json`), JSON.stringify({
         session: ctx.sessionManager.getSessionFile(), width, cwd: ctx.cwd, bashShape,
         ...(spinnerDiagnostics ? { spinnerStats, spinnerWork } : {}),
+        ...(editDiagnostics ? { nativeRenderCalls } : {}),
         selectionActive: typeof tui.hasActiveSelection === "function" ? tui.hasActiveSelection() : false,
         frameStyles: {
           border: ctx.ui.theme.fg("borderMuted", "┃"),
@@ -479,7 +529,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
         registrations: pi.getAllTools().map((tool) => tool.name),
         commands: pi.getCommands().map((command) => command.name),
         errorStyle: ctx.ui.theme.fg("error", "TERMINAL_ERROR"),
-        summaryStyles: Object.fromEntries((["dim", "toolTitle", "muted", "toolOutput", "error", "userMessageText"] as const)
+        summaryStyles: Object.fromEntries((["dim", "toolTitle", "muted", "toolOutput", "error", "userMessageText", "syntaxKeyword", "syntaxNumber", "syntaxString", "syntaxComment", "syntaxFunction", "syntaxType", "toolDiffAdded", "toolDiffRemoved"] as const)
           .map((role) => [role, ctx.ui.theme.fg(role, "X")])),
         backgroundStyles: Object.fromEntries((["toolPendingBg", "toolSuccessBg", "toolErrorBg", "userMessageBg"] as const)
           .map((role) => [role, ctx.ui.theme.bg(role, "X")])),
@@ -507,7 +557,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
           ...(spinnerDiagnostics ? { before: parents.get(node)?.children.slice(Math.max(0, parents.get(node).children.indexOf(node) - 3), parents.get(node).children.indexOf(node))
             .map((previous: any) => ({ kind: previous.constructor.name, name: previous.toolName, lines: previous.render(width).map(stripVTControlCharacters) })) } : {}),
           // Pointer/clock-work captures inspect only actual viewport paint; alternate widths intentionally rebuild layouts and width zero stops/restarts animation.
-          ...(name.startsWith("pointer-") || spinnerDiagnostics ? {} : { narrowLines: node.render(24),
+          ...(name.startsWith("pointer-") || spinnerDiagnostics || editDiagnostics ? {} : { narrowLines: node.render(24),
             tinyLines: Object.fromEntries([0, 1, 2, 3, 4, 5, 6, 7, 8].map((size) => [size, node.render(size)])) }) })),
         document: parents.get(tools[0])?.render(width),
         branch: ctx.sessionManager.getBranch(),

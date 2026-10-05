@@ -20,7 +20,9 @@ export class RenderCache {
   private skips = 0;
   private limitBytes: number;
   private maxEntries: number;
-  constructor(limitBytes = 8 * 1024 * 1024, maxEntries = 2048) {
+  private maxLimitBytes: number;
+  constructor(limitBytes = 8 * 1024 * 1024, maxEntries = 2048, maxLimitBytes = 64 * 1024 * 1024) {
+    this.maxLimitBytes = maxLimitBytes;
     this.limitBytes = limitBytes; this.maxEntries = maxEntries;
     this.setLimit(limitBytes);
   }
@@ -51,7 +53,7 @@ export class RenderCache {
     if (entry) { this.drop(entry); this.evictions++; }
   }
   setLimit(bytes: number) {
-    if (!Number.isFinite(bytes) || bytes < 0 || bytes > 64 * 1024 * 1024) throw new RangeError("Cache limit must be 0–64 MiB");
+    if (!Number.isFinite(bytes) || bytes < 0 || bytes > this.maxLimitBytes) throw new RangeError(`Cache limit must be 0–${this.maxLimitBytes / 1024 / 1024} MiB`);
     this.limitBytes = Math.floor(bytes);
     while (this.retainedBytes > this.limitBytes) this.evict();
   }

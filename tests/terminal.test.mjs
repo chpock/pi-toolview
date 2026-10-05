@@ -70,6 +70,17 @@ export class PiTerminal {
     if (!session) rmSync(join(this.work, 'written.txt'), { force: true });
     writeFileSync(join(this.work, 'a.txt'), 'READ_A_CONTENT\n');
     writeFileSync(join(this.work, 'b.txt'), 'READ_B_CONTENT\n');
+    if (!session) {
+      if (extraEnv.TOOLVIEW_TEST_EDIT_PERFORMANCE === '1') writeFileSync(join(this.work, 'edit-minified.ts'), 'x+=1;'.repeat(3200) + '\n');
+      writeFileSync(join(this.work, 'edit-example.ts'), 'export const before = 10;\n' +
+        Array.from({ length: 18 }, (_, i) => `const context${i} = ${i};`).join('\n') +
+        '\nconst label = "old";\nexport function greet(name: string) { return "hello"; }\n/* syntax comment\ncontinued comment */\nconst multiline = `first\ncontinued template\nend`;\n');
+      writeFileSync(join(this.work, 'edit-direction.ts'), 'const retained = 1;\nconst removeOnly = 2;\nconst directionTail = 3;\n');
+      writeFileSync(join(this.work, 'edit-long.ts'), 'const before = "' + 'before 界é '.repeat(14) + '";\nconst tail = 40;\n');
+      writeFileSync(join(this.work, 'index.html'), '<!doctype html>\n<html>\n<head>\n  <meta charset="utf-8">\n' +
+        '  <meta name="viewport" content="width=device-width, initial-scale=1">\n  <meta name="theme-color" content="#0b1020">\n  <title>Neon Blocks — Tetris</title>\n' +
+        '  <style>\n    :root { --bg: #0b1020; }\n    body { background: radial-gradient(ellipse at 50% 8%, #202b52 0, #10172c 38%, var(--bg) 75%); }\n    .app { width: min(100%, 760px); }\n  </style>\n</head>\n<body>\n  <main class="app">\n</body>\n</html>\n');
+    }
     writeFileSync(join(this.work, 'abcdefghijklm'), 'BOUNDARY_READ_CONTENT\n');
     mkdirSync(join(this.work, 'long-directory'), { recursive: true });
     writeFileSync(join(this.work, 'long-directory', 'r'.repeat(180) + '.txt'), 'LONG_READ_CONTENT\n');
@@ -446,9 +457,11 @@ test('real CLI: Toolview policy, input, lifecycle and same-session stock replay'
       assert.deepEqual(persisted(collapsed), persisted(control), 'persisted tool messages stay unchanged');
       assert.equal(readFileSync(join(live.work, 'written.txt'), 'utf8'), 'WRITE_AFTER\n');
       // Only cross-run live bash runtime text is normalized; same-process and replay checks below are exact.
-      for (const name of ['write', 'edit'])
+      for (const name of ['write'])
         assert.deepEqual(toolLines({ tools: byName(collapsed, name) }),
           toolLines({ tools: byName(control, name) }), `native ${name} card`);
+      assert.ok(byName(collapsed, 'edit')[0].lines.some((row) => plain(row).includes('← Edited written.txt')), 'edit now uses the custom numbered diff card');
+      assert.ok(byName(collapsed, 'edit')[0].lines.some((row) => /1 \+ WRITE_AFTER/.test(plain(row))));
       live.send('\x0f'); await live.settle(); const expanded = await live.capture('expanded');
       assert.ok(expanded.tools.every((tool) => tool.expanded));
       simpleBashCards(expanded);
@@ -515,7 +528,7 @@ test('real CLI: Toolview policy, input, lifecycle and same-session stock replay'
       const resumed = await replay.capture('collapsed'); compact(resumed); simpleBashCards(resumed);
       const nativeReplay = await start('stock-replay', { session, workspace: stock.work });
       const native = await nativeReplay.capture('collapsed');
-      for (const name of ['write', 'edit'])
+      for (const name of ['write'])
         assert.deepEqual(byName(resumed, name).map((t) => t.lines), byName(native, name).map((t) => t.lines), `same-session native ${name} replay`);
       assert.deepEqual(resumed.tools.map(({ name, content }) => ({ name, content })), beforeReplay.tools.map(({ name, content }) => ({ name, content })));
       await replay.command('/toolview off'); const disabledReplay = await replay.capture('disabled');
@@ -2206,13 +2219,21 @@ test('real CLI: render cache work counters and bounded retained memory',
       const stats = dump.cacheDiagnostics.at(-1);
       assert.ok(stats, 'real cache command produced a JSON notification in the native tree');
       assert.deepEqual(Object.keys(stats).sort(), ['retainedBytes', 'limitBytes', 'entries', 'hits', 'misses', 'builds',
-        'evictions', 'skips', 'processHeapUsedBytes', 'processMemoryScope'].sort(), 'diagnostic schema is explicit and bounded');
+        'evictions', 'skips', 'ordinary', 'cards', 'processHeapUsedBytes', 'processMemoryScope'].sort(), 'diagnostic schema is explicit and bounded');
       for (const key of ['retainedBytes', 'limitBytes', 'entries', 'hits', 'misses', 'builds', 'evictions', 'skips', 'processHeapUsedBytes'])
         assert.ok(Number.isSafeInteger(stats[key]) && stats[key] >= 0, `finite nonnegative diagnostic ${key}`);
       assert.equal(stats.processMemoryScope, 'whole Pi process, not Toolview');
       assert.ok(stats.processHeapUsedBytes > 0, 'process heap is sampled, not attributed to Toolview');
       assert.ok(stats.retainedBytes <= stats.limitBytes, 'retained rendered data never exceeds its current budget');
-      assert.ok(stats.entries <= 2048, 'entry count never exceeds its documented bound');
+      assert.ok(stats.entries <= 4096, 'aggregate entry count never exceeds two bounded pools');
+      for (const pool of ['ordinary', 'cards']) {
+        assert.deepEqual(Object.keys(stats[pool]).sort(), ['retainedBytes', 'limitBytes', 'entries', 'hits', 'misses', 'builds', 'evictions', 'skips'].sort());
+        assert.ok(stats[pool].entries <= 2048 && stats[pool].retainedBytes <= stats[pool].limitBytes);
+        for (const key of Object.keys(stats[pool])) {
+          assert.ok(Number.isSafeInteger(stats[pool][key]) && stats[pool][key] >= 0);
+          assert.equal(stats[key], stats.ordinary[key] + stats.cards[key], `aggregate ${key} equals the two independent pools`);
+        }
+      }
       snapshots.push({ terminal: terminal.output, name, ...stats });
       return { dump, stats };
     };
@@ -2257,7 +2278,9 @@ test('real CLI: render cache work counters and bounded retained memory',
       await panelCells(wide, 7, 'CACHE_OUTPUT_7_');
       await bashScreenStyle(wide, 'CACHE_OUTPUT_7_0010_ASCII_PAYLOAD', 'toolOutput', 'toolPendingBg');
       let { stats: previous } = await observe(live, 'warm');
-      assert.equal(previous.limitBytes, 1024 * 1024, 'initial string CLI budget is applied');
+      assert.equal(previous.ordinary.limitBytes, 1024 * 1024, 'initial string CLI ordinary budget is applied');
+      assert.equal(previous.cards.limitBytes, 128 * 1024 * 1024, 'separate card pool defaults to 128 MiB');
+      assert.equal(previous.ordinary.entries, 3); assert.equal(previous.cards.entries, 8);
       assert.equal(wide.users.length, 1, 'one actual user message joins the ten custom tool components');
        assert.equal(previous.entries, 11, 'one latest layout per eight bash, two compact tools and one user card; hidden contributes none');
       assert.ok(previous.retainedBytes > 0 && previous.builds >= 11);
@@ -2333,19 +2356,26 @@ test('real CLI: render cache work counters and bounded retained memory',
       assert.deepEqual(measured.dump.tools.map((tool) => tool.lines), wide.tools.map((tool) => tool.lines)); previous = measured.stats;
 
       // Command snapshot precedes its requested frame: reduction/clear must already be observable there.
-      const tiny = await observe(live, 'tiny-limit', '/toolview cache limit 0.02');
-      assert.equal(tiny.stats.limitBytes, Math.floor(0.02 * 1024 * 1024));
+      const tiny = await observe(live, 'tiny-limit', '/toolview cache cards limit 0.02');
+      assert.equal(tiny.stats.cards.limitBytes, Math.floor(0.02 * 1024 * 1024));
+      assert.equal(tiny.stats.ordinary.entries, 3);
+      assert.equal(tiny.stats.ordinary.evictions, previous.ordinary.evictions);
       assert.ok(tiny.stats.evictions > previous.evictions, 'limit reduction immediately evicts retained rendered data');
       measured = await observe(live, 'tiny-rendered');
       assert.ok(measured.stats.evictions > tiny.stats.evictions, 'tiny budget exercises real render-time LRU eviction');
+      assert.equal(measured.stats.ordinary.builds, previous.ordinary.builds, 'Bash pressure never rebuilds ordinary summaries/user card');
+      assert.equal(measured.stats.ordinary.evictions, previous.ordinary.evictions);
       allBashCards(measured.dump); identity(measured.dump, wide);
+      const zeroCards = await observe(live, 'zero-card-limit', '/toolview cache cards limit 0');
+      assert.equal(zeroCards.stats.cards.entries, 0); assert.equal(zeroCards.stats.ordinary.entries, 3);
       const zero = await observe(live, 'zero-limit', '/toolview cache limit 0');
       assert.equal(zero.stats.limitBytes, 0); assert.equal(zero.stats.entries, 0); assert.equal(zero.stats.retainedBytes, 0);
       measured = await observe(live, 'zero-rendered');
       assert.equal(measured.stats.entries, 0); assert.equal(measured.stats.retainedBytes, 0);
       assert.ok(measured.stats.builds > zero.stats.builds && measured.stats.skips > zero.stats.skips, 'zero disables retention, not correct rendering');
       allBashCards(measured.dump); identity(measured.dump, wide);
-      await observe(live, 'budget-restored', '/toolview cache limit 1');
+      await observe(live, 'ordinary-budget-restored', '/toolview cache limit 1');
+      await observe(live, 'budget-restored', '/toolview cache cards limit 128');
       measured = await observe(live, 'budget-warm'); assert.equal(measured.stats.entries, 11); previous = measured.stats;
       const clear = await observe(live, 'clear', '/toolview cache clear');
       assert.equal(clear.stats.entries, 0); assert.equal(clear.stats.retainedBytes, 0);
@@ -2400,7 +2430,7 @@ test('real CLI: render cache work counters and bounded retained memory',
         replayCalls: 0, replayResults: 0, replayModelContexts: 0, snapshots,
         checked: ['exact independent body oracle', 'physical panel/theme/output cells', 'native wheel/editor/no-hover frames',
           'single native result replacement/reused-object/restore', 'one latest width', 'theme rebuild counts', 'one native bash click expansion/collapse',
-          'immediate tiny-budget eviction', 'zero retention/skips', 'clear cold rebuild', 'off release/on cold', 'native/replay/session/model identity'],
+          'independent card pressure/eviction preserves ordinary builds/entries', 'zero per-pool retention/skips', 'clear cold rebuild', 'off release/on cold', 'native/replay/session/model identity'],
       }, null, 2));
     } finally { for (const terminal of terminals.reverse()) { await terminal.close(); terminal.dispose(); } }
   });
@@ -2545,5 +2575,339 @@ test('real CLI: user cards share Bash geometry with customMessageLabel and prese
         checks: ['full native content-width equality', 'customMessageLabel stripe', 'userMessageBg/userMessageText',
           'OSC 133 zones', 'native selection and Ctrl+O', 'warm transform work', 'off/on/reload', 'same-session replay and bytes'],
       }, null, 2));
+    } finally { for (const terminal of terminals.reverse()) { await terminal.close(); terminal.dispose(); } }
+  });
+
+test('real CLI: OpenCode-style edit syntax, numbered unified/split format, errors and exact replay',
+  { skip: stockOnly, timeout: 180000 }, async () => {
+    const terminals = [];
+    const start = async (name, options = {}) => {
+      const terminal = new PiTerminal(name, { extraEnv: { TOOLVIEW_TEST_EDIT_CARDS: '1' }, ...options });
+      terminals.push(terminal); await terminal.ready(); await terminal.resize(100, 160); return terminal;
+    };
+    const run = async (terminal) => {
+      const turn = terminal.events().filter((event) => event.type === 'agent_end').length;
+      terminal.send('run edit-cards\r'); await terminal.event('provider_gate');
+      const pending = await terminal.capture('pending', { animated: true });
+      assert.equal(pending.tools.length, 1);
+      assert.equal(pending.tools[0].executionStarted, false);
+      writeFileSync(join(terminal.output, 'provider-go'), 'go');
+      await terminal.event('edit_execution_gate');
+      const running = await terminal.capture('edit-running', { animated: true });
+      assert.equal(running.tools[0].executionStarted, true);
+      assert.equal(running.tools[0].partial, true);
+      assert.equal(terminal.events().filter((event) => event.type === 'call').length, 1);
+      assert.equal(terminal.events().filter((event) => event.type === 'result').length, 0);
+      writeFileSync(join(terminal.output, 'edit-execution-go'), 'go');
+      await terminal.event('agent_end', turn + 1); await terminal.settle(); return { pending, running };
+    };
+    const traffic = (terminal) => {
+      const events = terminal.events();
+      assert.equal(events.filter((event) => event.type === 'call').length, 7);
+      assert.equal(events.filter((event) => event.type === 'result').length, 7);
+      assert.equal(events.filter((event) => event.type === 'model_context').length, 8);
+      assert.deepEqual(events.filter((event) => event.type === 'result').map((event) => !!event.isError), [false, false, true, true, false, false, false]);
+      return events.filter((event) => ['call', 'result', 'model_context'].includes(event.type));
+    };
+    let checkedSyntaxCells = 0, checkedPanelCells = 0;
+    const reference = new Terminal({ cols: 100, rows: 4, allowProposedApi: true });
+    const fg = async (dump, role) => {
+      reference.reset(); await new Promise((done) => reference.write(dump.summaryStyles[role], done));
+      const cell = reference.buffer.active.getLine(0).getCell(0);
+      return { fg: cell.getFgColor(), fgMode: cell.getFgColorMode(), dim: cell.isDim() };
+    };
+    const check = async (dump, split) => {
+      assert.equal(dump.tools.length, 7);
+      const first = dump.tools[0], second = dump.tools[1];
+      const rows = lines(first);
+      assert.ok(rows.some((row) => row.includes('← Edited edit-example.ts')));
+      assert.doesNotMatch(rows.join('\n'), /@@|---|No newline|Click to expand/);
+      for (const index of [0, 1, 2, 8, 9, 10, 15, 16, 17]) assert.ok(rows.some((row) => row.includes(`const context${index} =`)), 'three following/preceding logical context rows remain visible');
+      for (const index of [3, 11, 14]) assert.ok(!rows.some((row) => row.includes(`const context${index} =`)), 'fourth context row on each side is omitted');
+      assert.equal(rows.filter((row) => /^…(?:\s+…)?$/.test(row.slice(3).trim())).length, 1, 'interior omitted interval remains visible between distant TypeScript changes');
+      const physical = dump.screen.map(plain);
+      const matched = physical.findIndex((row, y) => row === rows[0] && rows.every((value, offset) => physical[y + offset] === value));
+      assert.ok(matched >= 0, 'the full numbered diff card exists on the physical screen, not only a manual render');
+      const oldRow = rows.findIndex((row) => row.includes('export const before = 10;'));
+      const newRow = rows.findIndex((row) => row.includes('export const after = 20;'));
+      assert.equal(oldRow === newRow, split, 'real screen switches from stacked to horizontally paired old/new lines');
+      assert.match(rows[oldRow], /1 - export const before/);
+      assert.match(rows[newRow], /1 \+ export const after/);
+      const syntax = async (rowIndex, text, role) => {
+        const column = rows[rowIndex].indexOf(text); assert.ok(column >= 0, `${text} exists`);
+        const actual = dump.cells[matched + rowIndex][column];
+        assert.deepEqual({ fg: actual.fg, fgMode: actual.fgMode, dim: actual.dim }, await fg(dump, role), `${text} retains ${role} inside edit source`);
+        checkedSyntaxCells++; return actual;
+      };
+      const keyword = await syntax(oldRow, 'export', 'syntaxKeyword');
+      const oldNumber = await syntax(oldRow, '10', 'syntaxNumber');
+      const newNumber = await syntax(newRow, '20', 'syntaxNumber');
+      assert.notEqual(keyword.fg, oldNumber.fg, 'code is syntax-highlighted, not uniformly red');
+      assert.equal(keyword.bg, oldNumber.bg);
+      assert.notEqual(oldNumber.bg, newNumber.bg, 'red/green backgrounds are independent of syntax foreground');
+      assert.notEqual(oldNumber.bgMode, 0); assert.notEqual(newNumber.bgMode, 0);
+      const oldLabel = rows.findIndex((row) => row.includes('const label = "old";'));
+      const newLabel = rows.findIndex((row) => row.includes('const label = "new";'));
+      await syntax(oldLabel, '"old"', 'syntaxString'); await syntax(newLabel, '"new"', 'syntaxString');
+      const functionRow = rows.findIndex((row) => row.includes('function greet'));
+      await syntax(functionRow, 'greet', 'syntaxFunction'); await syntax(functionRow, 'string', 'syntaxType');
+      await syntax(rows.findIndex((row) => row.includes('continued comment')), 'continued comment', 'syntaxComment');
+      await syntax(rows.findIndex((row) => row.includes('continued template')), 'continued template', 'syntaxString');
+      const oldSign = await syntax(oldRow, '-', 'toolDiffRemoved'), newSign = await syntax(newRow, '+', 'toolDiffAdded');
+      const titleRow = rows.findIndex((row) => row.includes('← Edited edit-example.ts'));
+      const panel = dump.cells[matched + titleRow][2];
+      assert.equal(panel.bgMode, 0x3000000, 'physical panel supplies the RGB base for Multiply');
+      assert.equal(dump.cells[matched + oldRow][2].bg, panel.bg, 'one neutral left padding cell before diff');
+      assert.equal(dump.cells[matched + oldRow][3].bg, oldSign.bg, 'changed gutter begins at content origin without an extra diff inset');
+      assert.notEqual(oldSign.bg, panel.bg);
+      assert.notEqual(dump.cells[matched + oldRow][dump.width - 3].bg, panel.bg, 'changed diff fills the last content cell');
+      assert.equal(dump.cells[matched + oldRow][dump.width - 2].bg, panel.bg, 'one neutral right padding cell after diff');
+      const rgb = (value) => [value >>> 16, (value >>> 8) & 255, value & 255];
+      for (const [code, sign] of [[oldNumber, oldSign], [newNumber, newSign]]) {
+        assert.equal(sign.fgMode, 0x3000000, 'diff role supplies a concrete RGB overlay');
+        const base = rgb(panel.bg), overlay = rgb(sign.fg);
+        for (const [cell, alpha] of [[code, 0.16], [sign, 0.26]]) {
+          assert.equal(cell.bgMode, 0x3000000);
+          const expected = base.map((channel, index) => Math.round(channel * (1 - alpha + alpha * overlay[index] / 255)));
+          assert.deepEqual(rgb(cell.bg), expected, 'physical edit backgrounds use exact 16%/26% Multiply');
+          assert.ok(rgb(cell.bg).every((channel, index) => channel <= base[index]), 'no physical background channel is brighter than the panel');
+        }
+      }
+      for (const tool of [first, second, ...dump.tools.slice(4)]) {
+        await assertFits(tool.lines, dump.width);
+        const block = lines(tool);
+        const heading = block.findIndex((row) => row.includes('← Edited'));
+        assert.equal(block[heading].indexOf('←'), 3, 'edit title shares the physical Bash-description content origin');
+        const sourceRows = block.slice(heading + 2, -1).map((row) => row.slice(3).trim()).filter(Boolean);
+        assert.ok(sourceRows.length);
+        assert.doesNotMatch(sourceRows[0], /^…(?:\s+…)?$/, 'no leading omission marker');
+        assert.doesNotMatch(sourceRows.at(-1), /^…(?:\s+…)?$/, 'no trailing omission marker');
+        const start = physical.findIndex((row, y) => row === block[0] && block.every((value, offset) => physical[y + offset] === value));
+        assert.ok(start >= 0, 'each complete diff card is present on the physical screen');
+        for (let y = 0; y < block.length; y++) {
+          if (block[y][1] !== '┃') continue; // Exclude native adaptive separators.
+          const cells = dump.cells[start + y];
+          for (let x = 2; x < dump.width - 1; x++) {
+            assert.equal(cells[x].bgMode, 0x3000000, 'nested diff resets cannot expose page background inside any panel cell');
+            checkedPanelCells++;
+          }
+          assert.equal(cells[dump.width - 2].bg, panel.bg, 'last internal right padding cell keeps the neutral card background');
+          assert.equal(cells[dump.width - 1].bgMode, 0, 'exterior right margin stays page-colored');
+        }
+      }
+      for (const [index, sign, code] of [[5, '+', 'const addOnly = 4;'], [6, '-', 'const removeOnly = 2;']]) {
+        const tool = dump.tools[index], block = lines(tool);
+        assert.equal(block.join('\n').split('const retained = 1;').length - 1, 1, 'one-sided context is unified even at wide widths');
+        const sourceIndex = block.findIndex(row => row.includes(code)), source = block[sourceIndex];
+        assert.ok(source); assert.ok(source.includes(`${index === 5 ? 2 : 3} ${sign} ${code}`), 'original changed line numbers/signs are preserved');
+        assert.ok(source.indexOf(code) < dump.width / 2, 'addition/removal both use the left unified gutter');
+        assert.ok(tool.details.diff.split('\n').some(row => row.startsWith(sign)));
+        assert.ok(!tool.details.diff.split('\n').some(row => row.startsWith(sign === '+' ? '-' : '+')), 'actual persisted diff is one-sided');
+        const start = physical.findIndex((row, y) => row === block[0] && block.every((value, offset) => physical[y + offset] === value));
+        assert.ok(start >= 0);
+        const keyword = dump.cells[start + sourceIndex][source.indexOf('const')];
+        assert.deepEqual({ fg: keyword.fg, fgMode: keyword.fgMode, dim: keyword.dim }, await fg(dump, 'syntaxKeyword'));
+        checkedSyntaxCells++;
+        assert.equal(dump.cells[start + sourceIndex][dump.width - 3].bg, keyword.bg, 'changed unified background fills the whole content width, with no empty half-pane');
+      }
+      const html = lines(dump.tools[4]);
+      assert.ok(!html.some((row) => row.includes('charset="utf-8"')), 'HTML fourth preceding context line is omitted');
+      assert.ok(!html.some((row) => row.includes('</html>')), 'HTML fourth following context line is omitted');
+      const htmlStart = physical.findIndex((row, y) => row === html[0] && html.every((value, offset) => physical[y + offset] === value));
+      const link = html.findIndex((row) => row.includes('<link rel="stylesheet"'));
+      const body = html.findIndex((row) => row.includes('<body>'));
+      assert.ok(link >= 0 && body > link);
+      if (split) {
+        assert.ok(body > link + 2, 'the HTML replacement has unmatched removed rows before the next context');
+        const rightX = 3 + Math.floor((dump.width - 5) / 2);
+        let emptyRows = 0;
+        for (let y = link + 1; y < body; y++) {
+          if (html[y].slice(rightX, dump.width - 2).trim()) continue;
+          emptyRows++;
+          for (let x = rightX; x < dump.width - 2; x++) assert.equal(dump.cells[htmlStart + y][x].bg, panel.bg, 'empty added-side counterparts use card background, never page background');
+        }
+        assert.ok(emptyRows > 0, 'actual HTML output exercises blank right-hand counterparts');
+      }
+      const tail = lines(second).filter((row) => row.includes('const tail = 40;'));
+      assert.equal(tail.length, 1, 'wrapped replacement does not duplicate the next context row');
+      if (split) assert.equal(tail[0].match(/const tail = 40;/g)?.length, 2, 'unequal wrapped panes realign the following context');
+      for (const failed of [dump.tools[2], dump.tools[3]]) {
+        compactContent(failed);
+        assert.doesNotMatch(lines(failed).join(''), /┃|← Edited|Could not find|ENOENT/);
+        const failureRows = lines(failed);
+        const y = physical.findIndex((row, index) => row === failureRows[0] && failureRows.every((value, offset) => physical[index + offset] === value));
+        assert.ok(y >= 0, 'the complete failed edit summary exists on the physical screen');
+        for (let offset = 0; offset < failureRows.length; offset++) for (const cell of dump.cells[y + offset]) {
+          if (!cell.text.trim()) continue;
+          assert.deepEqual({ fg: cell.fg, fgMode: cell.fgMode, dim: cell.dim }, await fg(dump, 'error'));
+        }
+      }
+    };
+    try {
+      const stock = await start('edit-stock'); await run(stock); const native = await stock.capture('native');
+      assert.ok(native.nativeRenderCalls.edit > 0, 'stock control proves the native counter is active');
+      stock.send('\x0f'); await stock.settle(); const nativeExpanded = await stock.capture('expanded');
+      const live = await start('edit-toolview', { toolview: true, workspace: stock.work });
+      // Recreate only the four owned fixture inputs; no runtime package or project file is modified.
+      const { pending, running } = await run(live);
+      for (const dump of [pending, running]) assert.equal(dump.nativeRenderCalls.edit ?? 0, 0, 'stock edit streaming/execution performs no native visibility render');
+      compactContent(pending.tools[0]);
+      assert.match(lines(pending.tools[0]).join(''), /⚙ edit edit-example.ts/);
+      assert.doesNotMatch(lines(pending.tools[0]).join(''), /┃|← Edited/);
+      assert.match(lines(running.tools[0]).join(''), /^[\s]*[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] edit edit-example.ts/);
+      assert.doesNotMatch(lines(running.tools[0]).join(''), /┃|← Edited/);
+      const wide = await live.capture('unified'); await check(wide, false);
+      assert.equal(wide.nativeRenderCalls.edit ?? 0, 0, 'five cards and two failed summaries never build discarded native rows');
+      assert.deepEqual(traffic(live), traffic(stock), '7 actual calls/results and 8 provider contexts are identical');
+      assert.deepEqual(persisted(wide), persisted(native), 'the renderer never changes persisted diff/proposal/error bytes');
+      const sessionBytes = readFileSync(wide.session);
+      await live.resize(140, 160); const split = await live.capture('split'); await check(split, true);
+      await live.resize(141, 160); await check(await live.capture('split-odd'), true);
+      await live.command('/tv-theme light'); await check(await live.capture('split-light'), true);
+      await live.resize(24, 160); const narrow = await live.capture('narrow');
+      for (const tool of narrow.tools) await assertFits(tool.lines, 24);
+      await live.resize(100, 160); await live.command('/tv-theme dark');
+      const unified = await live.capture('unified-again'); await check(unified, false);
+      assert.equal(unified.nativeRenderCalls.edit ?? 0, 0, 'resize/theme changes do not reinstate native visibility work');
+      assert.deepEqual(toolLines(unified), toolLines(wide), 'resize/theme round trip retains complete code and styling');
+      live.send('\x0f'); await live.settle(); const expanded = await live.capture('expanded');
+      assert.deepEqual(toolLines(expanded), toolLines(nativeExpanded), 'Ctrl+O exposes the unchanged full native presentation');
+      assert.ok(expanded.nativeRenderCalls.edit > 0, 'expansion still visits the actual native renderer');
+      live.send('\x0f'); await live.settle();
+      const successful = await live.capture('before-successful-click');
+      const successY = successful.screen.findIndex((row) => row.includes('← Edited edit-example.ts') && row.includes('┃'));
+      assert.ok(successY >= 0);
+      live.send(`\x1b[<0;8;${successY + 1}M\x1b[<0;8;${successY + 1}m`); await live.settle();
+      const successClicked = await live.capture('successful-click');
+      assert.equal(successClicked.tools[0].expanded, true, 'a real completed diff-panel click expands only that edit');
+      assert.equal(successClicked.tools[1].expanded, false);
+      assert.deepEqual(successClicked.tools[0].lines, nativeExpanded.tools[0].lines);
+      live.send('\x0f'); await live.settle(); live.send('\x0f'); await live.settle();
+      const failed = await live.capture('before-failed-click');
+      const failedRows = lines(failed.tools[2]);
+      const y = failed.screen.map(plain).findIndex((row, index) => row === failedRows[0] && failedRows.every((value, offset) => plain(failed.screen[index + offset] ?? '') === value));
+      assert.ok(y >= 0);
+      live.send(`\x1b[<0;8;${y + 1}M\x1b[<0;8;${y + 1}m`); await live.settle();
+      const clicked = await live.capture('failed-click'); assert.equal(clicked.tools[2].expanded, true);
+      assert.deepEqual(clicked.tools[2].lines, nativeExpanded.tools[2].lines, 'click exposes native failure details');
+      // Ctrl+O is still the host's global expansion toggle.
+      live.send('\x0f'); await live.settle(); live.send('\x0f'); await live.settle();
+      await live.command('/toolview off'); assert.deepEqual(toolLines(await live.capture('off')), toolLines(native));
+      await live.command('/toolview on'); await check(await live.capture('on'), false);
+      const starts = live.events().filter((event) => event.type === 'start').length;
+      await live.command('/reload'); await live.event('start', starts + 1); const reloaded = await live.capture('reload'); await check(reloaded, false);
+      await live.command('/toolview cache'); const warm = await live.capture('warm');
+      await live.command('/toolview cache'); const warmAgain = await live.capture('warm-again');
+      assert.equal(warmAgain.cacheDiagnostics.at(-1).builds, warm.cacheDiagnostics.at(-1).builds, 'warm CLI frames do not rebuild/re-highlight edit layouts');
+      assert.equal(warmAgain.nativeRenderCalls.edit ?? 0, 0, 'reload resets fixture counters and warm custom frames still skip native rows');
+      assert.deepEqual(traffic(live), traffic(stock)); assert.deepEqual(readFileSync(wide.session), sessionBytes);
+      await live.close();
+      for (const mode of ['fullscreen', 'regular']) {
+        const replay = await start(`edit-replay-${mode}`, { toolview: true, session: wide.session, workspace: stock.work, mode });
+        const resumed = await replay.capture('replayed'); await check(resumed, false);
+        assert.deepEqual(toolLines(resumed), toolLines(wide)); assert.deepEqual(persisted(resumed), persisted(wide));
+        assert.equal(resumed.nativeRenderCalls.edit ?? 0, 0, `${mode} replay uses the native-free custom path`);
+      }
+      // Native live calls have an async preview; native replay does not recompute it.
+      // Compare the explicit override with unpatched Pi replaying the identical session.
+      const stockReplay = await start('edit-stock-replay', { session: wide.session, workspace: stock.work });
+      const nativeReplayed = await stockReplay.capture('native-replay');
+      const optedOut = await start('edit-native-override', { toolview: true, session: wide.session, workspace: stock.work, flags: ['--toolview-card', 'edit'] });
+      assert.deepEqual(toolLines(await optedOut.capture('native-override')), toolLines(nativeReplayed));
+      const compactEdit = await start('edit-compact-override', { toolview: true, session: wide.session, workspace: stock.work, flags: ['--toolview-compact', 'edit'] });
+      for (const tool of (await compactEdit.capture('compact-override')).tools) compactContent(tool);
+      writeFileSync(join(artifacts, 'edit-coverage.json'), JSON.stringify({ calls: 7, results: 7, modelContexts: 8,
+        oneSidedUnified: ['addition-only', 'removal-only'],
+        checkedSyntaxCells, checkedPanelCells, widths: [24, 100, 140, 141], modes: ['fullscreen', 'regular'], themes: ['dark', 'light'],
+        format: 'Ordinary compact edit while arguments stream/execute; wholly error-colored failed summaries; final successes use Bash-aligned Edited diff cards with context3 and symmetric padding',
+        identity: 'exact traffic, persisted metadata and unchanged session bytes',
+        cache: 'zero extra warm-frame builds; no alternate-width diagnostic probes',
+        nativeWork: 'zero native edit renders while custom (pending/running/failure/success/resize/theme/reload/replay); stock/expanded controls are positive',
+        scope: 'actual built-in edit; no installed AFT execution or pixel-perfect OpenCode screenshot claim' }, null, 2));
+    } finally {
+      reference.dispose();
+      for (const terminal of terminals.reverse()) { await terminal.close(); terminal.dispose(); }
+    }
+  });
+
+
+test('real CLI: minified edit keeps linear ANSI size, warm work, exact traffic and replay',
+  { skip: stockOnly, timeout: 180000 }, async () => {
+    const terminals = [], snapshots = [];
+    const start = async (name, options = {}) => {
+      const terminal = new PiTerminal(name, { extraEnv: { TOOLVIEW_TEST_EDIT_PERFORMANCE: '1' }, ...options });
+      terminals.push(terminal); await terminal.ready(); return terminal;
+    };
+    const traffic = (terminal) => {
+      const events = terminal.events().filter((event) => ['call', 'result', 'model_context'].includes(event.type));
+      for (const [type, count] of [['call', 2], ['result', 2], ['model_context', 3]])
+        assert.equal(events.filter((event) => event.type === type).length, count);
+      return events;
+    };
+    const check = (dump, stacked = true) => {
+      assert.equal(dump.tools.length, 2); assert.equal(dump.extensionIssues.length, 0);
+      const edit = dump.tools[0], rows = lines(edit);
+      assert.ok(rows.some((row) => row.includes('← Edited edit-minified.ts')));
+      const sourceUnits = edit.details.patch.length;
+      const chars = edit.lines.reduce((sum, row) => sum + row.length, 0);
+      assert.ok(chars < sourceUnits * 20, `${chars} rendered units for ${sourceUnits} patch units`);
+      if (stacked) {
+        const old = rows.findIndex((row) => /1 - x/.test(row)), next = rows.findIndex((row) => /1 \+ x/.test(row));
+        assert.ok(old >= 0 && next > old);
+        // `lines()` already removes right padding; skip only stripe/padding and the numbered gutter.
+        const code = (section) => section.map((row) => row.slice(8)).join('');
+        assert.equal(code(rows.slice(old, next)), 'x+=1;'.repeat(3200), 'every removed source character remains');
+        assert.equal(code(rows.slice(next, -1)), 'x+=2;'.repeat(3200), 'every added source character remains');
+      }
+      assert.ok(dump.screen.some((row) => row.includes('x+=2;')), 'real terminal viewport contains the long diff');
+      snapshots.push({ width: dump.width, sourceUnits, renderedUnits: chars, rows: rows.length });
+      return chars;
+    };
+    const observe = async (terminal, name) => {
+      await terminal.command('/toolview cache');
+      const dump = await terminal.capture(`pointer-minified-${name}`), stats = dump.cacheDiagnostics.at(-1);
+      assert.ok(stats);
+      assert.equal(stats.ordinary.limitBytes, 8 * 1024 * 1024, 'ordinary default remains 8 MiB');
+      assert.equal(stats.cards.limitBytes, 128 * 1024 * 1024, 'diff uses the separate 128 MiB card pool');
+      assert.equal(stats.limitBytes, 136 * 1024 * 1024, 'aggregate budget is the sum, not the old shared limit');
+      assert.equal(stats.cards.entries, 1, 'the actual minified diff is retained in the card pool');
+      return { dump, stats };
+    };
+    try {
+      const stock = await start('minified-stock'); await stock.run('edit-performance');
+      const native = await stock.capture('native-minified');
+      const live = await start('minified-live', { toolview: true, workspace: stock.work }); await live.run('edit-performance');
+      const wide = await live.capture('pointer-minified-wide'); check(wide);
+      assert.deepEqual(traffic(live), traffic(stock)); assert.deepEqual(persisted(wide), persisted(native));
+      const bytes = readFileSync(wide.session);
+      const warm = await observe(live, 'warm'); check(warm.dump);
+      const again = await observe(live, 'again'); check(again.dump);
+      assert.equal(again.stats.builds, warm.stats.builds, 'unchanged real frames do no custom rebuilds');
+      assert.equal(again.stats.skips, warm.stats.skips, 'the formerly oversized minified card is not rejected');
+      for (const width of [140, 100]) {
+        await live.resize(width); check(await live.capture(`pointer-minified-width-${width}`), width <= 120);
+      }
+      await live.command('/tv-theme light'); check(await live.capture('pointer-minified-light'));
+      await live.command('/tv-theme dark'); const dark = await live.capture('pointer-minified-dark'); check(dark);
+      const numeric = dark.cells.flat().filter((cell) => cell?.text === '2');
+      const reference = new Terminal({ cols: 4, rows: 2, allowProposedApi: true });
+      try {
+        await new Promise((done) => reference.write(dark.summaryStyles.syntaxNumber, done));
+        const expected = reference.buffer.active.getLine(0).getCell(0);
+        assert.ok(numeric.some((cell) => cell.fg === expected.getFgColor() && cell.fgMode === expected.getFgColorMode()),
+          'wrapped minified numbers retain native syntax foreground on the physical screen');
+      } finally { reference.dispose(); }
+      assert.deepEqual(traffic(live), traffic(stock)); assert.deepEqual(readFileSync(wide.session), bytes);
+      await live.close();
+      for (const mode of ['fullscreen', 'regular']) {
+        const replay = await start(`minified-replay-${mode}`, { toolview: true, session: wide.session, workspace: stock.work, mode });
+        const resumed = await replay.capture('pointer-minified-replayed'); check(resumed);
+        assert.deepEqual(toolLines(resumed), toolLines(wide)); assert.deepEqual(persisted(resumed), persisted(wide));
+        assert.equal(replay.events().filter((event) => ['call', 'result', 'model_context'].includes(event.type)).length, 0);
+      }
+      writeFileSync(join(artifacts, 'edit-performance-coverage.json'), JSON.stringify({ calls: 2, results: 2, modelContexts: 3,
+        defaultBudgetMiB: 8, warmBuildsBefore: warm.stats.builds, warmBuildsAfter: again.stats.builds,
+        snapshots, identity: 'exact traffic, persisted metadata, session bytes and regular/fullscreen replay',
+        scope: 'actual built-in edit/read; no cache policy change, truncation or timing threshold' }, null, 2));
     } finally { for (const terminal of terminals.reverse()) { await terminal.close(); terminal.dispose(); } }
   });

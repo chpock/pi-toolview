@@ -1,6 +1,6 @@
 # Tool summary specification
 
-Status: accepted. This specification supersedes the original argument-preview heuristic and one-row-only layout. It applies to compact tool calls, independent of tool name. Native cards, ordinary-tool expansion, images and hidden renderers retain native behavior; execution and persisted data are unchanged. The separate [bash card specification](bash-card-spec.md) governs bash's default collapsed/expanded card; these summary rules apply to bash only when explicitly forced compact.
+This specification defines compact tool calls, independent of tool name. Native cards, ordinary-tool expansion, images and hidden renderers retain native behavior; execution and persisted data are unchanged. The separate [bash card specification](bash-card-spec.md) governs bash's default collapsed/expanded card; these summary rules apply to bash only when explicitly forced compact. The separate [edit card specification](edit-card-spec.md) governs edit's default collapsed presentation; these summary rules apply to edit by default before completion and on final failure, and to every state when explicitly forced compact.
 
 ## 1. Primary description
 
@@ -90,7 +90,7 @@ A content row is a row belonging to the tool visualization, excluding an extensi
 
 A fullscreen primary click on **any content row** of a completed compact call expands that call. Separator rows, pending/partial calls and wheel events do not trigger expansion. Coordinates forwarded to native handlers account for any added separator. Ctrl+O, native collapse, reload, enable/disable and history reconstruction continue to use Pi's existing mechanisms.
 
-Custom rows and neighbor metadata follow the [bounded render-cache contract](render-cache-spec.md). Unchanged UI frames reuse formatting/wrapping; width/state/theme changes rebuild affected content without a multi-width history. Visibility remains native-authoritative.
+Custom rows and neighbor metadata follow the [bounded render-cache contract](render-cache-spec.md). Unchanged UI frames reuse formatting/wrapping; width/state/theme changes rebuild affected content without a multi-width history. Visibility remains native-authoritative, including the verified stock-edit fast path described in [architecture](architecture.md#native-visibility).
 
 ## 8. Representative logical summaries
 
@@ -116,3 +116,7 @@ custom [query="find this", limit=0, api_key="<redacted>", enabled=false]
 ```
 
 All tools use the same rules. Native card policy is a separate choice; these formatting rules also apply when a normally native tool is explicitly forced compact.
+
+## Verification
+
+Use the shared [testing and coverage guide](testing.md), preserving exact argument/model/session equality, native delegation and physical width/style/input controls. Working evidence belongs in `.test-artifacts/`, not in this specification.

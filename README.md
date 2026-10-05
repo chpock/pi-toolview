@@ -1,6 +1,6 @@
 # Pi Toolview
 
-An alternative presentation for Pi: concise tool summaries, terminal-style bash cards, framed user messages, and native rich cards for other commands, writes, and diffs.
+An alternative presentation for Pi: concise tool summaries, terminal-style bash cards, framed user messages, OpenCode-style syntax-colored edit diffs, and native rich cards for other commands and writes.
 
 ```text
  → read src/app.ts [offset=5, limit=10]
@@ -38,19 +38,17 @@ Pi loads the TypeScript source directly. No build, fork, copying into `~/.pi`, o
 
 ## Behavior
 
-- Collapsed text-only tools use a summary by default, including third-party tools.
-- `bash` uses a terminal-style card: optional muted description/workdir comments, `$ ` followed by the complete command with no continuation alignment, streamed first-ten-visual-row output, and a metadata-only error/exit footer. Clicking anywhere in an expandable panel toggles full available output; Ctrl+O works too. Exterior margins are not clickable; active text selection suppresses toggling. The panel has a neutral background, left-only strip (terminal-default background in all states, the same `error` foreground as the footer on failure), one exterior and one interior column on each side. Hover highlighting is disabled; pointer motion does not change its background. See the [shared card frame specification](docs/card-frame-spec.md). Status is never inferred from output and no additional output files are read. The only semantic output exception removes a separated terminal exit footer exactly matching our metadata-derived final footer; trailing blank preview rows are removed before the expansion hint. Raw tool/model/session content is unchanged. See the [normative bash card specification](docs/bash-card-spec.md), including metadata and upstream truncation limits.
-- User messages share the Bash frame geometry, with `customMessageLabel` for the left stripe, `userMessageBg` for the panel and native `userMessageText`/Markdown styling inside. Native Markdown transformations, links, list markers, syntax highlighting, selection/copy and terminal navigation zones are preserved. User cards have no expansion or hover behavior; `/toolview off` restores the original user renderer. See the [user-message contract](docs/card-frame-spec.md#user-message-cards).
-- `powershell`, `write`, and `edit` retain their original cards/renderers.
-- Single-row summaries are adjacent. A wrapped summary gets one blank row before the following tool, without a trailing spacer or duplicate native-card separator.
-- Summaries show the exact tool name, a primary pattern/object when present, all remaining non-payload arguments, and a leading spinner during actual execution (`→` for `read`, otherwise `⚙` before/after execution). Trailing `…`/`✓`/`✗` are hidden by default; `SHOW_COMPLETION_MARKERS = false` in `src/index.ts` can be changed to `true` to restore all three. Compact summaries never show result/error bodies: expand the call for full available information.
-- The leading symbol uses `dim`, the tool name uses `toolTitle`, and the primary pattern/object uses `muted`. Named parameters are enclosed in `[]` and use `dim`; an empty block is omitted. On completed failure the entire compact summary instead uses `error`, including its leading glyph, name, primary text and parameters. These are active-theme roles, not hardcoded colors.
-- Argument formatting is tool-name independent: pattern first, otherwise the first nonempty string in `path`/`target`/`url`/`scope` (also required for `path` after a pattern). Empty strings and non-string values remain named parameters. `paths` is always a named parameter and comes first, followed by unconsumed `path`, `target`, `url`, `scope`, other important named fields and alphabetically sorted remaining fields. Strings use JSON quoting, payload fields are excluded, and exact top-level secret fields are masked. Masking does not redact native expansion, nested secrets, or saved/model data.
-- Long descriptions wrap rather than truncate. Continuations align with the tool name (three spaces), not the parameter bracket. Widths 1–5 show only the spinner during execution, otherwise the tool glyph when status markers are disabled. See the [normative summary specification](docs/tool-summary-spec.md) for the exact lists and examples.
-- Ctrl+O uses Pi's original global expansion behavior. In fullscreen mode, clicking a completed summary expands that call; clicking the expanded native card collapses it. Regular mode uses terminal-owned mouse handling, so use Ctrl+O there.
-- Expanded ordinary tools, images, and tools deliberately hidden by their renderer keep native behavior. Expanded bash remains a terminal-style card unless explicitly opted out.
-- Summaries respect the current theme and terminal column widths. Untrusted arguments cannot inject terminal controls or arbitrary newlines; wrapping is renderer-controlled.
-- Tool execution, model-facing results, and saved session data are unchanged.
+- Collapsed text-only tools use compact summaries by default, including third-party tools. Arguments wrap without truncation; payload fields are omitted and exact top-level secret fields are masked for display only.
+- Summaries show `→` for `read`, otherwise `⚙`. Actual execution replaces that glyph with a shared spinner. Final failures color the entire summary with `error`; result/error bodies stay available through native expansion. Trailing status markers are disabled by the source constant `SHOW_COMPLETION_MARKERS = false`.
+- `bash` uses a terminal-style card with the complete command, optional description/workdir, a ten-visual-row output preview and a metadata-derived error footer. Expansion shows all already-available output, never rereads output files or reconstructs upstream truncation.
+- Ordinary user messages share the frame, using `customMessageLabel` for the stripe and `userMessageBg` for the panel. Native Markdown styles, transformations, selection/copy and navigation zones are preserved; user cards have no expansion behavior.
+- `edit` uses ordinary summaries before completion and on failure. Only final success enters the syntax-colored diff presenter: `← Edited <path>`, original line numbers, up to three unchanged context lines per side (`DIFF_CONTEXT_LINES`), and syntax highlighting inside changed code. Addition-only/removal-only diffs are always unified; mixed changes split above 120 columns. Missing metadata gives an inline success title; unsupported metadata delegates to native.
+- `powershell` and `write` keep their original renderers. Ordinary expanded calls, images and intentional native hiding remain native; expanded Bash retains its custom card unless opted out.
+- Consecutive single-row summaries are adjacent; a wrapped summary introduces one blank row before the following tool. Card content has one exterior and one interior column per side, a left-only stripe and no hover paint.
+- Ctrl+O remains Pi's global expansion control. In fullscreen mode, completed summaries/edit panels expand on click and expandable Bash panels toggle; exterior margins/separators are not targets. Card clicks do not interrupt active selection. Regular mode uses terminal-owned mouse handling, so use Ctrl+O there.
+- Colors follow the active Pi theme and layouts follow the actual viewport width. Tool execution, model-facing results and saved session data are unchanged.
+
+Exact formatting, metadata, geometry and safeguards are defined in the [specifications](#documentation).
 
 ### Controls
 
@@ -61,11 +59,21 @@ Pi loads the TypeScript source directly. No build, fork, copying into `~/.pi`, o
 /toolview cache
 /toolview cache clear
 /toolview cache limit 4
+/toolview cache cards limit 128
 ```
 
-Custom tool and user-message content is cached between frames with an **8 MiB estimated retained-layout budget** and a **2048-entry cap**, using weak component state and one latest width per component. Collapsed Bash wraps only enough output to show ten rows and detect overflow. Neighbor spacing reuses metadata instead of rebuilding previous Bash output. Changed args/results, expansion, user-message rebuilds, theme and actual width rebuild the affected layout. A single 100 ms spinner clock exists only while attached compact calls are executing; it changes only the leading glyph and stops when no calls need it or Toolview is disabled/restored. No idle polling, full-transcript tick scanning or host UI-update throttling is introduced; commands/results remain complete and physical width/click bounds stay safe.
+Rendered layouts use two independent least-recently-used caches, each capped at 2048 entries:
 
-`/toolview cache` samples cache bytes/entries/hit/miss/build/eviction/skip counters and labels heap usage as **whole Pi process**, not Toolview. `clear` releases retained layouts; `limit <MiB>` changes the current budget (0–64; 0 disables retention). Estimates bound retained custom layout, not host/native cache or total process memory. Oversized entries are not retained, and transient formatting of new/expanded large data is not subject to that retained-data budget. Optional `--toolview-cache-mb 4` sets the initial budget. Limits are not persisted and reload returns to the launch/default limit. See the [render-cache/performance contract](docs/render-cache-spec.md).
+| Pool | Default budget | Contents |
+| --- | ---: | --- |
+| `ordinary` | 8 MiB | Summaries, user cards, edit headings/native fallback |
+| `cards` | 128 MiB | Collapsed/expanded Bash cards and successful edit-diff frames |
+
+Card pressure cannot evict ordinary views. Each component keeps only its latest width/state; unchanged frames reuse prepared rows. Actual width/theme and relevant state changes rebuild affected content. The execution spinner changes only its prefix and has no idle timer.
+
+`/toolview cache` reports each pool and their aggregate. `clear` releases both; `limit <MiB>` changes ordinary retention (0–64) and `cards limit <MiB>` changes card retention (0–128). Zero disables only the selected pool. Optional `--toolview-cache-mb` and `--toolview-card-cache-mb` set initial limits. Limits survive off/on but are not persisted; reload returns to launch/default limits.
+
+Budgets estimate retained custom data, not upfront allocation or total process memory. Oversized entries are not retained. Reported heap usage is **whole Pi process**, not Toolview. Native host work and transient formatting remain outside these budgets; see the [cache contract](docs/render-cache-spec.md).
 
 Controls apply to the current extension runtime only. Disabling restores the original rendering methods; re-enabling covers existing and future calls. Reload creates a fresh enabled runtime.
 
@@ -76,11 +84,11 @@ pi -e ./src/index.ts --toolview-card Agent,ask_user_question
 pi -e ./src/index.ts --toolview-compact write
 ```
 
-`--toolview-card` adds to the native-card defaults; explicitly naming `bash` restores its original Pi card. `--toolview-compact` takes precedence over that list, but never over expansion, image, or hidden-component safeguards. There is no separate configuration file in this initial version.
+`--toolview-card` adds to the native-card defaults; explicitly naming `bash` or `edit` restores its original Pi card. `--toolview-compact` takes precedence over that list, but never over expansion, image, or hidden-component safeguards. There is no separate configuration file.
 
 ## Compatibility
 
-The initial supported and tested host is **Pi 1.0.0**. The extension obtains Pi's stable TUI reference through a public widget factory, then narrowly replaces private tool `render`/`handleMouse` and user-message `render` methods and observes `Container.addChild`. Cache invalidation additionally wraps the UI component's `updateArgs`, `updateResult`, `setExpanded`, `invalidate` and the UI notification `markExecutionStarted` without changing their native behavior; no tool execution method is wrapped. User-message `rebuild`, `setOutputPad` and `invalidate` retain native behavior while discarding custom layout. Hover and its dedicated input interception have been removed: no raw input observer, private viewport-input wrapper, receiver probe or input-hook migration. Pi retains native mouse/focus processing; Toolview handles only already-normalized card clicks. See the [frame integration contract](docs/card-frame-spec.md). It does not import private host modules or ship copies of Pi's libraries.
+The supported/tested host is **Pi 1.0.0**. One adapter obtains the stable TUI reference through a public widget factory and narrowly wraps private component rendering, normalized tool clicks, UI updates and child attachment. Native methods still execute; no tool execution or raw input is intercepted. Host libraries are not bundled or privately imported. See [architecture](docs/architecture.md) for the integration and ownership boundaries.
 
 This is intentionally a compatibility-sensitive integration. If the inspected component contract cannot be established, Toolview warns and retains native rendering. Runtime restoration does not overwrite hooks subsequently replaced by another extension. Arbitrary extensions wrapping the same private methods and future Pi versions are not guaranteed compatible; run the terminal checks after upgrading.
 
@@ -99,6 +107,16 @@ Development copies of host packages are pinned for reproducible tests; runtime i
 
 Terminal tests require a POSIX environment, Python 3, and a real Pi CLI. They use an offline scripted provider, isolated configuration/workspaces, real tool execution and keyboard/mouse input, and native control runs. They do not require model credentials. Generated evidence belongs in the gitignored `.test-artifacts/` directory.
 
-The installed-package smoke test is version-audited and skips explicitly when that profile is unavailable. In the verified profile, real task tools are executed; Agent, web, ask, and Magic Context tools have registration-only coverage. AFT and keep-awake are excluded because of their startup side effects. This is not a full user-runtime compatibility guarantee.
+The installed-package smoke test is version-audited and explicitly skips unavailable profiles; it is not a full user-runtime compatibility guarantee. See [testing and coverage](docs/testing.md) for the harness, reproducible checks and exclusions.
 
-See [the implementation contract](docs/implementation.md), [verification record](docs/verification.md), and [independent review](docs/review.md) for scope, evidence, and limits.
+## Documentation
+
+- [Architecture](docs/architecture.md) — modules, host integration, lifecycle, data and ownership boundaries.
+- [Tool summary specification](docs/tool-summary-spec.md) — arguments, status, wrapping and compact input.
+- [Bash card specification](docs/bash-card-spec.md) — command/output/footer semantics and expansion.
+- [Edit card specification](docs/edit-card-spec.md) — persisted metadata, syntax, diff format and lifecycle.
+- [Shared frame specification](docs/card-frame-spec.md) — geometry, paint, user cards and click bounds.
+- [Render-cache specification](docs/render-cache-spec.md) — invalidation, memory pools, controls and performance guarantees.
+- [Testing and coverage](docs/testing.md) — automated gates, strict native/data controls and coverage limits.
+
+These documents describe the current project. Run evidence and working review reports belong in gitignored `.test-artifacts/`, not in the documentation tree.
