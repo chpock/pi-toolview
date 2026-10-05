@@ -269,7 +269,7 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     const marker = node.isPartial || !node.result ? "…" : failed ? "✗" : "✓";
     const statusColor = failed ? "error" : marker === "✓" ? "success" : "muted";
     if (available < 5) return [theme.fg(statusColor, marker)];
-    const prefix = theme.fg("dim", " → ");
+    const prefix = theme.fg("dim", node.toolName === "read" ? " → " : " ⚙ ");
     const parts: { color?: ThemeColor; text: string }[] = [{ color: "toolTitle", text: sanitize(node.toolName).trim() }];
     const { pattern, object, params } = argumentParts(node.args);
     if (pattern) {

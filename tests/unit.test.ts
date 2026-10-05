@@ -354,6 +354,44 @@ test("empty self-rendered tools remain hidden even when hideComponent is false a
   } finally { controller.restore(); }
 });
 
+test("only exact read summaries use an arrow; every other compact tool uses a one-column gear", async () => {
+  const names = ["read", "Read", "grep", "aft_inspect", "ctx_reduce", "TaskList", "custom", "write", "edit", "bash"];
+  const tools = names.map((name) => new Tool(name, { path: "a.txt", query: "x".repeat(50) }));
+  const root = new Root(); tools.forEach((tool) => root.addChild(tool));
+  const controller = installToolview(root, () => ({ fg: (role, text) =>
+    `\x1b[${role === "dim" ? 90 : 37}m${text}\x1b[39m` }), { compact: names });
+  const terminal = new xterm.Terminal({ cols: 80, rows: 4, allowProposedApi: true });
+  try {
+    assert.equal(visibleWidth(" ⚙ "), 3, "literal gear has no emoji variation selector or extra column");
+    for (const tool of tools) {
+      const glyph = tool.toolName === "read" ? "→" : "⚙";
+      const args = structuredClone(tool.args);
+      for (const state of ["pending", "partial", "success", "error"]) {
+        tool.isPartial = state === "partial";
+        tool.updateResult(state === "pending" ? undefined : {
+          isError: state === "error", content: [{ type: "text", text: "ERROR_TEXT" }],
+        }, state === "partial");
+        const rows = tool.render(30).filter((row) => plain(row).trim());
+        assert.ok(rows[0]!.startsWith(`\x1b[90m ${glyph} \x1b[39m`), `${tool.toolName}: dim ${glyph}`);
+        assert.ok(rows.slice(1).every((row) => plain(row).startsWith("   ")));
+        assert.ok(rows.every((row) => visibleWidth(row) <= 29));
+        assert.deepEqual(tool.args, args);
+        assert.ok(tool.render(5).filter((row) => plain(row).trim()).every((row) => !/[→⚙]/u.test(plain(row))), "tiny viewports keep status only");
+      }
+      terminal.reset();
+      const row = tool.render(80).find((line) => plain(line).trim())!;
+      await new Promise<void>((done) => terminal.write(row, done));
+      const screen = terminal.buffer.active.getLine(0)!;
+      assert.equal(screen.getCell(1)!.getChars(), glyph);
+      assert.equal(screen.getCell(1)!.getWidth(), 1);
+      assert.equal(screen.getCell(3)!.getChars(), tool.toolName[0]);
+      assert.equal(terminal.buffer.active.cursorY, 0);
+      tool.setExpanded(true);
+      assert.deepEqual(tool.render(80), ["", `NATIVE ${tool.toolName}`, "FULL_OUTPUT"]);
+    }
+  } finally { terminal.dispose(); controller.restore(); }
+});
+
 test("read summaries use distinct semantic roles and bracket only non-path parameters", () => {
   const root = new Root(), tool = new Tool("read", { path: "a.txt", offset: 5, limit: 10 });
   root.addChild(tool);
@@ -376,7 +414,7 @@ test("read without parameters has no empty brackets; patterns are primary descri
   const { controller } = setup([read, grep]);
   try {
     assert.equal(read.render(120).at(-1), " → read a.txt ✓");
-    assert.equal(grep.render(120).at(-1), ' → grep "needle" in src ✓');
+    assert.equal(grep.render(120).at(-1), ' ⚙ grep "needle" in src ✓');
   } finally { controller.restore(); }
 });
 
@@ -454,7 +492,7 @@ test("multiline summaries retain all parameters, align to tool name and recomput
     assert.equal(short.render(40)[0], "");
     const rows = long.render(40).map(plain);
     assert.ok(rows.length > 2);
-    assert.ok(rows[0].startsWith(" → custom"));
+    assert.ok(rows[0].startsWith(" ⚙ custom"));
     assert.ok(rows.slice(1).every((row) => row.startsWith("   ") && row[3] !== " "));
     for (const row of rows) assert.ok(visibleWidth(row) <= 40);
     const joined = rows.map((row) => row.slice(3)).join("");
@@ -601,7 +639,7 @@ test("array summaries wrap between members instead of splitting paths that fit",
     const before = structuredClone(tool.args);
     const rows = tool.render(110).map(plain);
     assert.equal(rows.length, 3);
-    assert.equal(rows[0], ` → aft_inspect [scope=[${JSON.stringify(paths[0])},`);
+    assert.equal(rows[0], ` ⚙ aft_inspect [scope=[${JSON.stringify(paths[0])},`);
     assert.equal(rows[1], `   ${JSON.stringify(paths[1])},`);
     assert.equal(rows[2], `   ${JSON.stringify(paths[2])}]] ✓`);
     assert.deepEqual(tool.args, before);
@@ -615,13 +653,13 @@ test("comma-separated string values can start on the tool-name row and wrap afte
   const { controller } = setup([tool]);
   try {
     assert.deepEqual(tool.render(36).map(plain), [
-      ' → ctx_reduce [drop="3,4,5,8,9,10,',
+      ' ⚙ ctx_reduce [drop="3,4,5,8,9,10,',
       '   12,15,18,21"] ✓',
     ]);
     // Even a list that fits on its own must use the remaining first-row space.
     tool.updateArgs({ drop: "3,4,5,8,9,10,12" });
     assert.deepEqual(tool.render(30).map(plain), [
-      ' → ctx_reduce [drop="3,4,5,8,',
+      ' ⚙ ctx_reduce [drop="3,4,5,8,',
       '   9,10,12"] ✓',
     ]);
     assert.equal(describeArgs(tool.toolName, tool.args), '[drop="3,4,5,8,9,10,12"]');
@@ -653,12 +691,12 @@ test("comma wrap points preserve native CJK breaks in primary descriptions and e
   const tool = new Tool("custom", { path: "甲乙丙丁", drop: "1,2" });
   const { controller } = setup([tool]);
   try {
-    assert.equal(plain(tool.render(16)[0]!), " → custom 甲乙");
-    assert.equal(plain(tool.render(18)[0]!), " → custom 甲乙丙");
+    assert.equal(plain(tool.render(16)[0]!), " ⚙ custom 甲乙");
+    assert.equal(plain(tool.render(18)[0]!), " ⚙ custom 甲乙丙");
     tool.updateArgs({ drop: "1,2" });
     tool.updateResult({ isError: true, content: [{ type: "text", text: "甲乙丙丁" }] });
     assert.deepEqual(tool.render(28).map(plain), [
-      ' → custom [drop="1,2"] — 甲',
+      ' ⚙ custom [drop="1,2"] — 甲',
       '   乙丙丁 ✗',
     ]);
     tool.updateArgs({ target: ["甲乙丙丁", "한글かなカナ"] });
@@ -706,7 +744,7 @@ test("compact summaries reserve one right column before wrapping at every usable
         assert.match(rows.at(-1)!, new RegExp(`${marker}$`, "u"));
         if (width <= 5) assert.deepEqual(rows, [marker], "tiny viewports preserve status without overflowing prefix");
         else {
-          assert.match(rows[0]!, /^ → /u);
+          assert.match(rows[0]!, /^ ⚙ /u);
           assert.ok(rows.slice(1).every((row) => /^ {3}\S/u.test(row)));
           const expected = `custom ${describeArgs(tool.toolName, tool.args)}${state === "error" ? " — Failure 文件" : ""} ${marker}`;
           assert.equal(rows.map((row) => row.slice(3)).join("").replace(/ /g, ""), expected.replace(/ /g, ""));
@@ -996,7 +1034,7 @@ test("bash foregrounds and neutral panel follow live theme while Unicode geometr
 });
 
 test("bash policy preserves explicit native/compact overrides and image safeguards", () => {
-  for (const [options, expected] of [[{ cards: ["bash"] }, /NATIVE bash/], [{ cards: ["bash"], compact: ["bash"] }, /→ bash/]] as const) {
+  for (const [options, expected] of [[{ cards: ["bash"] }, /NATIVE bash/], [{ cards: ["bash"], compact: ["bash"] }, /⚙ bash/]] as const) {
     const tool = bashTool();
     const { controller } = setup([tool], options);
     try { assert.match(tool.render(80).join(""), expected); } finally { controller.restore(); }

@@ -243,7 +243,7 @@ const summaryExpected = (value) => value.replace(/\s/gu, '');
 function compactContent(tool) {
   const rows = lines(tool);
   assert.ok(rows.length > 0, `compact content exists: ${tool.id}`);
-  assert.match(rows[0], /^ → /, `compact prefix: ${tool.id}`);
+  assert.equal(rows[0].slice(0, 3), tool.name === 'read' ? ' → ' : ' ⚙ ', `compact prefix: ${tool.id}`);
   for (const row of rows.slice(1)) assert.match(row, /^ {3}\S/, `continuation aligns at tool-name column: ${tool.id}`);
   assert.match(rows.at(-1), tool.isError ? /✗$/u : /✓$/u, `marker ends final content row: ${tool.id}`);
   return rows;
@@ -281,22 +281,28 @@ async function semanticColors(dump) {
   const row = dump.screen.findIndex((line) => /\bread\b.*a\.txt/.test(line));
   assert.ok(row >= 0);
   assert.match(dump.screen[row], /read a\.txt \[offset=1, limit=1\]/);
+  const customRow = dump.screen.findIndex((line) => line.includes('⚙ tv_unknown'));
+  assert.ok(customRow >= 0, 'gear-prefixed unknown tool appears on the actual screen');
+  assert.equal(dump.cells[customRow][1].text, '⚙');
+  assert.equal(dump.cells[customRow][1].width, 1, 'gear is one terminal column, not emoji presentation');
+  assert.equal(dump.screen[customRow].indexOf('tv_unknown'), 3, 'gear keeps tool-name alignment');
   const samples = [
-    ['dim', '→'], ['toolTitle', 'read'], ['muted', 'a.txt'], ['dim', '[offset='],
+    [row, 'dim', '→'], [row, 'toolTitle', 'read'], [row, 'muted', 'a.txt'], [row, 'dim', '[offset='],
+    [customRow, 'dim', '⚙'],
   ];
   const reference = new Terminal({ cols: 10, rows: 2, allowProposedApi: true });
   try {
-    for (const [role, text] of samples) {
+    for (const [sampleRow, role, text] of samples) {
       reference.reset();
       await new Promise((done) => reference.write(dump.summaryStyles[role], done));
       const expected = reference.buffer.active.getLine(0).getCell(0);
-      const actual = dump.cells[row][dump.screen[row].indexOf(text)];
+      const actual = dump.cells[sampleRow][dump.screen[sampleRow].indexOf(text)];
       assert.deepEqual({ fg: actual.fg, fgMode: actual.fgMode, dim: actual.dim },
         { fg: expected.getFgColor(), fgMode: expected.getFgColorMode(), dim: expected.isDim() },
         `real screen ${text} uses theme role ${role}`);
     }
   } finally { reference.dispose(); }
-  const custom = dump.screen.find((line) => line.includes('→ tv_unknown'));
+  const custom = dump.screen[customRow];
   assert.match(custom, /tv_unknown \[query="wide/);
 }
 
@@ -459,7 +465,7 @@ test('real CLI: Toolview policy, input, lifecycle and same-session stock replay'
       }
       const narrowReads = narrow.screen.filter((line) => /\bread\b/.test(line));
       assert.equal(narrowReads.length, 3, 'each narrow read has exactly one first row');
-      assert.ok(narrow.screen.some((line) => /→ tv_unknown/.test(line)));
+      assert.ok(narrow.screen.some((line) => /⚙ tv_unknown/.test(line)));
       assert.ok(narrow.screen.some((line) => /[✓✗]/.test(line)), 'wrapped markers remain on the actual screen');
       await live.resize(100);
       const dark = await live.capture('dark');
@@ -526,9 +532,9 @@ test('real CLI: complete multiline summaries, adaptive separation, continuation 
       assert.deepEqual(wide.screen.slice(readRow, readRow + lines(reads[2]).length), lines(reads[2]), 'every read continuation is real screen content');
       const afterRead = readRow + lines(reads[2]).length;
       assert.equal(wide.screen[afterRead], '', 'one screen gap before following no-args call');
-      assert.match(wide.screen[afterRead + 1], /→ tv_noargs.*✓/u);
-      assert.match(wide.screen[afterRead + 2], /→ tv_noargs.*✓/u, 'single with leading gap is not counted as multiline');
-      assert.match(wide.screen[afterRead + 3], /→ tv_summary/u, 'multiline after single stays adjacent');
+      assert.match(wide.screen[afterRead + 1], /⚙ tv_noargs.*✓/u);
+      assert.match(wide.screen[afterRead + 2], /⚙ tv_noargs.*✓/u, 'single with leading gap is not counted as multiline');
+      assert.match(wide.screen[afterRead + 3], /⚙ tv_summary/u, 'multiline after single stays adjacent');
       const summary = byName(wide, 'tv_summary')[0];
       const summaryRow = wide.screen.findIndex((row) => row === lines(summary)[0]);
       assert.ok(summaryRow >= 0);
@@ -568,7 +574,7 @@ test('real CLI: complete multiline summaries, adaptive separation, continuation 
       await live.settle(); multilineLayout(await live.capture('native-collapsed'));
       // The next no-args call owns a leading separator; expand then native-collapse it.
       const withGap = await live.capture('with-gap');
-      const emptyRow = withGap.screen.findIndex((row, index) => index > readRow && row.includes('→ tv_noargs'));
+      const emptyRow = withGap.screen.findIndex((row, index) => index > readRow && row.includes('⚙ tv_noargs'));
       assert.ok(emptyRow >= 0, 'separator-owner compact call is on screen');
       live.send(`\x1b[<0;4;${emptyRow + 1}M\x1b[<0;4;${emptyRow + 1}m`);
       await live.settle(); const emptyExpanded = await live.capture('separator-owner-expanded');
@@ -676,7 +682,7 @@ test('real CLI: comma wrap points preserve array members and index lists in live
           assert.equal(dump.cells[y + offset][x].bgMode, 0, 'the reserved column keeps the terminal-default background');
         }
         if (!wholeMembers) continue;
-        assert.match(rows[0], /^ → tv_summary \[/, 'parameters start on the first row');
+        assert.match(rows[0], /^ ⚙ tv_summary \[/, 'parameters start on the first row');
         if (Array.isArray(args[index][key])) {
           assert.equal(rows.length, 3);
           for (const member of args[index][key]) {
@@ -942,7 +948,7 @@ test('real CLI: installed-profile registrations and real local task renderers',
         assert.match(rows[0], new RegExp(name));
         assert.match(rows.at(-1), /✓$/u);
         if (name === 'TaskList') assert.equal(rows.length, 1, 'no-args real task stays single-row');
-        const row = compacted.screen.findIndex((line) => line.includes(`→ ${name}`));
+        const row = compacted.screen.findIndex((line) => line.includes(`⚙ ${name}`));
         assert.ok(row >= 0, `real installed ${name} summary is on screen`);
         assert.equal(compacted.cells[row][compacted.screen[row].indexOf(name)].bgMode, 0);
       }
@@ -1041,7 +1047,7 @@ function bashCard(tool, args, dump, options) {
   assert.equal(actual.at(-1), frame(), 'exact full-panel bottom padding row');
   const expected = bashExpected(tool, args, dump, options);
   assert.deepEqual(actual.slice(top + 1, -1), expected.map(frame), 'independent W-5 oracle: complete body, left marker, one inside cell per side, exact exterior margins');
-  assert.doesNotMatch(actual.join('\n'), /Took \d|✓| → bash/, 'custom bash card has no native title/runtime/success marker');
+  assert.doesNotMatch(actual.join('\n'), /Took \d|✓| [→⚙] bash/, 'custom bash card has no native title/runtime/success marker');
 }
 function allBashCards(dump, options) {
   const args = bashArguments(dump);

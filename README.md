@@ -4,8 +4,8 @@ An alternative presentation for Pi tools: concise summaries for ordinary operati
 
 ```text
  → read src/app.ts [offset=5, limit=10] ✓
- → grep "handleRequest" in src ✓
- → aft_zoom src/app.ts [symbols="render"] ✓
+ ⚙ grep "handleRequest" in src ✓
+ ⚙ aft_zoom src/app.ts [symbols="render"] ✓
 
  ┃
  ┃ # Run the regression tests

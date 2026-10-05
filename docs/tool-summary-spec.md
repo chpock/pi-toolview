@@ -51,7 +51,7 @@ Use current theme roles at render time:
 
 | Segment | Role |
 | --- | --- |
-| Leading ` → ` | `dim` |
+| Leading ` → ` for exact tool name `read`; ` ⚙ ` for every other compact tool | `dim` |
 | Exact tool name | `toolTitle` |
 | Primary pattern/object | `muted` |
 | ` in ` connector | `dim` |
@@ -65,7 +65,7 @@ Retain the existing pending/partial/completion rules. Completed errors append th
 
 - Build the complete logical description and status, then wrap to the actual terminal viewport before applying colors. Spaces remain ordinary word-wrap points. Within the named-parameter block, standalone comma graphemes are additional soft break points immediately after the comma: this covers JSON array/object separators and comma-separated string values such as `drop="3,4,5,8,9,10"`. No spaces, newlines or other characters are inserted into values; primary descriptions and error explanations keep ordinary word wrapping. Fill available first-row space using these break points rather than moving an entire comma-separated value to the next row. An individual fragment longer than a full content row still wraps at grapheme boundaries. A comma plus a combining mark is not split. Do not truncate arguments or discard later fields to keep one row.
 - Reserve at least one blank terminal column at the right edge before wrapping: the effective summary viewport is `width - 1` and the text budget after indentation is `width - 4`. Do not add padding to argument values or reduce the width passed to native renderers. Short rows may leave more space; full rows still leave the last column blank.
-- At normal widths the first row begins ` → `; tool-name text starts at zero-based column 3. Every continuation row has exactly three spaces of indentation, aligned with the tool name, **not** with the parameter block or its opening bracket.
+- At normal widths the first row begins ` → ` only for the exact, case-sensitive tool name `read`; every other compact tool begins ` ⚙ ` (literal U+2699 without an emoji variation selector). Both prefixes occupy three columns and use the same `dim` role. Native tool representations and the separate Bash-card prompt are unchanged. Tool-name text starts at zero-based column 3. Every continuation row has exactly three spaces of indentation, aligned with the tool name, **not** with the parameter block or its opening bracket.
 - The status is at the end of the final content row and may itself wrap onto a continuation row. Brackets/quotes are retained across rows because content is wrapped rather than cut.
 - At widths 1–5 content consists only of the state marker (normal separator rules still apply): these widths cannot reliably fit the prefix, a wide grapheme, and the right margin. Width one keeps the marker even though a right margin cannot fit; widths 2–5 still leave at least one right column blank. Width zero renders no rows. No general maximum row count is introduced.
 - Input newlines do not create arbitrary blank rows; only renderer wrapping produces content rows. Layout is computed from plain logical text before colors are applied to source spans; this avoids Pi 1.0.0's colored-whitespace wrapping defect. Styling is preserved across breaks, with no card background.
