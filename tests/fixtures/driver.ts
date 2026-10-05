@@ -11,6 +11,45 @@ export default function terminalDriver(pi: ExtensionAPI) {
   let tui: any;
   const record = (event: object) => appendFileSync(join(output, "events.jsonl"), JSON.stringify(event) + "\n");
   const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+  // Opt-in UI-clock observations only: real timers/render requests, no model/session mutation.
+  const spinnerDiagnostics = process.env.TOOLVIEW_TEST_SPINNER_DIAGNOSTICS === "1";
+  const spinnerStats = { starts: 0, stops: 0, active: 0, maxActive: 0, ticks: 0, requests: 0, intervals: [] as number[] };
+  let insideSpinnerTick = false;
+  const spinnerWork = { widths: {} as Record<string, number>, invalidations: 0 };
+  const observedSpinnerNodes = new WeakSet<object>();
+  function observedToolRender(this: any, width: number) {
+    const key = `${this.toolName}:${width}`; spinnerWork.widths[key] = (spinnerWork.widths[key] ?? 0) + 1;
+    return Object.getPrototypeOf(this).render.call(this, width);
+  }
+  function observedToolInvalidate(this: any) {
+    spinnerWork.invalidations++;
+    return Object.getPrototypeOf(this).invalidate.call(this);
+  }
+  const spinnerHandles = new Set<ReturnType<typeof setInterval>>();
+  const nativeInterval = globalThis.setInterval, nativeClear = globalThis.clearInterval;
+  let nativeRequest: (() => void) | undefined;
+  if (spinnerDiagnostics) {
+    globalThis.setInterval = ((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
+      if (callback.name !== "tickSpinner") return nativeInterval(callback, delay, ...args);
+      const handle = nativeInterval(function (this: unknown, ...values: unknown[]) {
+        spinnerStats.ticks++; insideSpinnerTick = true;
+        try { callback.apply(this, values); }
+        finally { insideSpinnerTick = false; }
+        if ([4, 20].includes(spinnerStats.ticks)) record({ type: "spinner_tick_checkpoint", ticks: spinnerStats.ticks });
+      }, delay, ...args);
+      spinnerHandles.add(handle); spinnerStats.starts++; spinnerStats.active = spinnerHandles.size;
+      spinnerStats.maxActive = Math.max(spinnerStats.maxActive, spinnerStats.active); spinnerStats.intervals.push(delay ?? 0);
+      return handle;
+    }) as typeof setInterval;
+    globalThis.clearInterval = ((handle: ReturnType<typeof setInterval>) => {
+      if (spinnerHandles.delete(handle)) { spinnerStats.stops++; spinnerStats.active = spinnerHandles.size; }
+      nativeClear(handle);
+    }) as typeof clearInterval;
+    pi.on("session_shutdown", () => {
+      globalThis.setInterval = nativeInterval; globalThis.clearInterval = nativeClear;
+      if (nativeRequest && tui) tui.requestRender = nativeRequest;
+    });
+  }
   async function gate(name: string, signal?: AbortSignal) {
     const end = Date.now() + 15000;
     while (!existsSync(join(output, name))) {
@@ -151,6 +190,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
     name: "tv_summary", label: "Summary fixture", description: "Offline arbitrary JSON summary fixture",
     parameters: Type.Object({}, { additionalProperties: true }),
     async execute(_id, args) {
+      if ("fixtureError" in args && args.fixtureError === true) throw new Error("ERROR_BODY_SENTINEL first line\nERROR_STACK_SENTINEL second line");
       return { content: [{ type: "text", text: "SUMMARY_RESULT " + JSON.stringify(args) }],
         details: { supplied: args } };
     },
@@ -219,6 +259,12 @@ export default function terminalDriver(pi: ExtensionAPI) {
     ] } },
     { name: "tv_summary", arguments: { drop: Array.from({ length: 60 }, (_, i) => i + 1).join(",") } },
   ];
+  const compactErrors: Pick<ToolCall, "name" | "arguments">[] = [
+    { name: "read", arguments: { path: "missing/" + "r".repeat(90) + ".txt", offset: 3, limit: 7 } },
+    { name: "tv_summary", arguments: { pattern: "needle", path: "src/文件/" + "p".repeat(40), query: "a,b,c,".repeat(8), fixtureError: true } },
+    { name: "tv_summary", arguments: { target: ["src/" + "t".repeat(50), "tests/文件/" + "u".repeat(40)], query: "named", fixtureError: true } },
+    { name: "tv_summary", arguments: { query: "SUCCESS_CALL" } },
+  ];
   const suite: Pick<ToolCall, "name" | "arguments">[] = [
     { name: "read", arguments: { path: "a.txt", offset: 1, limit: 1 } },
     { name: "read", arguments: { path: "b.txt" } },
@@ -250,7 +296,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
         const scenario = prompt === "run cache-performance" ? "cache-performance" : prompt?.includes("bash-width") ? "bash-width" : prompt?.includes("bash-stream") ? "bash-stream" : prompt?.includes("bash-real") ? "bash-real" :
           prompt?.includes("bash-shape-exception-stream") ? "bash-shape-exception-stream" : prompt?.includes("bash-shape-exceptions") ? "bash-shape-exceptions" :
           prompt?.includes("bash-shape-stream") ? "bash-shape-stream" : prompt?.includes("bash-shapes") ? "bash-shapes" :
-          prompt?.includes("comma-wrap") ? "comma-wrap" : prompt?.includes("boundary") ? "boundary" : prompt?.includes("multiline") ? "multiline" : prompt?.includes("integration") ? "integration" :
+          prompt?.includes("compact-errors") ? "compact-errors" : prompt?.includes("comma-wrap") ? "comma-wrap" : prompt?.includes("boundary") ? "boundary" : prompt?.includes("multiline") ? "multiline" : prompt?.includes("integration") ? "integration" :
           prompt?.includes("pending") ? "pending" : prompt?.includes("fallback") ? "fallback" :
           prompt?.includes("future") ? "future" : "suite";
         const results = context.messages.slice(last + 1).filter((m) => m.role === "toolResult");
@@ -270,7 +316,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
             "printf 'LIVE_FINAL\\n'" } }] : scenario === "boundary" ? [
           { name: "read", arguments: { path: "abcdefghijklm", limit: 1 } },
           { name: "tv_summary", arguments: { path: "abcdefghijklm", query: "x".repeat(40) } },
-        ] : scenario === "comma-wrap" ? commaWrap : scenario === "multiline" ? multiline : scenario === "integration" ? [
+        ] : scenario === "compact-errors" ? compactErrors : scenario === "comma-wrap" ? commaWrap : scenario === "multiline" ? multiline : scenario === "integration" ? [
           { name: "TaskCreate", arguments: { subject: "TERMINAL_LOCAL_TASK", description: "Offline installed renderer smoke; do not execute." } },
           { name: "TaskList", arguments: {} },
         ] : scenario === "pending" ? [
@@ -321,6 +367,10 @@ export default function terminalDriver(pi: ExtensionAPI) {
     if (ctx.mode !== "tui") return;
     ctx.ui.setWidget("terminal-driver", (liveTui) => {
       tui = liveTui;
+      if (spinnerDiagnostics) {
+        nativeRequest = tui.requestRender;
+        tui.requestRender = () => { if (insideSpinnerTick) spinnerStats.requests++; nativeRequest!(); };
+      }
       record({ type: "start", sharedContainer: liveTui instanceof Container });
       return { render: () => [], invalidate() {} };
     });
@@ -403,8 +453,13 @@ export default function terminalDriver(pi: ExtensionAPI) {
       visit(tui);
       const tools = nodes.filter((node) => typeof node.toolCallId === "string" && typeof node.updateResult === "function");
       const width = process.stdout.columns || 100;
+      if (spinnerDiagnostics) for (const node of tools) {
+        if (observedSpinnerNodes.has(node)) continue;
+        observedSpinnerNodes.add(node); node.render = observedToolRender; node.invalidate = observedToolInvalidate;
+      }
       writeFileSync(join(output, `${name}.json`), JSON.stringify({
         session: ctx.sessionManager.getSessionFile(), width, cwd: ctx.cwd, bashShape,
+        ...(spinnerDiagnostics ? { spinnerStats, spinnerWork } : {}),
         selectionActive: typeof tui.hasActiveSelection === "function" ? tui.hasActiveSelection() : false,
         frameStyles: {
           border: ctx.ui.theme.fg("borderMuted", "┃"),
@@ -428,11 +483,13 @@ export default function terminalDriver(pi: ExtensionAPI) {
         extensionIssues: nodes.filter((node) => node.constructor.name === "ThemedText")
           .map((node) => node.render(width)).filter((rows: string[]) => rows.some((row) => row.includes("[Extension issues]"))),
         tools: tools.map((node) => ({ name: node.toolName, id: node.toolCallId,
-          expanded: node.expanded, isError: node.result?.isError,
+          expanded: node.expanded, executionStarted: node.executionStarted, isError: node.result?.isError,
           content: node.result?.content, details: node.result?.details, structuredContent: node.result?.structuredContent,
           args: node.args, partial: node.isPartial, lines: node.render(width),
-          // Pointer captures inspect actual viewport paint; other captures retain alternate-width probes.
-          ...(name.startsWith("pointer-") ? {} : { narrowLines: node.render(24),
+          ...(spinnerDiagnostics ? { before: parents.get(node)?.children.slice(Math.max(0, parents.get(node).children.indexOf(node) - 3), parents.get(node).children.indexOf(node))
+            .map((previous: any) => ({ kind: previous.constructor.name, name: previous.toolName, lines: previous.render(width).map(stripVTControlCharacters) })) } : {}),
+          // Pointer/clock-work captures inspect only actual viewport paint; alternate widths intentionally rebuild layouts and width zero stops/restarts animation.
+          ...(name.startsWith("pointer-") || spinnerDiagnostics ? {} : { narrowLines: node.render(24),
             tinyLines: Object.fromEntries([0, 1, 2, 3, 4, 5, 6, 7, 8].map((size) => [size, node.render(size)])) }) })),
         document: parents.get(tools[0])?.render(width),
         branch: ctx.sessionManager.getBranch(),

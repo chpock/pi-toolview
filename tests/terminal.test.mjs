@@ -245,7 +245,8 @@ function compactContent(tool) {
   assert.ok(rows.length > 0, `compact content exists: ${tool.id}`);
   assert.equal(rows[0].slice(0, 3), tool.name === 'read' ? ' → ' : ' ⚙ ', `compact prefix: ${tool.id}`);
   for (const row of rows.slice(1)) assert.match(row, /^ {3}\S/, `continuation aligns at tool-name column: ${tool.id}`);
-  assert.match(rows.at(-1), tool.isError ? /✗$/u : /✓$/u, `marker ends final content row: ${tool.id}`);
+  assert.doesNotMatch(rows.join(''), /✓|✗/u, `completion markers are disabled: ${tool.id}`);
+  assert.ok(!rows.at(-1).endsWith(' '), `hidden marker leaves no trailing separator space: ${tool.id}`);
   return rows;
 }
 function compact(dump) {
@@ -255,16 +256,16 @@ function compact(dump) {
     const rows = compactContent(tool);
     if (i < 2) assert.equal(rows.length, 1, `short read stays single-row: ${tool.id}`);
     assert.match(rows[0], /\bread\b/);
-    assert.match(rows.at(-1), i === 2 ? /✗/ : /✓/);
+    assert.equal(summaryText(tool), summaryExpected(`read ${['a.txt', 'b.txt', 'missing.txt'][i]}${i === 0 ? ' [offset=1, limit=1]' : ''}`));
   }
-  assert.match(summaryText(reads[2]), /ENOENT|nosuch|notfound|Error/i);
+  assert.doesNotMatch(summaryText(reads[2]), /ENOENT|nosuch|notfound|Error/i, 'failed summary contains call arguments, never the error body');
   const unknown = byName(dump, 'tv_unknown')[0];
   assert.equal(lines(unknown).length, 1);
-  assert.match(lines(unknown)[0], /tv_unknown.*✓|✓.*tv_unknown/);
+  assert.equal(summaryText(unknown), summaryExpected('tv_unknown [query="wide 界 é query"]'));
   const a = dump.screen.findIndex((line) => /\bread\b.*a\.txt/.test(line));
   assert.ok(a >= 0, 'first compact read is on the real screen');
   assert.match(dump.screen[a + 1], /\bread\b.*b\.txt/, 'consecutive compact reads have no blank screen row');
-  assert.match(dump.screen[a], /✓/);
+  assert.doesNotMatch(dump.screen[a], /✓|✗/u);
   assert.ok(!dump.screen.some((line) => /READ_[AB]_CONTENT|UNKNOWN_RESULT/.test(line)), 'collapsed output is hidden on screen');
   // Compact summaries have no card background, including their text cells.
   for (const y of [a, a + 1]) {
@@ -304,6 +305,34 @@ async function semanticColors(dump) {
   } finally { reference.dispose(); }
   const custom = dump.screen[customRow];
   assert.match(custom, /tv_unknown \[query="wide/);
+  await errorSummaryColors(dump, byName(dump, 'read').find((tool) => tool.isError));
+}
+
+async function errorSummaryColors(dump, tool) {
+  assert.equal(tool.isError, true);
+  const rows = compactContent(tool);
+  const y = dump.screen.findIndex((row, index) => row === rows[0] &&
+    rows.every((expected, offset) => dump.screen[index + offset] === expected));
+  assert.ok(y >= 0, 'complete failed compact call is present on the actual screen');
+  const reference = new Terminal({ cols: 10, rows: 2, allowProposedApi: true });
+  let checkedCells = 0;
+  try {
+    await new Promise((done) => reference.write(dump.summaryStyles.error, done));
+    const sample = reference.buffer.active.getLine(0).getCell(0);
+    const expected = { fg: sample.getFgColor(), fgMode: sample.getFgColorMode(), dim: sample.isDim() };
+    for (let offset = 0; offset < rows.length; offset++) {
+      for (const cell of dump.cells[y + offset]) {
+        if (!cell.text.trim()) continue;
+        assert.deepEqual({ fg: cell.fg, fgMode: cell.fgMode, dim: cell.dim }, expected,
+          'every visible failure glyph/name/description/connector/parameter cell uses the active error role');
+        assert.equal(cell.bgMode, 0, 'failed compact summary retains terminal-default background');
+        checkedCells++;
+      }
+      assert.ok(['', ' '].includes(dump.cells[y + offset][dump.width - 1].text), 'failure retains one blank right column');
+    }
+    assert.ok(checkedCells > 0);
+    return checkedCells;
+  } finally { reference.dispose(); }
 }
 
 const stockOnly = process.env.TOOLVIEW_TERMINAL_STOCK_ONLY === '1';
@@ -334,8 +363,8 @@ function multilineLayout(dump, wide) {
   assert.equal(leadingBlanks(empty[1]), 0, 'leading separator does not turn prior single into multiline');
   assert.equal(leadingBlanks(summaries[0]), 0, 'multiline after single has no separator');
   assert.equal(leadingBlanks(summaries[1]), 0, 'pattern call follows single read without separator');
-  assert.equal(summaryText(empty[0]), summaryExpected('tv_noargs ✓'), 'no invented no-args placeholder');
-  assert.equal(summaryText(reads[2]), summaryExpected('read long-directory/' + 'r'.repeat(180) + '.txt [offset=1, limit=1] ✓'));
+  assert.equal(summaryText(empty[0]), summaryExpected('tv_noargs'), 'no invented no-args placeholder');
+  assert.equal(summaryText(reads[2]), summaryExpected('read long-directory/' + 'r'.repeat(180) + '.txt [offset=1, limit=1]'));
   const query = 'quoted "query"\\value 界 é ' + 'UNBREAKABLE'.repeat(30) + ' END_QUERY_VISIBLE';
   const parameters = [
     `query=${JSON.stringify(query)}`, 'queries=["first","second"]', 'op="trace"', 'action="inspect"', 'symbol="symbol"', 'symbols=["one","two"]',
@@ -345,17 +374,17 @@ function multilineLayout(dump, wide) {
     'nested={"input":"NESTED_PAYLOAD_VISIBLE","token":"NESTED_TOKEN_VISIBLE","values":[false,0,"nested quoted value"],"clean":"clean nestedvalue"}',
     'nothing=null', '"odd key"="QUOTED_KEY"', 'passwd="<redacted>"', 'password="<redacted>"', 'refresh_token="<redacted>"', 'sanitized="white space redend"', 'secret="<redacted>"', 'token="<redacted>"', 'zLast="LAST_FIELD_VISIBLE"',
   ];
-  assert.equal(summaryText(summaries[0]), summaryExpected('tv_summary [' + parameters.join(', ') + '] ✓'), 'complete priority/alpha ordering, JSON values, exact payload exclusion and top-level masking');
+  assert.equal(summaryText(summaries[0]), summaryExpected('tv_summary [' + parameters.join(', ') + ']'), 'complete priority/alpha ordering, JSON values, exact payload exclusion and top-level masking');
   assert.doesNotMatch(summaries[0].lines.join(''), /\u202e|\u001b\[31m/u, 'top-level and nested controls cannot affect terminal presentation');
   assert.ok(lines(summaries[0]).length > (dump.width === 24 ? 30 : 4), 'long summary is not bounded by old argument or row caps');
   const expected = [
-    'tv_summary "needle \\"quoted\\"" [paths=["ordinary-path"], path=["src dir","tests"], target="ordinary-target", url="https://example.invalid/ordinary", scope="ordinary-scope", query="always named", enabled=true] ✓',
-    'tv_summary "chosen target" [paths=["ordinary-path"], path=null, url="ordinary-url", scope="ordinary-scope", query="named", pattern=0] ✓',
-    'tv_summary chosen-path [paths=["ordinary-path"], target="ordinary-target", url="ordinary-url", scope="ordinary-scope"] ✓',
-    'tv_summary https://example.invalid/chosen [paths=[], scope="ordinary-scope", pattern=false] ✓',
-    'tv_summary [paths=["ordinary-path"], scope=[]] ✓',
-    'tv_summary [paths=[]] ✓',
-    'tv_summary "" [path=[], query=""] ✓',
+    'tv_summary "needle \\"quoted\\"" [paths=["ordinary-path"], path=["src dir","tests"], target="ordinary-target", url="https://example.invalid/ordinary", scope="ordinary-scope", query="always named", enabled=true]',
+    'tv_summary "chosen target" [paths=["ordinary-path"], path=null, url="ordinary-url", scope="ordinary-scope", query="named", pattern=0]',
+    'tv_summary chosen-path [paths=["ordinary-path"], target="ordinary-target", url="ordinary-url", scope="ordinary-scope"]',
+    'tv_summary https://example.invalid/chosen [paths=[], scope="ordinary-scope", pattern=false]',
+    'tv_summary [paths=["ordinary-path"], scope=[]]',
+    'tv_summary [paths=[]]',
+    'tv_summary "" [path=[], query=""]',
   ];
   for (const [index, expectedSummary] of expected.entries())
     assert.equal(summaryText(summaries[index + 1]), summaryExpected(expectedSummary), `primary selection case ${index + 1}`);
@@ -453,7 +482,7 @@ test('real CLI: Toolview policy, input, lifecycle and same-session stock replay'
       const future = await live.capture('future-after-reload');
       assert.equal(byName(future, 'tv_unknown').length, 2);
       assert.equal(lines(byName(future, 'tv_unknown')[1]).length, 1, 'future attachment is compact after reload');
-      assert.match(lines(byName(future, 'tv_unknown')[1])[0], /tv_unknown.*✓|✓.*tv_unknown/);
+      assert.match(lines(byName(future, 'tv_unknown')[1])[0], /^ ⚙ tv_unknown \[query="future after reload"\]$/u);
       compact(future);
       await live.resize(24); const narrow = await live.capture('narrow');
       assert.equal(narrow.width, 24);
@@ -466,7 +495,8 @@ test('real CLI: Toolview policy, input, lifecycle and same-session stock replay'
       const narrowReads = narrow.screen.filter((line) => /\bread\b/.test(line));
       assert.equal(narrowReads.length, 3, 'each narrow read has exactly one first row');
       assert.ok(narrow.screen.some((line) => /⚙ tv_unknown/.test(line)));
-      assert.ok(narrow.screen.some((line) => /[✓✗]/.test(line)), 'wrapped markers remain on the actual screen');
+      assert.ok(narrow.screen.some((line) => line.includes('→ read missing.txt')), 'failed compact call remains visible without an error preview or failure badge');
+      for (const tool of narrow.tools.filter((tool) => ['read', 'tv_unknown'].includes(tool.name))) assert.doesNotMatch(tool.lines.map(plain).join(''), /✓|✗/u);
       await live.resize(100);
       const dark = await live.capture('dark');
       await live.command('/tv-theme light'); const light = await live.capture('light'); compact(light);
@@ -532,8 +562,8 @@ test('real CLI: complete multiline summaries, adaptive separation, continuation 
       assert.deepEqual(wide.screen.slice(readRow, readRow + lines(reads[2]).length), lines(reads[2]), 'every read continuation is real screen content');
       const afterRead = readRow + lines(reads[2]).length;
       assert.equal(wide.screen[afterRead], '', 'one screen gap before following no-args call');
-      assert.match(wide.screen[afterRead + 1], /⚙ tv_noargs.*✓/u);
-      assert.match(wide.screen[afterRead + 2], /⚙ tv_noargs.*✓/u, 'single with leading gap is not counted as multiline');
+      assert.match(wide.screen[afterRead + 1], /⚙ tv_noargs$/u);
+      assert.match(wide.screen[afterRead + 2], /⚙ tv_noargs$/u, 'single with leading gap is not counted as multiline');
       assert.match(wide.screen[afterRead + 3], /⚙ tv_summary/u, 'multiline after single stays adjacent');
       const summary = byName(wide, 'tv_summary')[0];
       const summaryRow = wide.screen.findIndex((row) => row === lines(summary)[0]);
@@ -591,10 +621,10 @@ test('real CLI: complete multiline summaries, adaptive separation, continuation 
       await t.test('live component render at width zero has no rows', () => {
         for (const tool of compactTools) assert.deepEqual(tool.tinyLines['0'], [], `width zero has no rows: ${tool.id}`);
       });
-      await t.test('live component render at widths 1–5 has status only', async () => {
+      await t.test('live component render at widths 1–5 preserves a tool glyph without completion badges', async () => {
         for (const tool of compactTools) {
           for (const width of [1, 2, 3, 4, 5]) {
-            assert.deepEqual(tool.tinyLines[width].map(plain).filter((row) => row.trim()), ['✓'], `width ${width} displays only status`);
+            assert.deepEqual(tool.tinyLines[width].map(plain).filter((row) => row.trim()), [tool.name === 'read' ? '→' : '⚙'], `width ${width} retains the tool glyph`);
             await assertFits(tool.tinyLines[width], Math.max(1, width - 1));
           }
         }
@@ -668,7 +698,7 @@ test('real CLI: comma wrap points preserve array members and index lists in live
       for (const [index, tool] of dump.tools.entries()) {
         const rows = compactContent(tool);
         const key = ['scope', 'target', 'drop'][index];
-        const expected = `tv_summary [${key}=${JSON.stringify(args[index][key])}] ✓`;
+        const expected = `tv_summary [${key}=${JSON.stringify(args[index][key])}]`;
         assert.equal(summaryText(tool), summaryExpected(expected));
         await assertFits(tool.lines, width - 1);
         // Narrow summaries share the same title row; locate the complete call, not its first matching title.
@@ -739,6 +769,95 @@ test('real CLI: comma wrap points preserve array members and index lists in live
     }
   });
 
+test('real CLI: failed summaries are wholly error-colored, hide bodies and final badges, and expose native errors on click',
+  { skip: stockOnly, timeout: 120000 }, async () => {
+    const terminals = [];
+    const start = async (name, options = {}) => {
+      const terminal = new PiTerminal(name, options); terminals.push(terminal);
+      await terminal.ready(); await terminal.resize(80, 120); return terminal;
+    };
+    const activity = (terminal) => {
+      const observed = terminal.events();
+      assert.equal(observed.filter((event) => event.type === 'call').length, 4);
+      assert.equal(observed.filter((event) => event.type === 'result').length, 4);
+      assert.equal(observed.filter((event) => event.type === 'model_context').length, 5);
+      assert.deepEqual(observed.filter((event) => event.type === 'result').map((event) => event.isError), [true, true, true, false]);
+      return observed.filter((event) => ['call', 'result', 'model_context'].includes(event.type));
+    };
+    let checkedErrorCells = 0;
+    const check = async (dump, width) => {
+      assert.equal(dump.tools.length, 4);
+      const args = persisted(dump).filter((entry) => entry.arguments).map((entry) => entry.arguments);
+      const expected = [
+        `read ${args[0].path} [offset=3, limit=7]`,
+        `tv_summary "needle" in ${args[1].path} [query=${JSON.stringify(args[1].query)}, fixtureError=true]`,
+        `tv_summary [target=${JSON.stringify(args[2].target)}, query="named", fixtureError=true]`,
+        'tv_summary [query="SUCCESS_CALL"]',
+      ];
+      assert.deepEqual(dump.tools.map((tool) => tool.isError === true), [true, true, true, false]);
+      for (const [index, tool] of dump.tools.entries()) {
+        compactContent(tool);
+        assert.equal(summaryText(tool), summaryExpected(expected[index]), 'collapsed call contains its full arguments and no result preview');
+        assert.doesNotMatch(tool.lines.map(plain).join(''), /ERROR_BODY_SENTINEL|ERROR_STACK_SENTINEL|ENOENT|✓|✗/u);
+        await assertFits(tool.lines, width - 1);
+        if (index < 3) checkedErrorCells += await errorSummaryColors(dump, tool);
+      }
+      assert.ok(!dump.screen.some((row) => /ERROR_BODY_SENTINEL|ERROR_STACK_SENTINEL|ENOENT/u.test(row)), 'raw error bodies are absent from the real collapsed screen');
+    };
+    try {
+      const stock = await start('compact-errors-stock');
+      await stock.run('compact-errors'); const native = await stock.capture('native');
+      stock.send('\x0f'); await stock.settle(); const nativeExpanded = await stock.capture('expanded');
+      const live = await start('compact-errors-toolview', { toolview: true, workspace: stock.work });
+      await live.run('compact-errors'); const wide = await live.capture('wide'); await check(wide, 80);
+      assert.deepEqual(activity(live), activity(stock), '4 calls/results and 5 model contexts remain exact');
+      assert.deepEqual(persisted(wide), persisted(native), 'all raw error messages and supplied arguments remain native session data');
+      assert.match(byName(wide, 'tv_summary')[0].content[0].text, /ERROR_BODY_SENTINEL.*\nERROR_STACK_SENTINEL/u);
+      const sessionBytes = readFileSync(wide.session);
+      await live.resize(21, 120); const narrow = await live.capture('narrow'); await check(narrow, 21);
+      assert.deepEqual(persisted(narrow), persisted(wide));
+      await live.resize(80, 120); const back = await live.capture('wide-again');
+      assert.deepEqual(toolLines(back), toolLines(wide));
+      await live.command('/tv-theme light'); await check(await live.capture('light'), 80);
+      await live.command('/tv-theme dark'); const dark = await live.capture('dark'); await check(dark, 80);
+      const target = dark.tools[1], rows = lines(target);
+      const y = dark.screen.findIndex((row, index) => row === rows[0] && rows.every((expected, offset) => dark.screen[index + offset] === expected));
+      assert.ok(y >= 0);
+      const last = y + rows.length - 1;
+      live.send(`\x1b[<0;4;${last + 1}M\x1b[<0;4;${last + 1}m`);
+      await live.settle(); const clicked = await live.capture('failed-continuation-click');
+      assert.deepEqual(clicked.tools.filter((tool) => tool.expanded).map((tool) => tool.id), [target.id]);
+      assert.deepEqual(clicked.tools[1].lines, nativeExpanded.tools[1].lines, 'failed continuation click delegates exactly to native full information');
+      assert.ok(clicked.screen.some((row) => row.includes('ERROR_BODY_SENTINEL')));
+      assert.ok(clicked.screen.some((row) => row.includes('ERROR_STACK_SENTINEL')), 'full available second error line is visible after expansion');
+      live.send('\x0f'); await live.settle(); const expanded = await live.capture('expanded');
+      assert.ok(expanded.tools.every((tool) => tool.expanded));
+      assert.deepEqual(toolLines(expanded), toolLines(nativeExpanded));
+      live.send('\x0f'); await live.settle(); await check(await live.capture('recollapsed'), 80);
+      await live.command('/toolview off'); assert.deepEqual(toolLines(await live.capture('off')), toolLines(native));
+      await live.command('/toolview on'); await check(await live.capture('on'), 80);
+      const starts = live.events().filter((event) => event.type === 'start').length;
+      await live.command('/reload'); await live.event('start', starts + 1);
+      const reloaded = await live.capture('reloaded'); await check(reloaded, 80);
+      assert.deepEqual(activity(live), activity(stock), 'presentation/lifecycle changes do not modify execution or model context');
+      assert.deepEqual(readFileSync(wide.session), sessionBytes);
+      await live.close();
+      const replay = await start('compact-errors-replay', { toolview: true, session: wide.session, workspace: stock.work });
+      const resumed = await replay.capture('replayed'); await check(resumed, 80);
+      assert.deepEqual(toolLines(resumed), toolLines(reloaded));
+      assert.deepEqual(persisted(resumed), persisted(wide));
+      assert.deepEqual(readFileSync(wide.session), sessionBytes);
+      writeFileSync(join(artifacts, 'compact-errors-coverage.json'), JSON.stringify({
+        calls: 4, results: 4, modelContexts: 5, failedCalls: 3, checkedErrorCells, widths: [21, 80],
+        tools: 'Real built-in failing read plus two generic throwing summaries and one generic success; no installed third-party execution',
+        lifecycle: ['real failed-continuation SGR click', 'exact native expansion', 'dark/light', 'resize round trip', 'off/on', 'reload', 'same-session replay'],
+        identity: 'Exact raw arguments/results/model contexts and unchanged session bytes',
+      }, null, 2));
+    } finally {
+      for (const terminal of terminals.reverse()) { await terminal.close(); terminal.dispose(); }
+    }
+  });
+
 test('real CLI: width-21 colored-segment boundary preserves content and exact indentation',
   { skip: stockOnly, timeout: 60000 }, async () => {
     const terminals = [];
@@ -764,7 +883,7 @@ test('real CLI: width-21 colored-segment boundary preserves content and exact in
       await live.resize(21); const narrow = await live.capture('boundary');
       assert.equal(narrow.width, 21, 'real PTY boundary viewport');
       assert.equal(narrow.tools.length, 2);
-      const expected = ['read abcdefghijklm [limit=1] ✓', `tv_summary abcdefghijklm [query="${'x'.repeat(40)}"] ✓`];
+      const expected = ['read abcdefghijklm [limit=1]', `tv_summary abcdefghijklm [query="${'x'.repeat(40)}"]`];
       for (const [index, tool] of narrow.tools.entries()) {
         const rows = compactContent(tool);
         const allContentRows = tool.lines.map(plain).slice(leadingBlanks(tool));
@@ -784,9 +903,9 @@ test('real CLI: width-21 colored-segment boundary preserves content and exact in
           assert.ok(['', ' '].includes(narrow.cells[y + offset][20].text), 'the rightmost column is blank on the actual boundary screen');
         }
       }
-      assert.deepEqual(lines(narrow.tools[0]), [' → read', '   abcdefghijklm', '   [limit=1] ✓'], 'right margin is reserved before wrapping; continuation starts at column three');
+      assert.deepEqual(lines(narrow.tools[0]), [' → read', '   abcdefghijklm', '   [limit=1]'], 'right margin is reserved before wrapping; continuation starts at column three');
       await live.resize(22); const boundaryWithMargin = await live.capture('boundary-with-margin');
-      assert.deepEqual(lines(boundaryWithMargin.tools[0]), [' → read abcdefghijklm', '   [limit=1] ✓'], 'original colored segment boundary still works with one right column reserved');
+      assert.deepEqual(lines(boundaryWithMargin.tools[0]), [' → read abcdefghijklm', '   [limit=1]'], 'original colored segment boundary still works with one right column reserved');
       for (const tool of boundaryWithMargin.tools) await assertFits(tool.lines, 21);
       await live.resize(21); assert.deepEqual(toolLines(await live.capture('boundary-again')), toolLines(narrow));
       assert.equal(leadingBlanks(narrow.tools[1]), 1, 'following multiline call receives exactly one separator');
@@ -808,6 +927,120 @@ test('real CLI: width-21 colored-segment boundary preserves content and exact in
     }
   });
 
+test('real CLI: spinner ticks reuse cached work, stop on off/completion/cancellation, and leave idle/replay clock-free',
+  { skip: stockOnly, timeout: 120000 }, async () => {
+    const terminals = [];
+    const start = async (name, options = {}) => {
+      const terminal = new PiTerminal(name, { ...options, extraEnv: { TOOLVIEW_TEST_SPINNER_DIAGNOSTICS: '1' } });
+      terminals.push(terminal); await terminal.ready(); return terminal;
+    };
+    const busyCapture = (terminal, name) => terminal.capture(name, { animated: true });
+    const normalTraffic = (terminal) => terminal.events().filter((event) => ['call', 'result', 'model_context'].includes(event.type));
+    const assertBusy = async (dump) => {
+      const tool = byName(dump, 'tv_stream')[0];
+      assert.equal(tool.executionStarted, true); assert.equal(tool.partial, true);
+      const rows = lines(tool);
+      assert.equal(rows.length, 1);
+      assert.match(rows[0], /^ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] tv_stream \[query="gated"\]$/u);
+      const y = dump.screen.findIndex((row) => /^ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] tv_stream \[query="gated"\]$/u.test(row));
+      assert.ok(y >= 0, 'actual physical screen has the running glyph; only animation phase may differ from the tree snapshot');
+      assert.equal(dump.cells[y][1].width, 1); assert.equal(dump.cells[y][3].text, 't');
+      const expected = await referenceCell(dump.summaryStyles.dim);
+      assert.deepEqual({ fg: dump.cells[y][1].fg, fgMode: dump.cells[y][1].fgMode, dim: dump.cells[y][1].dim },
+        { fg: expected.fg, fgMode: expected.fgMode, dim: expected.dim });
+      assert.ok(['', ' '].includes(dump.cells[y][dump.width - 1].text));
+      assert.ok(!dump.screen.some((row) => row.includes('STREAM_PARTIAL')));
+      assert.equal(dump.spinnerStats.active, 1); assert.equal(dump.spinnerStats.maxActive, 1);
+      assert.ok(dump.spinnerStats.intervals.every((delay) => delay === 100));
+      return dump.cells[y][1].text;
+    };
+    try {
+      const stock = await start('spinner-stock');
+      stock.send('run pending\r'); await stock.event('provider_gate');
+      writeFileSync(join(stock.output, 'provider-go'), 'go'); await stock.event('tool_gate');
+      const nativePartial = await busyCapture(stock, 'partial');
+      writeFileSync(join(stock.output, 'tool-go'), 'go'); await stock.event('agent_end');
+      const native = await stock.capture('complete');
+      assert.equal(native.spinnerStats.starts, 0, 'observer ignores native Pi animation timers');
+      const live = await start('spinner-toolview', { toolview: true, workspace: stock.work });
+      const idle = await live.capture('idle'); assert.equal(idle.spinnerStats.starts, 0);
+      live.send('run pending\r'); await live.event('provider_gate');
+      const argumentsOnly = await busyCapture(live, 'arguments');
+      assert.equal(argumentsOnly.spinnerStats.starts, 0); assert.equal(argumentsOnly.spinnerStats.ticks, 0);
+      assert.equal(lines(argumentsOnly.tools[0])[0], ' → read a.txt');
+      writeFileSync(join(live.output, 'provider-go'), 'go'); await live.event('tool_gate');
+      await live.event('spinner_tick_checkpoint');
+      live.send('/toolview cache\r'); await live.settle(true);
+      const warm = await busyCapture(live, 'warm'); await assertBusy(warm);
+      const builds = warm.cacheDiagnostics.at(-1).builds;
+      await live.event('spinner_tick_checkpoint', 2);
+      live.send('/toolview cache\r'); await live.settle(true);
+      const hot = await busyCapture(live, 'hot'); await assertBusy(hot);
+      assert.ok(hot.spinnerStats.ticks > warm.spinnerStats.ticks);
+      assert.equal(hot.cacheDiagnostics.at(-1).builds, builds, 'real animation frames perform zero custom body rebuilds');
+      assert.equal(hot.spinnerStats.requests - warm.spinnerStats.requests, hot.spinnerStats.ticks - warm.spinnerStats.ticks,
+        'each observed clock tick requests exactly one normal render');
+      assert.equal(hot.spinnerStats.starts, warm.spinnerStats.starts, 'hot animation starts no new timers');
+      assert.equal(hot.spinnerStats.stops, warm.spinnerStats.stops, 'hot animation never restarts its clock');
+      assert.ok(Object.keys(hot.spinnerWork.widths).every((key) => key.endsWith(':100')), 'clock-work observations never perform synthetic alternate-width renders');
+      assert.equal(hot.spinnerWork.invalidations, warm.spinnerWork.invalidations, 'ticks cause no native tool invalidation');
+      const runningStarts = hot.spinnerStats.starts, runningStops = hot.spinnerStats.stops;
+      // Full frames reach xterm in the real PTY stream, not merely component render() snapshots.
+      const distinct = new Set();
+      for (let i = 0; i < 4; i++) { await live.settle(true); distinct.add(await assertBusy(await busyCapture(live, `phase-${i}`))); }
+      assert.ok(distinct.size >= 2, 'physical first cell really animates');
+      live.send('/toolview off\r'); await live.settle(true);
+      const off = await busyCapture(live, 'off'); assert.equal(off.spinnerStats.active, 0); assert.equal(off.spinnerStats.stops, runningStops + 1);
+      assert.deepEqual(toolLines(off), toolLines(nativePartial), 'off delegates actual partial information exactly to native');
+      const offAgain = await busyCapture(live, 'off-again'); assert.deepEqual(offAgain.spinnerStats, off.spinnerStats, 'zero Toolview ticks/redraws while off despite active native animation');
+      live.send('/toolview on\r'); await live.settle(true);
+      const on = await busyCapture(live, 'on'); await assertBusy(on); assert.equal(on.spinnerStats.starts, runningStarts + 1);
+      writeFileSync(join(live.output, 'tool-go'), 'go'); await live.event('agent_end');
+      const complete = await live.capture('complete'); assert.equal(complete.spinnerStats.active, 0);
+      assert.equal(complete.spinnerStats.stops, runningStops + 2); assert.equal(lines(byName(complete, 'tv_stream')[0])[0], ' ⚙ tv_stream [query="gated"]');
+      const idleAgain = await live.capture('idle-again'); assert.deepEqual(idleAgain.spinnerStats, complete.spinnerStats, 'zero ticks and zero spinner render requests after completion');
+      const traffic = normalTraffic(live); assert.deepEqual(traffic, normalTraffic(stock));
+      assert.equal(traffic.filter((event) => event.type === 'call').length, 2);
+      assert.equal(traffic.filter((event) => event.type === 'result').length, 2);
+      assert.equal(traffic.filter((event) => event.type === 'model_context').length, 3);
+      assert.deepEqual(persisted(complete), persisted(native));
+      const bytes = readFileSync(complete.session), starts = live.events().filter((event) => event.type === 'start').length;
+      await live.command('/reload'); await live.event('start', starts + 1);
+      const reloaded = await live.capture('reloaded'); assert.equal(reloaded.spinnerStats.starts, 0);
+      assert.ok(complete.tools[1].before.some((entry) => entry.kind === 'ThemedText' && entry.lines.some((row) => row.includes('Pi Toolview: on'))),
+        'live on-command notification is a visible native sibling, not persisted session data');
+      assert.equal(complete.tools[1].lines[0], '', 'visible notification requires one native-text separator');
+      assert.ok(reloaded.tools[1].before.some((entry) => entry.name === 'read'));
+      assert.deepEqual(reloaded.tools[0].lines, complete.tools[0].lines);
+      assert.deepEqual(reloaded.tools[1].lines, complete.tools[1].lines.slice(1), 'reload removes only the separator for the vanished on-notification; call bytes stay exact');
+      assert.deepEqual(readFileSync(complete.session), bytes);
+      const replay = await start('spinner-replay', { toolview: true, session: complete.session, workspace: stock.work });
+      const resumed = await replay.capture('replay'); assert.equal(resumed.spinnerStats.starts, 0); assert.equal(resumed.spinnerStats.ticks, 0);
+      assert.deepEqual(toolLines(resumed), toolLines(reloaded)); assert.deepEqual(persisted(resumed), persisted(native));
+      assert.deepEqual(readFileSync(complete.session), bytes);
+      // Real cancellation produces a final error and stops the restarted clock without waiting for normal tool completion.
+      for (const terminal of [stock, live]) {
+        rmSync(join(terminal.output, 'provider-go')); rmSync(join(terminal.output, 'tool-go'));
+        terminal.send('run pending-abort\r'); await terminal.event('provider_gate', 2);
+        writeFileSync(join(terminal.output, 'provider-go'), 'go'); await terminal.event('tool_gate', 2);
+        await terminal.settle(true);
+        terminal.send('\x1b'); await terminal.event('agent_end', 2);
+      }
+      const aborted = await live.capture('aborted'), abortedNative = await stock.capture('aborted');
+      assert.equal(aborted.spinnerStats.active, 0);
+      assert.equal(byName(aborted, 'tv_stream').at(-1).isError, true);
+      assert.deepEqual(normalTraffic(live), normalTraffic(stock), 'cancellation also preserves exact real tool/model traffic');
+      assert.deepEqual(persisted(aborted), persisted(abortedNative));
+      const afterAbort = await live.capture('after-abort'); assert.deepEqual(afterAbort.spinnerStats, aborted.spinnerStats);
+      writeFileSync(join(artifacts, 'spinner-coverage.json'), JSON.stringify({
+        normalCalls: 2, normalResults: 2, normalModelContexts: 3, buildsBefore: builds, buildsAfter: hot.cacheDiagnostics.at(-1).builds,
+        runningClock: hot.spinnerStats, stoppedClock: complete.spinnerStats, abortedClock: aborted.spinnerStats,
+        physicalFrames: [...distinct], idleRequestsAdded: 0, idleTicksAdded: 0,
+        controls: ['native partial/complete', 'pre-execution zero clocks', 'hot cached animation', 'off/on while running', 'completion idle', 'reload', 'same-session replay', 'native cancellation traffic'],
+      }, null, 2));
+    } finally { for (const terminal of terminals.reverse()) { await terminal.close(); terminal.dispose(); } }
+  });
+
 test('real CLI: gated pending/streaming, image/hidden fallback and exact-name flags',
   { skip: stockOnly, timeout: 120000 }, async (t) => {
     assert.ok(existsSync(extension), 'src/index.ts is required for the implementation gate');
@@ -820,17 +1053,19 @@ test('real CLI: gated pending/streaming, image/hidden fallback and exact-name fl
       live.send('run pending\r'); await live.event('provider_gate');
       const pending = await live.capture('arguments-pending', { animated: true });
       assert.equal(lines(byName(pending, 'read')[0]).length, 1);
-      assert.match(lines(byName(pending, 'read')[0])[0], /…/);
-      assert.ok(pending.screen.some((line) => /\bread\b.*…|….*\bread\b/.test(line)));
+      assert.equal(lines(byName(pending, 'read')[0])[0], ' → read a.txt');
+      assert.equal(byName(pending, 'read')[0].executionStarted, false);
+      assert.ok(pending.screen.some((line) => line === ' → read a.txt'), 'argument streaming retains the static glyph and has no trailing ellipsis');
       writeFileSync(join(live.output, 'provider-go'), 'go'); await live.event('tool_gate');
       const streaming = await live.capture('tool-pending', { animated: true });
       assert.equal(lines(byName(streaming, 'tv_stream')[0]).length, 1);
-      assert.match(lines(byName(streaming, 'tv_stream')[0])[0], /…/);
-      assert.ok(streaming.screen.some((line) => /tv_stream.*…|….*tv_stream/.test(line)));
+      assert.match(lines(byName(streaming, 'tv_stream')[0])[0], /^ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] tv_stream \[query="gated"\]$/u);
+      assert.equal(byName(streaming, 'tv_stream')[0].executionStarted, true);
+      assert.ok(streaming.screen.some((line) => /^ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] tv_stream \[query="gated"\]$/u.test(line)), 'actual screen shows a spinner in column one and no trailing marker');
       assert.ok(!streaming.screen.some((line) => line.includes('STREAM_PARTIAL')));
       writeFileSync(join(live.output, 'tool-go'), 'go'); await live.event('agent_end');
       const complete = await live.capture('complete');
-      assert.match(lines(byName(complete, 'tv_stream')[0])[0], /✓/);
+      assert.equal(lines(byName(complete, 'tv_stream')[0])[0], ' ⚙ tv_stream [query="gated"]');
       await live.run('future');
       await live.run('fallback'); const fallback = await live.capture('fallback');
       assert.ok(byName(fallback, 'read').at(-1).content.some((c) => c.type === 'image'), 'real image read produced an image result');
@@ -946,7 +1181,7 @@ test('real CLI: installed-profile registrations and real local task renderers',
         const tool = byName(compacted, name)[0];
         const rows = compactContent(tool);
         assert.match(rows[0], new RegExp(name));
-        assert.match(rows.at(-1), /✓$/u);
+        assert.doesNotMatch(rows.join(''), /✓|✗/u);
         if (name === 'TaskList') assert.equal(rows.length, 1, 'no-args real task stays single-row');
         const row = compacted.screen.findIndex((line) => line.includes(`⚙ ${name}`));
         assert.ok(row >= 0, `real installed ${name} summary is on screen`);

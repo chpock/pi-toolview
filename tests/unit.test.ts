@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import xterm from "@xterm/headless";
 import { Container, Text, visibleWidth, parseColor, TuiAltScreen, TuiMainScreen, type Terminal, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -43,6 +46,7 @@ class Tool extends Container {
   constructor(name = "read", args: Record<string, unknown> = { path: "a.txt" }) {
     super(); this.toolName = name; this.args = args;
   }
+  markExecutionStarted() { this.executionStarted = true; }
   updateResult(result: Tool["result"], partial = false) { this.result = result; this.isPartial = partial; }
   updateArgs(args: Record<string, unknown>) { this.args = args; }
   setExpanded(value: boolean) { this.expanded = value; }
@@ -59,6 +63,7 @@ class Tool extends Container {
     return undefined;
   }
 }
+const spinnerFrames = Array.from("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏");
 const color = { fg: (_name: string, text: string) => text };
 function setup(children: (Container | Text | Tool)[] = [], options: ToolviewOptions = {}) {
   const root = new Root();
@@ -110,24 +115,265 @@ test("rich, image, hidden and expanded tools delegate exactly", () => {
   } finally { controller.restore(); }
 });
 
+test("completed summaries hide result text and markers; failures color every visible segment", () => {
+  for (const name of ["read", "custom"]) {
+    const tool = new Tool(name, { pattern: "needle", path: "文件/" + "p".repeat(40), query: "a,b,c", limit: 0 });
+    const root = new Root(); root.addChild(tool);
+    const paints: { role: string; text: string }[] = [];
+    const controller = installToolview(root, () => ({ fg: (role, text) => {
+      paints.push({ role, text });
+      return `\x1b[${role === "error" ? 31 : 37}m${text}\x1b[39m`;
+    } }));
+    try {
+      const args = structuredClone(tool.args);
+      tool.updateResult({ isError: true, content: [{ type: "text", text: "ERROR_BODY_SENTINEL\nSTACK_SENTINEL" }], details: { raw: "UNCHANGED" } });
+      const result = structuredClone(tool.result);
+      assert.doesNotMatch(tool.render(80).map(plain).join(""), /ERROR_BODY_SENTINEL|STACK_SENTINEL/u, "error preview is never part of a collapsed call");
+      for (let width = 1; width <= 100; width++) {
+        controller.clearCache(); paints.length = 0;
+        const rows = tool.render(width);
+        assert.ok(rows.length > 0, "completed failed tool stays visible, including tiny widths");
+        assert.ok(paints.length > 0 && paints.every(({ role }) => role === "error"), `all segments use error at width ${width}`);
+        assert.ok(rows.every((row) => visibleWidth(row) <= Math.max(1, width - 1)));
+        assert.doesNotMatch(rows.map(plain).join(""), /ERROR_BODY_SENTINEL|STACK_SENTINEL|✓|✗| — /u);
+        if (width >= 6) {
+          assert.equal(rows.map(plain).map((row) => row.slice(3)).join("").replace(/ /g, ""),
+            `${name} ${describeArgs(name, tool.args)}`.replace(/ /g, ""));
+          assert.ok(rows.map(plain).every((row) => !row.endsWith(" ")), "hidden marker leaves no dangling separator space");
+        }
+      }
+      const failed = tool.render(30).map(plain);
+      assert.ok(tool.handleMouse(mouse(failed.length - 1, 30))?.handled, "last failed continuation opens native information");
+      assert.deepEqual(tool.render(30), ["", `NATIVE ${name}`, "FULL_OUTPUT"]);
+      tool.setExpanded(false);
+      tool.updateResult({ content: [{ type: "text", text: "SUCCESS_BODY_SENTINEL" }] });
+      controller.clearCache(); paints.length = 0;
+      const success = tool.render(30).map(plain);
+      assert.deepEqual(success, failed, "error state changes colors, not logical call text or height");
+      assert.ok(paints.some(({ role }) => role === "dim") && paints.every(({ role }) => role !== "error"));
+      assert.doesNotMatch(success.join(""), /SUCCESS_BODY_SENTINEL|✓|✗/u);
+      assert.deepEqual(tool.args, args);
+      tool.updateResult(result, true);
+      paints.length = 0;
+      assert.ok(spinnerFrames.includes(plain(tool.render(30)[0]!)[1]!));
+      assert.doesNotMatch(tool.render(30).join(""), /…/u);
+      assert.ok(paints.every(({ role }) => role !== "error"), "partial isError does not mark the call failed");
+      tool.updateResult(result);
+      assert.deepEqual(tool.result, result);
+      assert.deepEqual(tool.render(30).map(plain), failed);
+    } finally { controller.restore(); }
+  }
+});
+
+test("hiding completion badges never removes literal status glyphs from supplied arguments", () => {
+  const tool = new Tool("custom", { query: "✓,✗", pattern: "✓" });
+  const { controller } = setup([tool]);
+  try {
+    assert.equal(tool.render(80).at(-1), ' ⚙ custom "✓" [query="✓,✗"]');
+    tool.updateResult({ isError: true, content: [{ type: "text", text: "HIDDEN_ERROR" }] });
+    assert.equal(tool.render(80).at(-1), ' ⚙ custom "✓" [query="✓,✗"]');
+  } finally { controller.restore(); }
+});
+
+test("completion marker constant can restore success and failure symbols without error-body previews", async () => {
+  const sourceUrl = new URL("../src/index.ts", import.meta.url);
+  const source = readFileSync(sourceUrl, "utf8");
+  const switchLine = "const SHOW_COMPLETION_MARKERS = false;";
+  assert.ok(source.includes(switchLine), "one source constant controls final markers and defaults to false");
+  const enabled = source.replace(switchLine, "const SHOW_COMPLETION_MARKERS = true;")
+    .replace(/from "([^"]+)"/gu, (_match, specifier: string) =>
+      `from ${JSON.stringify(specifier.startsWith(".") ? new URL(specifier, sourceUrl).href : import.meta.resolve(specifier))}`);
+  const temporary = mkdtempSync(join(tmpdir(), "toolview-completion-markers-"));
+  let controller: ReturnType<typeof installToolview> | undefined;
+  try {
+    const file = join(temporary, "index.ts"); writeFileSync(file, enabled);
+    const alternate = await import(pathToFileURL(file).href);
+    const root = new Root(), tool = new Tool(); root.addChild(tool);
+    controller = alternate.installToolview(root, () => color);
+    assert.equal(tool.render(80).at(-1), " → read a.txt ✓");
+    tool.updateResult({ isError: true, content: [{ type: "text", text: "ERROR_BODY_SENTINEL" }] });
+    assert.equal(plain(tool.render(80).at(-1)!), " → read a.txt ✗");
+    assert.doesNotMatch(tool.render(80).join(""), /ERROR_BODY_SENTINEL/u);
+    assert.deepEqual(tool.render(5), ["✗"]);
+    tool.updateResult({ content: [] }); assert.deepEqual(tool.render(5), ["✓"]);
+    tool.updateResult(undefined); assert.match(plain(tool.render(80).at(-1)!), /…$/u);
+    assert.deepEqual(tool.render(5), ["⠋"]);
+    tool.executionStarted = false; assert.deepEqual(tool.render(5), ["…"]);
+  } finally { controller?.restore(); rmSync(temporary, { recursive: true, force: true }); }
+});
+
+test("one execution-only spinner clock changes prefixes without rebuilding cached summaries and stops immediately", (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const intervals = t.mock.method(globalThis, "setInterval"), clears = t.mock.method(globalThis, "clearInterval");
+  const first = new Tool("read", { path: "a.txt", query: "x".repeat(90) }), second = new Tool("custom", { drop: "1,2,3,4" });
+  first.result = second.result = undefined; first.executionStarted = second.executionStarted = false;
+  const { root, controller } = setup([first, second]);
+  try {
+    assert.ok(root.render(30).every((row) => !row.includes("…")));
+    assert.equal(intervals.mock.calls.length, 0, "argument streaming alone starts no animation clock");
+    const idle = root.requests; t.mock.timers.tick(10000); assert.equal(root.requests, idle);
+    first.markExecutionStarted();
+    const beforeStart = controller.cacheStats().builds;
+    const initial = first.render(30).map(plain);
+    assert.equal(initial[0]!.slice(0, 3), " ⠋ ");
+    assert.equal(controller.cacheStats().builds, beforeStart, "execution start changes only the uncached glyph");
+    second.markExecutionStarted(); second.render(30);
+    assert.equal(intervals.mock.calls.length, 1, "parallel tools share one clock");
+    assert.equal(intervals.mock.calls[0]!.arguments[1], 100, "bounded ten-frame-per-second cadence");
+    const builds = controller.cacheStats().builds, requests = root.requests;
+    const seen = new Set<string>();
+    for (let frame = 0; frame < 4; frame++) {
+      t.mock.timers.tick(100);
+      assert.equal(root.requests, requests + frame + 1, "one ordinary render request per clock tick, not per tool");
+      const rows = first.render(30).map(plain); seen.add(rows[0]![1]!);
+      assert.deepEqual(rows.map((row) => row.slice(3)), initial.map((row) => row.slice(3)), "every argument/continuation is unchanged");
+      assert.equal(controller.cacheStats().builds, builds, "ticks cause no custom layout rebuilds or global invalidation");
+    }
+    assert.equal(seen.size, 4);
+    first.updateResult({ isError: true, content: [{ type: "text", text: "PARTIAL" }] }, true);
+    first.render(30); assert.equal(intervals.mock.calls.length, 1, "partial failure keeps the existing clock");
+    first.updateResult({ content: [] }); assert.equal(clears.mock.calls.length, 0, "other running tool keeps the clock alive");
+    assert.ok(first.render(30).map(plain)[0]!.startsWith(" → read"));
+    second.updateResult({ isError: true, content: [{ type: "text", text: "FULL_ERROR" }] });
+    assert.equal(clears.mock.calls.length, 1, "final result stops the last clock before another render");
+    const finalRequests = root.requests; t.mock.timers.tick(100000); assert.equal(root.requests, finalRequests, "zero redraws during idle");
+    assert.equal(second.render(80).at(-1), ' ⚙ custom [drop="1,2,3,4"]');
+    second.updateResult(undefined); second.render(80); assert.equal(intervals.mock.calls.length, 2);
+    controller.restore(); assert.equal(clears.mock.calls.length, 2);
+    const restored = root.requests; t.mock.timers.tick(100000); assert.equal(root.requests, restored, "restore cancels animation, not just its output");
+  } finally { controller.restore(); }
+});
+
+test("spinner clock ignores native/hidden/image/expanded/zero-width tools and drops detached subtrees", (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const intervals = t.mock.method(globalThis, "setInterval"), clears = t.mock.method(globalThis, "clearInterval");
+  const tool = new Tool("custom"), branch = new Container(); branch.addChild(tool);
+  tool.result = undefined;
+  const { root, controller } = setup([branch]);
+  try {
+    tool.expanded = true; tool.render(80);
+    tool.expanded = false; tool.hideComponent = true; tool.render(80);
+    tool.hideComponent = false; tool.result = { content: [{ type: "image" }] }; tool.isPartial = true; tool.render(80);
+    tool.result = undefined; tool.isPartial = false; tool.render(0);
+    assert.equal(intervals.mock.calls.length, 0);
+    tool.render(80); assert.equal(intervals.mock.calls.length, 1);
+    tool.setExpanded(true); assert.equal(clears.mock.calls.length, 1, "expansion stops immediately");
+    tool.setExpanded(false); tool.render(80); assert.equal(intervals.mock.calls.length, 2);
+    tool.hideComponent = true; const hidden = root.requests; t.mock.timers.tick(100);
+    assert.equal(clears.mock.calls.length, 2); assert.equal(root.requests, hidden, "hidden call gets no spinner redraw");
+    tool.hideComponent = false; tool.render(80);
+    tool.updateResult({ content: [{ type: "image" }] }, true); assert.equal(clears.mock.calls.length, 3);
+    tool.updateResult(undefined); tool.render(80); tool.render(0); assert.equal(clears.mock.calls.length, 4);
+    tool.render(80); root.removeChild(branch);
+    const detached = root.requests; t.mock.timers.tick(100);
+    assert.equal(clears.mock.calls.length, 5); assert.equal(root.requests, detached, "detached subtree cannot keep a clock running");
+    root.addChild(branch); tool.render(80); assert.equal(intervals.mock.calls.length, 6);
+    controller.restore(); assert.equal(clears.mock.calls.length, 6);
+    const inactive = root.requests; t.mock.timers.tick(100000); assert.equal(root.requests, inactive);
+  } finally { controller.restore(); }
+  const native = new Tool("bash", { command: "sleep 1" }); native.result = undefined;
+  const second = setup([native]);
+  try { native.render(80); assert.equal(intervals.mock.calls.length, 6, "default Bash card owns no compact spinner"); }
+  finally { second.controller.restore(); }
+});
+
+test("spinner clock stops on native zero-row visibility and render failure", (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const intervals = t.mock.method(globalThis, "setInterval"), clears = t.mock.method(globalThis, "clearInterval");
+  class SelfTool extends Tool {
+    visible = true;
+    getRenderShell() { return "self"; }
+    render(width: number) { return this.visible ? super.render(width) : []; }
+    handleMouse(event: TuiMouseEvent) { return super.handleMouse(event); }
+  }
+  const tool = new SelfTool("custom"); tool.result = undefined;
+  const root = new Root(); root.addChild(tool);
+  let bad = false;
+  const controller = installToolview(root, () => { if (bad) throw new Error("paint failure"); return color; });
+  try {
+    tool.visible = false; assert.deepEqual(tool.render(80), []); assert.equal(intervals.mock.calls.length, 0);
+    tool.visible = true; tool.render(80); assert.equal(intervals.mock.calls.length, 1);
+    tool.visible = false; assert.deepEqual(tool.render(80), []); assert.equal(clears.mock.calls.length, 1);
+    tool.visible = true; tool.render(80); bad = true; tool.render(80);
+    assert.equal(controller.active, false); assert.equal(clears.mock.calls.length, 2);
+    const requests = root.requests; t.mock.timers.tick(10000); assert.equal(root.requests, requests);
+  } finally { controller.restore(); }
+});
+
+test("spinner attachment follows stable TUI renderer replacement without probes, writes or orphan redraws", (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const intervals = t.mock.method(globalThis, "setInterval"), clears = t.mock.method(globalThis, "clearInterval");
+  const noop = () => {};
+  const terminal: Terminal = { columns: 80, rows: 20, kittyProtocolActive: false, start: noop, stop: noop,
+    drainInput: async () => {}, write: noop, moveBy: noop, hideCursor: noop, showCursor: noop,
+    clearLine: noop, clearFromCursor: noop, clearScreen: noop, setTitle: noop, setProgress: noop };
+  const roots = [new TuiAltScreen(terminal, false), new TuiMainScreen(terminal, false)], requests = [0, 0];
+  roots.forEach((root, index) => { root.requestRender = () => { requests[index]!++; }; });
+  let current = roots[0]!;
+  const reference = new Proxy({}, {
+    get: (_target, property) => {
+      assert.notEqual(property, "handleViewportInput");
+      const value = Reflect.get(current, property, current);
+      return typeof value === "function" ? (...args: unknown[]) => Reflect.apply(value, current, args) : value;
+    },
+    set: () => { throw new Error("No renderer writes"); },
+    defineProperty: () => { throw new Error("No receiver probe"); },
+    getPrototypeOf: () => Reflect.getPrototypeOf(current),
+  }) as TuiAltScreen;
+  const first = new Tool("read"); first.result = undefined; current.addChild(first);
+  const controller = installToolview(reference, () => color);
+  try {
+    first.render(80); t.mock.timers.tick(100); assert.equal(intervals.mock.calls.length, 1);
+    current = roots[1]!; const before = [...requests];
+    t.mock.timers.tick(100);
+    assert.equal(clears.mock.calls.length, 1); assert.deepEqual(requests, before, "old root cannot keep redrawing a replacement renderer");
+    const second = new Tool("custom"); second.result = undefined; current.addChild(second);
+    assert.ok(second.render(80).at(-1)!.startsWith(" ⠋ "));
+    t.mock.timers.tick(100); assert.equal(intervals.mock.calls.length, 2);
+    assert.equal(requests[1], before[1]! + 1); assert.equal(requests[0], before[0]);
+    second.updateResult({ content: [] }); assert.equal(clears.mock.calls.length, 2);
+  } finally { controller.restore(); }
+});
+
+test("extension off and shutdown cancel active clocks; non-TUI loading starts none", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const intervals = t.mock.method(globalThis, "setInterval"), clears = t.mock.method(globalThis, "clearInterval");
+  const h = extensionHarness("tui"), tool = new Tool(); tool.result = undefined; h.root.addChild(tool);
+  try {
+    h.events.get("session_start")!({}, h.ctx); h.root.render(80); assert.equal(intervals.mock.calls.length, 1);
+    await h.commands.get("toolview")!.handler("off", h.ctx); assert.equal(clears.mock.calls.length, 1);
+    const off = h.root.requests; t.mock.timers.tick(10000); assert.equal(h.root.requests, off);
+    await h.commands.get("toolview")!.handler("on", h.ctx); h.root.render(80); assert.equal(intervals.mock.calls.length, 2);
+    h.events.get("session_shutdown")!({}, h.ctx); assert.equal(clears.mock.calls.length, 2);
+    const closed = h.root.requests; t.mock.timers.tick(10000); assert.equal(h.root.requests, closed);
+    for (const mode of ["print", "json", "rpc"] as const) {
+      const other = extensionHarness(mode); other.root.addChild(tool);
+      other.events.get("session_start")!({}, other.ctx); other.root.render(80); other.events.get("session_shutdown")!({}, other.ctx);
+      assert.equal(intervals.mock.calls.length, 2, `${mode} installs no animation resources`);
+    }
+  } finally { h.events.get("session_shutdown")!({}, h.ctx); }
+});
+
 test("pending, partial, success and errors are distinguishable without full output", () => {
   const tool = new Tool();
   const { controller } = setup([tool]);
   try {
     tool.result = undefined; tool.isPartial = true;
-    assert.match(plain(tool.render(80).at(-1)!), /…$/);
+    assert.ok(spinnerFrames.includes(plain(tool.render(80)[0]!)[1]!));
+    assert.doesNotMatch(tool.render(80).join(""), /…/u);
     tool.result = { content: [{ type: "text", text: "PARTIAL_OUTPUT" }] };
-    assert.match(plain(tool.render(80).at(-1)!), /…$/);
+    assert.ok(spinnerFrames.includes(plain(tool.render(80)[0]!)[1]!));
+    assert.doesNotMatch(tool.render(80).join(""), /…/u);
     tool.isPartial = false;
-    assert.match(plain(tool.render(80).at(-1)!), /✓$/);
+    assert.equal(plain(tool.render(80).at(-1)!), " → read a.txt");
     assert.doesNotMatch(tool.render(80).join(""), /PARTIAL_OUTPUT/);
     tool.result = { isError: true, content: [{ type: "text", text: "ENOENT: missing file\nstack details" }] };
-    assert.match(plain(tool.render(80).at(-1)!), /ENOENT: missing file.*✗$/);
-    assert.doesNotMatch(tool.render(80).join(""), /stack details/);
+    assert.equal(plain(tool.render(80).at(-1)!), " → read a.txt");
+    assert.doesNotMatch(tool.render(80).join(""), /ENOENT|stack details|✓|✗/u);
   } finally { controller.restore(); }
 });
 
-test("status survives wrapping and Unicode at every usable width", () => {
+test("summary content survives wrapping and Unicode at every usable width", () => {
   const tool = new Tool("read", { path: "文件/🦀/é".repeat(20) });
   const { controller } = setup([tool]);
   try {
@@ -135,7 +381,8 @@ test("status survives wrapping and Unicode at every usable width", () => {
       const rows = tool.render(width);
       const line = rows.at(-1)!;
       for (const row of rows) assert.ok(visibleWidth(row) <= width, `${width}: ${visibleWidth(row)}`);
-      assert.match(plain(line), /✓$/);
+      assert.ok(plain(line).trim(), "completed summary remains visible without a completion badge");
+      assert.doesNotMatch(rows.map(plain).join(""), /✓|✗/u);
     }
     assert.deepEqual(tool.render(0), []);
   } finally { controller.restore(); }
@@ -166,8 +413,8 @@ test("policy overrides are exact names and compact wins", () => {
   try {
     assert.equal(tools[0].render(80).length, 1);
     assert.match(tools[1].render(80)[1], /NATIVE/);
-    assert.match(tools[2].render(80).at(-1)!, /bash.*✓/);
-    assert.match(tools[3].render(80).at(-1)!, /custom_extra.*✓/);
+    assert.match(tools[2].render(80).at(-1)!, /^ ⚙ bash /);
+    assert.match(tools[3].render(80).at(-1)!, /^ ⚙ custom_extra /);
   } finally { controller.restore(); }
 });
 
@@ -209,7 +456,7 @@ test("restoration is idempotent; re-enabling covers existing and future tools", 
   const second = installToolview(root, () => color);
   try {
     const future = new Tool(); root.addChild(future);
-    assert.match(future.render(80).at(-1)!, /✓/);
+    assert.equal(future.render(80).at(-1), " → read a.txt");
   } finally { second.restore(); }
 });
 
@@ -301,7 +548,7 @@ test("extension lifecycle removes the temporary widget, restores on shutdown, an
     assert.equal(Container.prototype.addChild, before);
     await h.commands.get("toolview")!.handler("on", h.ctx);
     assert.notEqual(Container.prototype.addChild, before);
-    assert.match(h.root.render(80).at(-1)!, /read.*✓/);
+    assert.match(h.root.render(80).at(-1)!, /read a\.txt/);
     await h.commands.get("toolview")!.handler("invalid", h.ctx);
     assert.match(h.notices.at(-1)!, /Usage:/);
   } finally { h.events.get("session_shutdown")!({}, h.ctx); }
@@ -348,7 +595,7 @@ test("empty self-rendered tools remain hidden even when hideComponent is false a
     assert.deepEqual(hidden.render(80), []);
     assert.equal(root.render(80).some((line) => line.includes("self_hidden")), false);
     assert.equal(next.render(80)[0], ""); // separation still follows the preceding visible user text
-    assert.match(hidden.render(24).at(-1)!, /self_hidden.*✓/); // visibility can depend on width
+    assert.match(hidden.render(24).at(-1)!, /^ ⚙ self_hidden /); // visibility can depend on width
     hidden.expanded = true;
     assert.deepEqual(hidden.render(80), ["NATIVE SELF"]);
   } finally { controller.restore(); }
@@ -372,11 +619,12 @@ test("only exact read summaries use an arrow; every other compact tool uses a on
           isError: state === "error", content: [{ type: "text", text: "ERROR_TEXT" }],
         }, state === "partial");
         const rows = tool.render(30).filter((row) => plain(row).trim());
-        assert.ok(rows[0]!.startsWith(`\x1b[90m ${glyph} \x1b[39m`), `${tool.toolName}: dim ${glyph}`);
+        const leading = state === "pending" || state === "partial" ? "⠋" : glyph;
+        assert.ok(rows[0]!.startsWith(`\x1b[${state === "error" ? 37 : 90}m ${leading} \x1b[39m`), `${tool.toolName}: ${state === "error" ? "error" : "dim"} ${glyph}`);
         assert.ok(rows.slice(1).every((row) => plain(row).startsWith("   ")));
         assert.ok(rows.every((row) => visibleWidth(row) <= 29));
         assert.deepEqual(tool.args, args);
-        assert.ok(tool.render(5).filter((row) => plain(row).trim()).every((row) => !/[→⚙]/u.test(plain(row))), "tiny viewports keep status only");
+        assert.deepEqual(tool.render(5).map(plain).filter((row) => row.trim()), [leading], "tiny viewports retain pending state or tool glyph");
       }
       terminal.reset();
       const row = tool.render(80).find((line) => plain(line).trim())!;
@@ -398,13 +646,12 @@ test("read summaries use distinct semantic roles and bracket only non-path param
   const parts: { color: string; text: string }[] = [];
   const controller = installToolview(root, () => ({ fg: (color, text) => { parts.push({ color, text }); return text; } }));
   try {
-    assert.equal(tool.render(120).at(-1), " → read a.txt [offset=5, limit=10] ✓");
+    assert.equal(tool.render(120).at(-1), " → read a.txt [offset=5, limit=10]");
     assert.deepEqual(parts, [
       { color: "dim", text: " → " },
       { color: "toolTitle", text: "read" },
       { color: "muted", text: " a.txt" },
       { color: "dim", text: " [offset=5, limit=10]" },
-      { color: "success", text: "✓" },
     ]);
   } finally { controller.restore(); }
 });
@@ -413,12 +660,12 @@ test("read without parameters has no empty brackets; patterns are primary descri
   const read = new Tool(), grep = new Tool("grep", { pattern: "needle", path: "src" });
   const { controller } = setup([read, grep]);
   try {
-    assert.equal(read.render(120).at(-1), " → read a.txt ✓");
-    assert.equal(grep.render(120).at(-1), ' ⚙ grep "needle" in src ✓');
+    assert.equal(read.render(120).at(-1), " → read a.txt");
+    assert.equal(grep.render(120).at(-1), ' ⚙ grep "needle" in src');
   } finally { controller.restore(); }
 });
 
-test("colored summary wrapping preserves a state marker and terminal-width bounds", () => {
+test("colored completed summary wrapping preserves content and terminal-width bounds", () => {
   const root = new Root(), tool = new Tool("read", { path: "文件/🦀/é".repeat(20), offset: 5, limit: 100 });
   root.addChild(tool);
   const controller = installToolview(root, () => ({ fg: (role, text) => {
@@ -431,7 +678,8 @@ test("colored summary wrapping preserves a state marker and terminal-width bound
       const rows = tool.render(width);
       const line = rows.at(-1)!;
       for (const row of rows) assert.ok(visibleWidth(row) <= width);
-      assert.match(plain(line), /✓$/);
+      assert.ok(plain(line).trim(), "completed summary remains visible without a completion badge");
+      assert.doesNotMatch(rows.map(plain).join(""), /✓|✗/u);
     }
   } finally { controller.restore(); }
 });
@@ -498,7 +746,7 @@ test("multiline summaries retain all parameters, align to tool name and recomput
     const joined = rows.map((row) => row.slice(3)).join("");
     assert.match(joined, /x{220}/); // no previous 180-column argument cap
     for (const key of ['query=', 'limit=0', 'enabled=false', 'z="last"']) assert.ok(joined.includes(key), key);
-    assert.match(joined, /\] ✓$/);
+    assert.match(joined, /\]$/);
     assert.equal(next.render(40)[0], "");
     assert.equal(last.render(40).length, 1); // next's leading separator is not content
     assert.notEqual(root.render(40).at(-1), "");
@@ -615,9 +863,9 @@ test("colored word-boundary wraps never add padding or blank clickable content r
     return `\x1b[${colors[role] ?? 31}m${text}\x1b[39m`;
   } }));
   try {
-    assert.deepEqual(tool.render(21).map(plain), [' → read', '   abcdefghijklm', '   [limit=1] ✓']);
+    assert.deepEqual(tool.render(21).map(plain), [' → read', '   abcdefghijklm', '   [limit=1]']);
     // The original colored-boundary geometry now occurs one column wider.
-    assert.deepEqual(tool.render(22).map(plain), [' → read abcdefghijklm', '   [limit=1] ✓']);
+    assert.deepEqual(tool.render(22).map(plain), [' → read abcdefghijklm', '   [limit=1]']);
     tool.args = { path: "abcdefghijklm", query: "x".repeat(40) };
     const rows = tool.render(21).map(plain);
     assert.ok(rows.length > 2);
@@ -641,9 +889,9 @@ test("array summaries wrap between members instead of splitting paths that fit",
     assert.equal(rows.length, 3);
     assert.equal(rows[0], ` ⚙ aft_inspect [scope=[${JSON.stringify(paths[0])},`);
     assert.equal(rows[1], `   ${JSON.stringify(paths[1])},`);
-    assert.equal(rows[2], `   ${JSON.stringify(paths[2])}]] ✓`);
+    assert.equal(rows[2], `   ${JSON.stringify(paths[2])}]]`);
     assert.deepEqual(tool.args, before);
-    assert.equal(rows.map((row) => row.slice(3)).join(""), `aft_inspect ${describeArgs(tool.toolName, tool.args)} ✓`);
+    assert.equal(rows.map((row) => row.slice(3)).join(""), `aft_inspect ${describeArgs(tool.toolName, tool.args)}`);
     assert.deepEqual(tool.render(110).map(plain), rows);
   } finally { controller.restore(); }
 });
@@ -654,13 +902,13 @@ test("comma-separated string values can start on the tool-name row and wrap afte
   try {
     assert.deepEqual(tool.render(36).map(plain), [
       ' ⚙ ctx_reduce [drop="3,4,5,8,9,10,',
-      '   12,15,18,21"] ✓',
+      '   12,15,18,21"]',
     ]);
     // Even a list that fits on its own must use the remaining first-row space.
     tool.updateArgs({ drop: "3,4,5,8,9,10,12" });
     assert.deepEqual(tool.render(30).map(plain), [
       ' ⚙ ctx_reduce [drop="3,4,5,8,',
-      '   9,10,12"] ✓',
+      '   9,10,12"]',
     ]);
     assert.equal(describeArgs(tool.toolName, tool.args), '[drop="3,4,5,8,9,10,12"]');
   } finally { controller.restore(); }
@@ -674,7 +922,7 @@ test("comma-aware wrapping preserves nested JSON, quotes, colors, graphemes and 
     return `\x1b[${colors[role] ?? 31}m${text}\x1b[39m`;
   } }));
   try {
-    const expected = `custom ${describeArgs(tool.toolName, tool.args)} ✓`;
+    const expected = `custom ${describeArgs(tool.toolName, tool.args)}`;
     for (let width = 6; width <= 100; width++) {
       const colored = tool.render(width);
       const rows = colored.map(plain);
@@ -682,12 +930,13 @@ test("comma-aware wrapping preserves nested JSON, quotes, colors, graphemes and 
       assert.ok(rows.slice(1).every((row) => row.startsWith("   ") && row.trim()));
       assert.equal(rows.map((row) => row.slice(3)).join("").replace(/ /g, ""), expected.replace(/ /g, ""));
       assert.ok(rows.every((row) => !row.slice(3).startsWith("\u0301")), "comma plus combining mark remains one grapheme");
-      assert.match(colored.at(-1)!, /\x1b\[32m✓\x1b\[39m$/);
+      assert.match(colored.at(-1)!, /\x1b\[90m/u, "wrapped parameters preserve their dim role");
+      assert.doesNotMatch(rows.join(""), /✓|✗/u);
     }
   } finally { controller.restore(); }
 });
 
-test("comma wrap points preserve native CJK breaks in primary descriptions and error explanations", () => {
+test("comma wrap points preserve native CJK breaks in primary descriptions and parameters on failures", () => {
   const tool = new Tool("custom", { path: "甲乙丙丁", drop: "1,2" });
   const { controller } = setup([tool]);
   try {
@@ -695,16 +944,13 @@ test("comma wrap points preserve native CJK breaks in primary descriptions and e
     assert.equal(plain(tool.render(18)[0]!), " ⚙ custom 甲乙丙");
     tool.updateArgs({ drop: "1,2" });
     tool.updateResult({ isError: true, content: [{ type: "text", text: "甲乙丙丁" }] });
-    assert.deepEqual(tool.render(28).map(plain), [
-      ' ⚙ custom [drop="1,2"] — 甲',
-      '   乙丙丁 ✗',
-    ]);
+    assert.deepEqual(tool.render(28).map(plain), [' ⚙ custom [drop="1,2"]']);
     tool.updateArgs({ target: ["甲乙丙丁", "한글かなカナ"] });
     for (let width = 6; width <= 40; width++) {
       const rows = tool.render(width).map(plain);
       assert.ok(rows.every((row) => visibleWidth(row) <= width));
       assert.equal(rows.map((row) => row.slice(3)).join("").replace(/ /g, ""),
-        `custom ${describeArgs(tool.toolName, tool.args)} — 甲乙丙丁 ✗`.replace(/ /g, ""));
+        `custom ${describeArgs(tool.toolName, tool.args)}`.replace(/ /g, ""));
     }
   } finally { controller.restore(); }
 });
@@ -717,7 +963,7 @@ test("comma wrapping still hard-wraps oversized array members and expands contin
     assert.ok(rows.length > 3);
     assert.ok(rows.every((row) => visibleWidth(row) <= 30));
     assert.match(rows.map((row) => row.slice(3)).join(""), /x{90}/);
-    assert.match(rows.at(-1)!, /"tail"\]\] ✓$/);
+    assert.match(rows.at(-1)!, /"tail"\]\]$/);
     assert.equal(tool.handleMouse(mouse(2, 30))?.handled, true);
     assert.equal(tool.expanded, true);
     assert.deepEqual(tool.render(30), ["", "NATIVE custom", "FULL_OUTPUT"]);
@@ -735,18 +981,18 @@ test("compact summaries reserve one right column before wrapping at every usable
       tool.result = state === "pending" ? undefined : {
         isError: state === "error", content: [{ type: "text", text: state === "error" ? "Failure 文件" : "RAW_RESULT" }],
       };
-      const marker = state === "pending" || state === "partial" ? "…" : state === "error" ? "✗" : "✓";
+      const glyph = state === "pending" || state === "partial" ? "⠋" : "⚙";
       const result = structuredClone(tool.result);
       for (let width = 0; width <= 90; width++) {
         const rows = tool.render(width).map(plain);
         if (!width) { assert.deepEqual(rows, []); continue; }
         assert.ok(rows.every((row) => visibleWidth(row) <= Math.max(1, width - 1)), `right margin: ${state}, width ${width}`);
-        assert.match(rows.at(-1)!, new RegExp(`${marker}$`, "u"));
-        if (width <= 5) assert.deepEqual(rows, [marker], "tiny viewports preserve status without overflowing prefix");
+        assert.doesNotMatch(rows.join(""), /…|✓|✗/u);
+        if (width <= 5) assert.deepEqual(rows, [glyph], "tiny viewports preserve pending state or tool glyph without overflowing prefix");
         else {
-          assert.match(rows[0]!, /^ ⚙ /u);
+          assert.equal(rows[0]!.slice(0, 3), ` ${glyph} `);
           assert.ok(rows.slice(1).every((row) => /^ {3}\S/u.test(row)));
-          const expected = `custom ${describeArgs(tool.toolName, tool.args)}${state === "error" ? " — Failure 文件" : ""} ${marker}`;
+          const expected = `custom ${describeArgs(tool.toolName, tool.args)}`;
           assert.equal(rows.map((row) => row.slice(3)).join("").replace(/ /g, ""), expected.replace(/ /g, ""));
         }
         assert.deepEqual(tool.render(width).map(plain), rows, "cached layout retains right margin");
@@ -1441,13 +1687,19 @@ test("unchanged UI frames reuse custom layout; one tool update does not rebuild 
 
 test("reused mutable arguments and results invalidate only through native update methods", () => {
   const tool = new Tool("custom", { query: "before" });
-  const { root, controller } = setup([tool]);
+  const root = new Root(); root.addChild(tool);
+  const controller = installToolview(root, () => ({ fg: (role, text) =>
+    `\x1b[${role === "error" ? 31 : 37}m${text}\x1b[39m` }));
   try {
     assert.ok(root.render(80).some((row) => plain(row).includes("before")));
     const args = tool.args; args.query = "after"; tool.updateArgs(args);
     assert.ok(root.render(80).some((row) => plain(row).includes("after")));
+    const beforeError = controller.cacheStats().builds;
     tool.result!.isError = true; tool.result!.content[0].text = "new error"; tool.updateResult(tool.result);
-    assert.ok(root.render(80).some((row) => plain(row).includes("new error")));
+    const errorRows = root.render(80);
+    assert.ok(errorRows.some((row) => row.includes("\x1b[31m")), "mutating result in place invalidates the previous success colors");
+    assert.doesNotMatch(errorRows.map(plain).join(""), /new error|✓|✗/u);
+    assert.equal(controller.cacheStats().builds, beforeError + 1);
     const builds = controller.cacheStats().builds;
     tool.invalidate(); root.render(80); assert.equal(controller.cacheStats().builds, builds + 1);
   } finally { controller.restore(); }
@@ -1536,6 +1788,8 @@ test("actual SDK viewport caches work and permits detached tool collection with 
   const records = JSON.parse(probe.stdout);
   assert.equal(records[0].segments, 88); assert.equal(records[1].segments, 0);
   assert.ok(records.some((record: { detachedToolCollected?: boolean }) => record.detachedToolCollected === true));
+  assert.ok(records.some((record: { animatedFirstInstallerCollected?: boolean; spinnerCacheBuildsUnchanged?: boolean }) =>
+    record.animatedFirstInstallerCollected === true && record.spinnerCacheBuildsUnchanged === true));
   mkdirSync(".test-artifacts/render-cache-proof", { recursive: true });
   writeFileSync(".test-artifacts/render-cache-proof/sdk.json", JSON.stringify(records, null, 2));
 });

@@ -1,5 +1,6 @@
 // Isolated actual-SDK work/ownership oracle; no real tools or user settings are touched.
 import assert from "node:assert/strict";
+import { stripVTControlCharacters } from "node:util";
 import { Container, ScrollView } from "@earendil-works/pi-tui";
 import { renderLayoutFrame } from "../../node_modules/@earendil-works/pi-tui/dist/layout.js";
 import { ToolExecutionComponent } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/tool-execution.js";
@@ -80,5 +81,38 @@ try {
     assert.equal(compactController.cacheStats().builds, 2);
     observations.push({ compactBashMutationUpdated: true, ...compactController.cacheStats() });
   } finally { compactController.restore(); }
+   // The first installer is genuinely executing while the adapter owns its animation clock.
+  const spinnerRoot = new Root(), spinnerViewport = new ScrollView(spinnerRoot, { scrollbar: "hidden", primary: true });
+  let spinning: ToolExecutionComponent | undefined = new ToolExecutionComponent("read", "spinner-owner", { path: "a.txt", limit: 1 },
+    undefined, undefined, spinnerRoot as never, "/tmp");
+  spinnerRoot.addChild(spinning);
+  const spinnerController = installToolview(spinnerRoot as never, () => theme);
+  const spinnerFrame = () => renderLayoutFrame(spinnerViewport, 80, 24, () => {}).lines.map(stripVTControlCharacters);
+  try {
+    const before = spinnerFrame(), builds = spinnerController.cacheStats().builds;
+    spinning.markExecutionStarted(); const cold = spinnerFrame();
+    assert.equal(cold[0]![1], "⠋");
+    assert.deepEqual(cold.map((row) => row.slice(3)), before.map((row) => row.slice(3)));
+    assert.equal(spinnerController.cacheStats().builds, builds, "actual native execution-start notification preserves cached argument layout");
+    const reference = new WeakRef(spinning);
+    const glyphs = new Set([cold[0]![1]]);
+    for (let i = 0; i < 3; i++) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 120));
+      const warm = spinnerFrame(); glyphs.add(warm[0]![1]);
+      assert.deepEqual(warm.map((row) => row.slice(3)), cold.map((row) => row.slice(3)));
+      assert.equal(spinnerController.cacheStats().builds, builds, "actual SDK animation changes no cached argument layout");
+    }
+    assert.ok(glyphs.size >= 3, "real timer advances the actual SDK viewport prefix");
+    const stillRunning = new ToolExecutionComponent("custom", "spinner-still-running", { query: "keep clock active" },
+      undefined, undefined, spinnerRoot as never, "/tmp");
+    spinnerRoot.addChild(stillRunning); stillRunning.markExecutionStarted(); spinnerFrame();
+    spinnerRoot.removeChild(spinning); spinning = undefined; spinnerFrame();
+    for (let i = 0; i < 12; i++) {
+      await new Promise<void>((resolve) => setImmediate(resolve)); globalThis.gc!();
+    }
+    assert.equal(reference.deref(), undefined, "adapter/active shared clock must not retain its first installer while a second tool is still running");
+    observations.push({ animatedFirstInstallerCollected: true, spinnerFramesObserved: glyphs.size,
+      spinnerBuilds: builds, spinnerCacheBuildsUnchanged: true });
+  } finally { spinnerController.restore(); }
   console.log(JSON.stringify(observations));
 } finally { controller.restore(); Intl.Segmenter.prototype.segment = original; }

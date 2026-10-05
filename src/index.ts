@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext, ThemeColor } from "@earendil-works/pi-coding-agent";
-import { Container, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
+import { Container, visibleWidth, wrapTextWithAnsi, type Component, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { isAbsolute, resolve } from "node:path";
 import { renderBashCard } from "./bash-card.ts";
@@ -18,6 +18,7 @@ interface ToolNode extends Component {
   executionStarted: boolean;
   argsComplete: boolean;
   result?: { content: { type: string; text?: string }[]; isError?: boolean; details?: unknown };
+  markExecutionStarted(): void;
   updateArgs(args: unknown): void;
   updateResult(result: unknown, partial?: boolean): void;
   setExpanded(expanded: boolean): void;
@@ -47,6 +48,10 @@ export interface ToolviewController {
   setCacheLimitMiB(value: number): void;
 }
 const DEFAULT_CARDS = ["bash", "powershell", "write", "edit"];
+// Controls all trailing status markers, including the pending ellipsis, not the leading spinner.
+const SHOW_COMPLETION_MARKERS = false;
+const SPINNER_FRAMES = Array.from("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏");
+const SPINNER_INTERVAL_MS = 100;
 
 /** Untrusted labels may not inject colors, terminal commands, bidi controls, or additional rows. */
 export function sanitize(value: string): string {
@@ -156,7 +161,7 @@ function compatible(node: ToolNode): boolean {
     typeof node.hideComponent === "boolean" && typeof node.isPartial === "boolean" &&
     typeof node.executionStarted === "boolean" && typeof node.argsComplete === "boolean" &&
     !!node.args && typeof node.args === "object" && !Array.isArray(node.args) &&
-    typeof node.updateArgs === "function" && typeof node.updateResult === "function" &&
+    typeof node.markExecutionStarted === "function" && typeof node.updateArgs === "function" && typeof node.updateResult === "function" &&
     typeof node.setExpanded === "function" && typeof node.getRenderContext === "function" &&
     typeof node.getRenderShell === "function" &&
     typeof node.render === "function" && typeof node.handleMouse === "function";
@@ -177,6 +182,57 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
   const parents = new WeakMap<Component, { parent: Container; index: number }>();
   const cache = new RenderCache((options.cacheMiB ?? 8) * 1024 * 1024);
   type Layout = { rows: string[] };
+  type SummaryLayout = Layout & { prefixLength: number };
+  const animated = new Set<WeakRef<ToolNode>>();
+  let animationRefs = new WeakMap<ToolNode, WeakRef<ToolNode>>();
+  let spinnerTimer: ReturnType<typeof setInterval> | undefined;
+  let spinnerFrame = 0;
+  function stopSpinner() {
+    if (spinnerTimer !== undefined) clearInterval(spinnerTimer);
+    spinnerTimer = undefined;
+    spinnerFrame = 0;
+  }
+  function removeAnimation(node: ToolNode) {
+    const reference = animationRefs.get(node);
+    if (reference) { animated.delete(reference); animationRefs.delete(node); }
+    if (!animated.size) stopSpinner();
+  }
+  // Public tree edges also recognize the stable TUI proxy without probing its receiver.
+  function attached(node: Component): boolean {
+    let current = node;
+    while (current !== tui) {
+      if (current instanceof Container && tui instanceof Container && current.children === tui.children) return true;
+      const position = parents.get(current);
+      if (!position) return false;
+      const children = position.parent.children;
+      if (children[position.index] !== current) position.index = children.indexOf(current);
+      if (position.index < 0) return false;
+      current = position.parent;
+    }
+    return true;
+  }
+  const executing = (node: ToolNode) => node.executionStarted && (node.isPartial || !node.result) && eligible(node);
+  function tickSpinner() {
+    // Only the small weak set of painted running calls, never a full transcript traversal.
+    for (const reference of animated) {
+      const node = reference.deref();
+      if (!node) animated.delete(reference);
+      else if (!executing(node) || !attached(node)) removeAnimation(node);
+    }
+    if (!animated.size) { stopSpinner(); return; }
+    spinnerFrame = (spinnerFrame + 1) % SPINNER_FRAMES.length;
+    tui.requestRender(); // No global/native invalidation and no custom layout rebuild.
+  }
+  function animate(node: ToolNode) {
+    if (!executing(node) || !attached(node)) { removeAnimation(node); return; }
+    if (!animationRefs.has(node)) {
+      const reference = new WeakRef(node); animationRefs.set(node, reference); animated.add(reference);
+    }
+    if (spinnerTimer === undefined) {
+      spinnerTimer = setInterval(tickSpinner, SPINNER_INTERVAL_MS);
+      spinnerTimer.unref?.();
+    }
+  }
   let states = new WeakMap<ToolNode, { signature: unknown[]; entry: CacheEntry<Layout> }>();
   const forget = (node: ToolNode) => { cache.drop(states.get(node)?.entry); states.delete(node); };
   const clearCache = () => { cache.clear(); states = new WeakMap(); };
@@ -208,7 +264,7 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
   };
   const summaryLayout = (node: ToolNode, width: number) => {
     const theme = getTheme();
-    return memo(node, "summary", width, theme, undefined, () => ({ rows: summaryRows(node, width, theme) })).rows;
+    return memo(node, "summary", width, theme, undefined, () => summaryRows(node, width, theme));
   };
   const controller: ToolviewController = {
     get active() { return active; },
@@ -219,6 +275,7 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     restore() {
       if (!active && !patches.size) return;
       active = false;
+      stopSpinner(); animated.clear(); animationRefs = new WeakMap();
       clearCache();
       if (Container.prototype.addChild === patchedAdd) Container.prototype.addChild = originalAdd;
       for (const [prototype, patch] of patches) {
@@ -262,14 +319,19 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
   }
 
 
-  function summaryRows(node: ToolNode, width: number, theme: Palette): string[] {
-    if (width < 1) return [];
+  function summaryRows(node: ToolNode, width: number, theme: Palette): SummaryLayout {
+    if (width < 1) return { rows: [], prefixLength: 0 };
     const available = width - 1; // Reserve the right margin before laying out any text.
     const failed = !node.isPartial && node.result?.isError;
-    const marker = node.isPartial || !node.result ? "…" : failed ? "✗" : "✓";
-    const statusColor = failed ? "error" : marker === "✓" ? "success" : "muted";
-    if (available < 5) return [theme.fg(statusColor, marker)];
-    const prefix = theme.fg("dim", node.toolName === "read" ? " → " : " ⚙ ");
+    const pending = node.isPartial || !node.result;
+    const marker = SHOW_COMPLETION_MARKERS ? pending ? "…" : failed ? "✗" : "✓" : "";
+    const statusColor = failed ? "error" : pending ? "muted" : "success";
+    const glyph = node.toolName === "read" ? "→" : "⚙";
+    if (available < 5) {
+      const prefix = theme.fg(marker ? statusColor : failed ? "error" : "dim", marker || glyph);
+      return { rows: [prefix], prefixLength: prefix.length };
+    }
+    const prefix = theme.fg(failed ? "error" : "dim", ` ${glyph} `);
     const parts: { color?: ThemeColor; text: string }[] = [{ color: "toolTitle", text: sanitize(node.toolName).trim() }];
     const { pattern, object, params } = argumentParts(node.args);
     if (pattern) {
@@ -278,16 +340,14 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     } else if (object) parts.push({ color: "muted", text: ` ${object}` });
     const parameterStart = parts.reduce((length, part) => length + part.text.length, 0) + 1;
     if (params) parts.push({ color: "dim", text: ` ${params}` });
-    const error = failed ? node.result?.content.find((item) => item.type === "text")?.text?.split(/[\r\n]/u)[0] : undefined;
-    if (error) parts.push({ color: "toolTitle", text: ` — ${truncateToWidth(sanitize(error).trim(), 180)}` });
-    parts.push({ text: " " }, { color: statusColor, text: marker });
+    if (marker) parts.push({ text: " " }, { color: statusColor, text: marker });
     // Layout plain text before styling. Pi 1.0.0's ANSI word wrapper mistakes
     // colored whitespace for content, adding padding or empty content rows.
     const plain = parts.map((part) => part.text).join("");
     let end = 0;
     const spans = parts.map((part) => { const start = end; end += part.text.length; return { ...part, start, end }; });
     let cursor = 0;
-    return wrapSummary(plain, available - 3, parameterStart, params.length).map((line, index) => {
+    const rows = wrapSummary(plain, available - 3, parameterStart, params.length).map((line, index) => {
       const start = plain.indexOf(line, cursor);
       if (start < 0) throw new Error("Wrapped text is not a source substring");
       cursor = start + line.length;
@@ -295,10 +355,19 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
         const from = Math.max(start, span.start), to = Math.min(cursor, span.end);
         if (from >= to) return "";
         const text = plain.slice(from, to);
-        return span.color ? theme.fg(span.color, text) : text;
+        return failed ? theme.fg("error", text) : span.color ? theme.fg(span.color, text) : text;
       }).join("");
       return (index === 0 ? prefix : "   ") + styled;
     });
+    return { rows, prefixLength: prefix.length };
+  }
+  function paintSummary(node: ToolNode, width: number): string[] {
+    const layout = summaryLayout(node, width);
+    animate(node);
+    if (!executing(node) || !layout.rows.length) return layout.rows;
+    const frame = SPINNER_FRAMES[spinnerFrame]!;
+    const prefix = getTheme().fg("dim", width < 6 ? frame : ` ${frame} `);
+    return [prefix + layout.rows[0]!.slice(layout.prefixLength), ...layout.rows.slice(1)];
   }
   function nativeRows(node: Component, width: number): string[] {
     const render = candidate(node) ? patches.get(Object.getPrototypeOf(node))?.render.value as Render | undefined : undefined;
@@ -312,7 +381,7 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     for (let index = current - 1; index >= 0; index--) {
       const previous = siblings[index];
       if (width > 0 && bashCard(previous, width)) return { compact: false, tool: true, height: 3 };
-      if (compact(previous, width)) return { compact: true, tool: true, height: summaryLayout(previous, width).length };
+      if (compact(previous, width)) return { compact: true, tool: true, height: summaryLayout(previous, width).rows.length };
       const lines = nativeRows(previous, width);
       if (lines.length) return { compact: false, tool: candidate(previous), height: lines.length - (lines[0] === "" ? 1 : 0) };
     }
@@ -344,20 +413,22 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     const patchedRender: Render = function (width) {
       try {
         if (bashCard(this, width)) {
+          removeAnimation(this);
           const rows = bashLayout(this, width).rows;
           if (!rows.length) return rows;
           return previousLayout(this, width) ? ["", ...rows] : rows;
         }
         if (!eligible(this)) {
+          removeAnimation(this);
           const lines = originalRender.call(this, width);
           return nativeGap(this, width, lines) ? ["", ...lines] : lines;
         }
-        if (width < 1) return [];
+        if (width < 1) { removeAnimation(this); return []; }
         if (this.getRenderShell() === "self") {
           const lines = originalRender.call(this, width);
-          if (!lines.length) return lines;
+          if (!lines.length) { removeAnimation(this); return lines; }
         }
-        return [...Array(gap(this, width)).fill(""), ...summaryLayout(this, width)];
+        return [...Array(gap(this, width)).fill(""), ...paintSummary(this, width)];
       }
       catch { fail("Toolview could not render this component; native rendering restored"); return originalRender.call(this, width); }
     };
@@ -379,21 +450,23 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
       }
       const offset = gap(this, event.width);
       if (!this.result || this.isPartial || event.type !== "click" || event.button !== "left" ||
-        event.y < offset || event.y >= offset + summaryLayout(this, event.width).length) return undefined;
+        event.y < offset || event.y >= offset + summaryLayout(this, event.width).rows.length) return undefined;
       this.setExpanded(true);
       tui.requestRender();
       return { handled: true };
     };
-    const updates = ["updateArgs", "updateResult", "setExpanded", "invalidate"].map((name) => {
+    const updates = ["updateArgs", "updateResult", "setExpanded", "invalidate", "markExecutionStarted"].map((name) => {
       const original = Object.getOwnPropertyDescriptor(prototype, name);
       const method = (prototype as Record<string, unknown>)[name];
       if (typeof method !== "function" || (original && (!original.writable || !original.configurable)) || (!original && !Object.isExtensible(prototype)))
         throw new Error("Tool cache invalidation methods cannot be wrapped");
       const wrapper = function (this: ToolNode, ...args: unknown[]) {
         // Bash keys include every displayed argument; unrelated/same argument updates reuse its body.
-        if (!(name === "updateArgs" && this.toolName === "bash" && !overrides.has("bash")) &&
+        if (name !== "markExecutionStarted" && !(name === "updateArgs" && this.toolName === "bash" && !overrides.has("bash")) &&
           !(name === "setExpanded" && args[0] === this.expanded)) forget(this);
-        return method.apply(this, args);
+        const result = method.apply(this, args);
+        if (!executing(this) || !attached(this)) removeAnimation(this);
+        return result;
       };
       return { name, original, wrapper };
     });
@@ -405,10 +478,8 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
   }
   function visit(node: Component, parent?: Container, index = -1) {
     if (!active) return;
-    if (candidate(node)) {
-      if (parent) parents.set(node, { parent, index });
-      install(node);
-    }
+    if (parent) parents.set(node, { parent, index });
+    if (candidate(node)) install(node);
     if (node instanceof Container) node.children.forEach((child, index) => visit(child, node, index));
   }
   function patchedAdd(this: Container, child: Component) {
