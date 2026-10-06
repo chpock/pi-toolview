@@ -87,6 +87,46 @@ export default function terminalDriver(pi: ExtensionAPI) {
   // Representative AFT-shaped results only; this never loads or executes installed AFT.
   // It must be enabled in a separate invocation, never in the built-in scenarios.
   const bashShape = process.env.TOOLVIEW_TEST_BASH_SHAPE === "1";
+  const writeShape = process.env.TOOLVIEW_TEST_WRITE_SHAPE === "1";
+  const writeDiagnostics = process.env.TOOLVIEW_TEST_WRITE_CARDS === "1";
+  const writeSource = '/* write comment\ncontinued write comment */\nexport const value = "界é";\n' +
+    Array.from({ length: 15 }, (_, i) => `const line${i + 4} = ${i + 4};`).join("\n") + '\nconst WRITE_TAIL_19 = 19;';
+  const writeStockSuite: Pick<ToolCall, "name" | "arguments">[] = [
+    { name: "write", arguments: { path: "write-stock.ts", content: writeSource } },
+    { name: "write", arguments: { path: "write-stock.ts", content: "const overwritten = 20;\n" } },
+    { name: "write", arguments: { path: "write-empty.ts", content: "const filled = 21;\n" } },
+    { name: "write", arguments: { path: "write-cleared.ts", content: "" } },
+    { name: "write", arguments: { path: "write-directory", content: "FAILED_WRITE_PAYLOAD" } },
+  ];
+  const writeShapeCases = ["created", "edited", "replaced", "cleared", "noop", "context-only", "truncated", "malformed", "plain", "hidden"];
+  const writeShapeSuite: Pick<ToolCall, "name" | "arguments">[] = [
+    ...writeShapeCases.map(fixtureCase => ({ name: "write", arguments: { path: `write-${fixtureCase}.ts`,
+      content: fixtureCase === "created" ? "ARGS_CREATED_MUST_NOT_REPLACE_RESULT" : fixtureCase === "cleared" ? "" : `const supplied_${fixtureCase.replace(/-/g, "_")} = 42;`, fixtureCase } })),
+    { name: "read", arguments: { path: "a.txt", limit: 1 } },
+  ];
+  if (writeShape) pi.registerTool({
+    name: "write", label: "Representative write fixture", description: "Isolated saved-metadata write fixture; never executes AFT or changes files",
+    parameters: Type.Object({ path: Type.String(), content: Type.String(), fixtureCase: Type.String() }),
+    renderShell: "self",
+    renderCall(args, theme) { return new Text(args.fixtureCase === "hidden" ? "" : theme.fg("toolTitle", `NATIVE_WRITE ${args.path}`), 0, 0); },
+    renderResult(result) { return new Text((result.details as { hidden?: boolean })?.hidden ? "" : result.content.filter(c => c.type === "text").map(c => c.text).join("\n"), 0, 0); },
+    async execute(_id, args, signal, onUpdate) {
+      if (args.fixtureCase === "created" && writeDiagnostics) {
+        onUpdate?.({ content: [{ type: "text", text: "PROPOSED_WRITE_BODY" }], details: { diff: "+1 PROPOSED_WRITE_DIFF" } });
+        record({ type: "write_execution_gate" }); await gate("write-execution-go", signal);
+      }
+      const diff = (value: string) => ({ diff: value });
+      const details = args.fixtureCase === "created" ? diff(writeSource.split("\n").map((line, i) => `+${i + 1} ${line}`).join("\n")) :
+        args.fixtureCase === "edited" ? diff(" 1 const old1 = 1;\n 2 const old2 = 2;\n 3 const old3 = 3;\n 4 const old4 = 4;\n+5 const ADDED_WRITE = 5;\n 5 const tail = 6;") :
+        args.fixtureCase === "replaced" ? { patch: "@@ -1,2 +1,2 @@\n-const BEFORE_WRITE = 1;\n-const OLD_WRITE = 2;\n+const AFTER_WRITE = 3;\n+const NEXT_WRITE = 4;\n" } :
+        args.fixtureCase === "cleared" ? diff("-1 const ERASED_WRITE = 1;") :
+        args.fixtureCase === "noop" ? { diff: "", noOp: true } : args.fixtureCase === "context-only" ? diff(" 1 const unchanged = 1;") :
+        args.fixtureCase === "truncated" ? { diff: "+1 INCOMPLETE_DIFF", truncated: true } :
+        args.fixtureCase === "malformed" ? { patch: "@@ -1 +1 @@\n-UNFINISHED\n", diff: "+1 LOWER_PRIORITY" } :
+        args.fixtureCase === "hidden" ? { diff: "+1 HIDDEN_WRITE", hidden: true } : undefined;
+      return { content: [{ type: "text", text: `NATIVE_WRITE_RESULT_${args.fixtureCase}` }], details };
+    },
+  });
   if (bashShape) pi.registerTool({
     name: "bash", label: "Representative bash fixture", description: "Isolated deterministic bash-shaped result fixture",
     parameters: Type.Object({ command: Type.String(), description: Type.Optional(Type.String()),
@@ -353,7 +393,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
         const user: any = context.messages[last];
         const prompt = typeof user?.content === "string" ? user.content :
           user?.content?.filter((c: any) => c.type === "text").map((c: any) => c.text).join("");
-        const scenario = prompt?.includes("run edit-performance") ? "edit-performance" : prompt?.includes("run edit-cards") ? "edit-cards" : prompt?.includes("run user-card") ? "user-card" : prompt === "run cache-performance" ? "cache-performance" : prompt?.includes("bash-width") ? "bash-width" : prompt?.includes("bash-stream") ? "bash-stream" : prompt?.includes("bash-real") ? "bash-real" :
+        const scenario = prompt?.includes("run write-stock") ? "write-stock" : prompt?.includes("run write-shapes") ? "write-shapes" : prompt?.includes("run edit-performance") ? "edit-performance" : prompt?.includes("run edit-cards") ? "edit-cards" : prompt?.includes("run user-card") ? "user-card" : prompt === "run cache-performance" ? "cache-performance" : prompt?.includes("bash-width") ? "bash-width" : prompt?.includes("bash-stream") ? "bash-stream" : prompt?.includes("bash-real") ? "bash-real" :
           prompt?.includes("bash-shape-exception-stream") ? "bash-shape-exception-stream" : prompt?.includes("bash-shape-exceptions") ? "bash-shape-exceptions" :
           prompt?.includes("bash-shape-stream") ? "bash-shape-stream" : prompt?.includes("bash-shapes") ? "bash-shapes" :
           prompt?.includes("bounded-summaries") ? "bounded-summaries" : prompt?.includes("compact-errors") ? "compact-errors" : prompt?.includes("comma-wrap") ? "comma-wrap" : prompt?.includes("boundary") ? "boundary" : prompt?.includes("multiline") ? "multiline" : prompt?.includes("integration") ? "integration" :
@@ -365,7 +405,9 @@ export default function terminalDriver(pi: ExtensionAPI) {
         })) });
         if (scenario.startsWith("bash-shape") && !bashShape) throw new Error("bash-shape scenario requires explicit isolated opt-in");
         if (["cache-performance", "bash-width", "bash-real", "bash-stream", "suite", "multiline"].includes(scenario) && bashShape) throw new Error("Built-in scenario cannot run with bash-shape opt-in");
-        const calls: Pick<ToolCall, "name" | "arguments">[] = scenario === "edit-performance" ? editPerformanceSuite : scenario === "edit-cards" ? editSuite : scenario === "user-card" ? [
+        if (scenario === "write-shapes" && !writeShape) throw new Error("write-shapes requires explicit isolated opt-in");
+        if (writeShape && scenario !== "write-shapes") throw new Error("write-shape opt-in is isolated from all other scenarios");
+        const calls: Pick<ToolCall, "name" | "arguments">[] = scenario === "write-stock" ? writeStockSuite : scenario === "write-shapes" ? writeShapeSuite : scenario === "edit-performance" ? editPerformanceSuite : scenario === "edit-cards" ? editSuite : scenario === "user-card" ? [
           { name: "bash", arguments: { command: "printf 'USER_BASH_OUTPUT\\n'" } },
           { name: "read", arguments: { path: "a.txt" } },
         ] : scenario === "cache-performance" ? cacheSuite : scenario === "bash-width" ? bashWidth : scenario === "bash-real" ? bashReal : scenario === "bash-shapes" ? bashShapes :
@@ -400,7 +442,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
           await wait(60);
           message.content[0] = call;
           stream.push({ type: "toolcall_delta", contentIndex: 0, delta: JSON.stringify(call.arguments), partial: message });
-          if ((scenario === "pending" || scenario === "bash-stream" || scenario === "edit-cards") && step === 0) {
+          if ((scenario === "pending" || scenario === "bash-stream" || scenario === "edit-cards" || (writeDiagnostics && scenario.startsWith("write-"))) && step === 0) {
             record({ type: "provider_gate" });
             await gate("provider-go", options?.signal);
           }
@@ -439,7 +481,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
     });
     ctx.ui.setWidget("terminal-driver", undefined);
   });
-  let editExecutionGated = false;
+  let editExecutionGated = false, writeExecutionGated = false;
   pi.on("tool_call", async (event) => {
     record({ type: "call", name: event.toolName, input: event.input });
     // Await after native execution-start, without replacing the actual built-in edit implementation.
@@ -448,6 +490,9 @@ export default function terminalDriver(pi: ExtensionAPI) {
       editExecutionGated = true;
       record({ type: "edit_execution_gate" });
       await gate("edit-execution-go");
+    }
+    if (!writeExecutionGated && writeDiagnostics && !writeShape && event.toolName === "write" && event.input.path === "write-stock.ts") {
+      writeExecutionGated = true; record({ type: "write_execution_gate" }); await gate("write-execution-go");
     }
     // Installed-profile requests are restricted to the two audited, real local task tools.
     if (process.env.TOOLVIEW_TEST_PROFILE === "installed" && !["TaskCreate", "TaskList"].includes(event.toolName)) {
@@ -529,7 +574,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
         observedSpinnerNodes.add(node); node.render = observedToolRender; node.invalidate = observedToolInvalidate;
       }
       writeFileSync(join(output, `${name}.json`), JSON.stringify({
-        session: ctx.sessionManager.getSessionFile(), width, cwd: ctx.cwd, bashShape,
+        session: ctx.sessionManager.getSessionFile(), width, cwd: ctx.cwd, bashShape, writeShape,
         ...(spinnerDiagnostics ? { spinnerStats, spinnerWork } : {}),
         ...(editDiagnostics ? { nativeRenderCalls } : {}),
         selectionActive: typeof tui.hasActiveSelection === "function" ? tui.hasActiveSelection() : false,
@@ -569,7 +614,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
           ...(spinnerDiagnostics ? { before: parents.get(node)?.children.slice(Math.max(0, parents.get(node).children.indexOf(node) - 3), parents.get(node).children.indexOf(node))
             .map((previous: any) => ({ kind: previous.constructor.name, name: previous.toolName, lines: previous.render(width).map(stripVTControlCharacters) })) } : {}),
           // Pointer/clock-work captures inspect only actual viewport paint; alternate widths intentionally rebuild layouts and width zero stops/restarts animation.
-          ...(name.startsWith("pointer-") || spinnerDiagnostics || editDiagnostics ? {} : { narrowLines: node.render(24),
+          ...(name.startsWith("pointer-") || spinnerDiagnostics || editDiagnostics || writeDiagnostics ? {} : { narrowLines: node.render(24),
             tinyLines: Object.fromEntries([0, 1, 2, 3, 4, 5, 6, 7, 8].map((size) => [size, node.render(size)])) }) })),
         document: parents.get(tools[0])?.render(width),
         branch: ctx.sessionManager.getBranch(),

@@ -4,7 +4,8 @@ import { colorToRgb, rgbColor, stripTerminalSequences, visibleWidth, wrapTextWit
 import { cardGeometry, frameRows } from "./card-frame.ts";
 import { toolCardPaint, type CardTheme } from "./card-theme.ts";
 
-interface EditPresentation {
+interface FilePresentation {
+  toolName?: string;
   args: Record<string, unknown>;
   isPartial: boolean;
   result?: { isError?: boolean; details?: unknown };
@@ -20,7 +21,7 @@ function clean(value: string): string {
   return stripVTControlCharacters(stripTerminalSequences(value)).replace(/\p{Bidi_Control}/gu, "")
     .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b\u200e\u200f\u2060-\u206f]/gu, "");
 }
-export function editPath(args: Record<string, unknown>): string | undefined {
+export function filePath(args: Record<string, unknown>): string | undefined {
   const path = args.path ?? args.file_path ?? args.filePath;
   return typeof path === "string" && path.length ? path : undefined;
 }
@@ -49,7 +50,7 @@ function* sourceRows(diff: string, trimFinalNewline = false): Generator<string> 
 }
 
 /** Pi/AFT number context in the old file; OpenCode's unified view numbers context in the new file. */
-function numberedDiff(diff: string, content = true): DiffLine[] | undefined {
+function numberedDiff(diff: string, content = true, kinds?: Set<" " | "+" | "-">): DiffLine[] | undefined {
   if (!diff) return [];
   const result: DiffLine[] = [];
   let delta = 0;
@@ -59,6 +60,7 @@ function numberedDiff(diff: string, content = true): DiffLine[] | undefined {
     if (!match) return undefined;
     const kind = match[1] as " " | "+" | "-", number = Number(match[2]);
     if (!validNumber(number) || number < 1 || (kind === " " && (!validNumber(number + delta) || number + delta < 1))) return undefined;
+    kinds?.add(kind);
     if (content) result.push({ kind, text: tabText(match[3]!), old: kind !== "+" ? number : undefined,
       next: kind === " " ? number + delta : kind === "+" ? number : undefined });
     if (kind === "+") delta++;
@@ -68,7 +70,7 @@ function numberedDiff(diff: string, content = true): DiffLine[] | undefined {
 }
 
 /** Accept single-file unified patches only, and validate hunk counts before painting any edits. */
-function unifiedDiff(diff: string, content = true): DiffLine[] | undefined {
+function unifiedDiff(diff: string, content = true, kinds?: Set<" " | "+" | "-">): DiffLine[] | undefined {
   if (!diff) return [];
   const result: DiffLine[] = [];
   let old = 0, next = 0, oldRemaining = 0, newRemaining = 0, hunks = 0;
@@ -89,6 +91,7 @@ function unifiedDiff(diff: string, content = true): DiffLine[] | undefined {
     if (kind !== " " && kind !== "+" && kind !== "-") return undefined;
     if (kind !== "+" && --oldRemaining < 0) return undefined;
     if (kind !== "-" && --newRemaining < 0) return undefined;
+    kinds?.add(kind);
     if (content) result.push({ kind, text: tabText(row.slice(1)), old: kind !== "+" ? old : undefined, next: kind !== "-" ? next : undefined, hunk: hunks });
     if (kind !== "+") old++;
     if (kind !== "-") next++;
@@ -97,30 +100,63 @@ function unifiedDiff(diff: string, content = true): DiffLine[] | undefined {
 }
 
 /** Validation-only calls collect no source rows and do no cleaning, segmentation or highlighting. */
-function editDiff(node: EditPresentation, content = true): DiffLine[] | "inline" | undefined {
+function savedDiff(node: FilePresentation, content = true, kinds?: Set<" " | "+" | "-">): DiffLine[] | "inline" | undefined {
   // Reject stale/proposed source before even looking at diff metadata on final errors.
   if (!node.isPartial && node.result?.isError === true) return "inline";
   const details = node.result?.details as { diff?: unknown; patch?: unknown } | undefined;
   if (details?.diff === undefined && details?.patch === undefined) return "inline";
-  return typeof details?.patch === "string" ? unifiedDiff(details.patch, content) : typeof details?.diff === "string" ?
-    /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/mu.test(details.diff) ? unifiedDiff(details.diff, content) : numberedDiff(details.diff, content) : undefined;
+  if (details?.patch !== undefined) return typeof details.patch === "string" ? unifiedDiff(details.patch, content, kinds) : undefined;
+  return typeof details?.diff === "string" ? /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/mu.test(details.diff) ?
+    unifiedDiff(details.diff, content, kinds) : numberedDiff(details.diff, content, kinds) : undefined;
 }
-function heading(path: string, cwd: string | undefined): string {
+type FileView = { label: "Edited" | "Created" | "Replaced" | "Wrote"; mode: "inline" | "diff" | "code"; lines: DiffLine[]; note?: string };
+
+/** Classify supplied rows before projecting context; validation-only calls never materialize code. */
+function presentation(node: FilePresentation, content = true): FileView | undefined {
+  if (node.toolName !== "write") {
+    const diff = savedDiff(node, content);
+    return diff === "inline" ? { label: "Edited", mode: "inline", lines: [] } :
+      diff ? { label: "Edited", mode: "diff", lines: diff } : undefined;
+  }
+  // Partial/failure source is never a candidate for a completed write card.
+  if (!node.result || node.isPartial || node.result.isError) return undefined;
+  const details = node.result.details as { truncated?: unknown; noOp?: unknown } | undefined;
+  const suppliedCode = (): FileView | undefined => {
+    if (typeof node.args.content !== "string") return undefined;
+    const lines: DiffLine[] = [];
+    if (content && node.args.content.length) {
+      let next = 1;
+      for (const text of sourceRows(node.args.content)) lines.push({ kind: " ", text: tabText(text), next: next++ });
+    }
+    return { label: "Wrote", mode: "code", lines,
+      note: details?.truncated === true ? "Diff truncated by tool; showing supplied content." : details?.noOp === true ? "No changes." : undefined };
+  };
+  // An explicitly incomplete diff cannot establish a change class, even if some rows survived.
+  if (details?.truncated === true) return suppliedCode();
+  const kinds = new Set<" " | "+" | "-">(), diff = savedDiff(node, content, kinds);
+  if (!diff) return undefined; // Malformed/present unsupported metadata stays native.
+  if (diff === "inline" || (!kinds.has("+") && !kinds.has("-"))) return suppliedCode();
+  if (kinds.has("-")) return { label: "Replaced", mode: "diff", lines: diff };
+  if (kinds.has(" ")) return { label: "Edited", mode: "diff", lines: diff };
+  return { label: "Created", mode: "code", lines: diff };
+}
+
+function heading(path: string, cwd: string | undefined, label: FileView["label"]): string {
   const local = cwd && isAbsolute(path) ? relative(cwd, path) : path;
-  return `← Edited ${clean(local || path).replace(/\s+/gu, " ").trim()}`;
+  return `← ${label} ${clean(local || path).replace(/\s+/gu, " ").trim()}`;
 }
 
 /** Class/height needed for spacing or rejected clicks, not a rendered layout or a second cache. */
-export function measureEditCard(node: EditPresentation, cwd: string | undefined, width: number) {
-  const path = editPath(node.args);
+export function measureFileCard(node: FilePresentation, cwd: string | undefined, width: number) {
+  const path = filePath(node.args);
   if (!path) return undefined;
   if (!width) return { framed: false, height: 0 };
-  const diff = editDiff(node, false);
-  if (!diff) return undefined;
+  const view = presentation(node, false);
+  if (!view) return undefined;
   // A frame always has padding plus a title: only height > 1 matters to transcript spacing.
-  if (diff !== "inline") return { framed: true, height: 3 };
+  if (view.mode !== "inline") return { framed: true, height: 3 };
   const inset = Math.min(cardGeometry(width).contentX, Math.max(0, width - 1));
-  return { framed: false, height: chunks(heading(path, cwd), width - inset).length };
+  return { framed: false, height: chunks(heading(path, cwd, view.label), width - inset).length };
 }
 
 /** Project available context without changing source positions or joining separate hunks. */
@@ -234,12 +270,13 @@ function diffTints(theme: CardTheme): DiffTints {
   }
   return tints;
 }
-function cell(line: DiffLine | undefined, side: "old" | "next", width: number, digits: number, theme: CardTheme, tints: DiffTints): string[] {
+function cell(line: DiffLine | undefined, side: "old" | "next", width: number, digits: number, theme: CardTheme, tints: DiffTints, plain = false): string[] {
   if (!line) return [" ".repeat(width)];
   if (line.kind === "gap") return [theme.fg("dim", "…") + " ".repeat(width - 1)];
-  const gutterWidth = digits + 4 < width ? digits + 4 : 0;
+  const gutterSize = digits + (plain ? 2 : 4);
+  const gutterWidth = gutterSize < width ? gutterSize : 0;
   const contentWidth = width - gutterWidth;
-  const role = line.kind === "+" ? "toolDiffAdded" : line.kind === "-" ? "toolDiffRemoved" : undefined;
+  const role = plain ? undefined : line.kind === "+" ? "toolDiffAdded" : line.kind === "-" ? "toolDiffRemoved" : undefined;
   const tint = (text: string, part: "gutter" | "code") => {
     const bg = role ? tints[role]?.[part] : undefined;
     return bg && theme.style ? theme.style(text, { bg }) : text;
@@ -247,18 +284,18 @@ function cell(line: DiffLine | undefined, side: "old" | "next", width: number, d
   const wrapped = chunks(line.text, contentWidth), styled = styledChunks(line.styled ?? line.text, wrapped);
   return wrapped.map((chunk, index) => {
     const number = index === 0 ? String(line[side] ?? "").padStart(digits) : " ".repeat(digits);
-    const sign = index === 0 && role ? theme.fg(role, ` ${line.kind}`) : "  ";
+    const sign = plain ? "" : index === 0 && role ? theme.fg(role, ` ${line.kind}`) : "  ";
     const gutter = gutterWidth ? tint(theme.fg("dim", " " + number) + sign + " ", "gutter") : "";
     const fragment = styled[index] ?? "";
     const code = stripVTControlCharacters(fragment) === chunk.text ? fragment : theme.fg("toolOutput", chunk.text);
     return gutter + tint(code + " ".repeat(contentWidth - chunk.size), "code");
   });
 }
-function* diffRows(lines: DiffLine[], width: number, split: boolean, theme: CardTheme): Generator<string> {
-  const tints = diffTints(theme);
+function* codeRows(lines: DiffLine[], width: number, split: boolean, theme: CardTheme, plain = false): Generator<string> {
+  const tints = plain ? {} : diffTints(theme);
   const digits = String(lines.reduce((max, line) => line.kind === "gap" ? max : Math.max(max, line.old ?? 0, line.next ?? 0), 1)).length;
   if (!split) {
-    for (const line of lines) yield* cell(line, line.kind === "-" ? "old" : "next", width, digits, theme, tints);
+    for (const line of lines) yield* cell(line, line.kind === "-" ? "old" : "next", width, digits, theme, tints, plain);
     return;
   }
   const leftWidth = Math.floor(width / 2), rightWidth = width - leftWidth;
@@ -281,31 +318,36 @@ function* diffRows(lines: DiffLine[], width: number, split: boolean, theme: Card
   }
 }
 
-/** OpenCode Edit content policy inside Toolview's accepted shared frame. Undefined means native fallback. */
-export function renderEditCard(node: EditPresentation, cwd: string | undefined, width: number, theme: CardTheme, highlighter?: CodeHighlight) {
+/** Shared edit/write source presentation inside the accepted frame. Undefined means native fallback. */
+export function renderFileCard(node: FilePresentation, cwd: string | undefined, width: number, theme: CardTheme, highlighter?: CodeHighlight) {
   const geometry = cardGeometry(width), available = geometry.contentWidth;
-  const path = editPath(node.args);
+  const path = filePath(node.args);
   if (!path) return undefined;
   if (!width) return { rows: [] as string[], framed: false, native: false };
-  const title = heading(path, cwd);
+  const view = presentation(node);
+  if (!view) return undefined;
+  const title = heading(path, cwd, view.label);
   const error = !node.isPartial && node.result?.isError === true;
   const details = node.result?.details as { diff?: unknown; patch?: unknown; diagnostics?: unknown } | undefined;
-  const diff = editDiff(node);
-  if (diff === "inline") {
+  if (view.mode === "inline") {
     const inset = Math.min(geometry.contentX, Math.max(0, width - 1));
     return { rows: chunks(title, width - inset).map((row) => " ".repeat(inset) + theme.fg(error ? "error" : "muted", row.text)),
       framed: false, native: false };
   }
-  if (!diff) return undefined;
+  const diff = view.lines;
   highlight(diff, path, theme, highlighter);
   // Highlight all supplied source first: hidden context can open a multiline token.
-  const visible = contextRows(diff);
+  const visible = view.mode === "code" ? diff : contextRows(diff);
   const body = chunks(title, available).map((row) => theme.fg("muted", row.text));
   if (visible.length) {
     body.push("");
     // Only mixed edits benefit from two panes; classify the entire parsed diff, not each hunk.
-    const split = width > 120 && diff.some(line => line.kind === "+") && diff.some(line => line.kind === "-");
-    for (const row of diffRows(visible, available, split, theme)) body.push(row);
+    const split = view.mode === "diff" && width > 120 && diff.some(line => line.kind === "+") && diff.some(line => line.kind === "-");
+    for (const row of codeRows(visible, available, split, theme, view.mode === "code")) body.push(row);
+  }
+  if (view.note) {
+    body.push("");
+    for (const row of chunks(view.note, available)) body.push(theme.fg("muted", row.text));
   }
   // AFT supplies flattened display positions, not OpenCode's zero-based LSP range map.
   if (Array.isArray(details?.diagnostics)) {

@@ -7,11 +7,11 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import xterm from "@xterm/headless";
 import { Box, Container, Spacer, Text, visibleWidth, parseColor, colorToRgb, TuiAltScreen, TuiMainScreen, type Terminal, type TuiMouseEvent } from "@earendil-works/pi-tui";
-import { ToolExecutionComponent as NativeToolExecution, createEditToolDefinition, highlightCode, getLanguageFromPath, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { ToolExecutionComponent as NativeToolExecution, createEditToolDefinition, createWriteToolDefinition, createWriteTool, highlightCode, getLanguageFromPath, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import toolview, { installToolview, describeArgs, sanitize, type ToolviewOptions } from "../src/index.ts";
 import { cardGeometry, frameRows, insidePanel } from "../src/card-frame.ts";
 import { renderUserCard } from "../src/user-card.ts";
-import { measureEditCard, renderEditCard } from "../src/edit-card.ts";
+import { measureFileCard, renderFileCard } from "../src/file-card.ts";
 import { generateDiffString, generateUnifiedPatch } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/edit-diff.js";
 import type { CardTheme } from "../src/card-theme.ts";
 import { RenderCache } from "../src/render-cache.ts";
@@ -1996,7 +1996,7 @@ test("one-sided edits use full-width unified rows for numbered and unified metad
     const patch = generateUnifiedPatch("one-sided.ts", oldSource, newSource);
     for (const details of [{ diff }, { patch }, { diff: patch }]) for (const width of [120, 121, 140, 141, 200]) {
       const snapshot = structuredClone(details);
-      const rows = renderEditCard({ args: { path: "one-sided.ts" }, isPartial: false, result: { details } }, undefined, width, color)!.rows.map(plain);
+      const rows = renderFileCard({ args: { path: "one-sided.ts" }, isPartial: false, result: { details } }, undefined, width, color)!.rows.map(plain);
       assert.equal(rows.join("\n").split('const marker = "+ -";').length - 1, 1, "context is shown once, not in two panes; code punctuation is not a diff sign");
       const source = rows.find(row => row.includes("const added"))!;
       assert.ok(source); assert.ok(source.includes(`2 ${sign} const added`));
@@ -2023,7 +2023,7 @@ test("one-sided mode is selected globally across hunks and invalidated on metada
       assert.deepEqual(tool.render(140), rows); assert.equal(controller.cacheStats().builds, builds);
       assert.equal(controller.cacheStats().cards.entries, 1, "latest card only; same retention pool in both modes");
     }
-    const noChanges = renderEditCard({ args: tool.args, isPartial: false, result: { details: { diff: ' 1 const unchanged = 1;' } } }, undefined, 140, color)!.rows.map(plain);
+    const noChanges = renderFileCard({ args: tool.args, isPartial: false, result: { details: { diff: ' 1 const unchanged = 1;' } } }, undefined, 140, color)!.rows.map(plain);
     assert.ok(noChanges.some(row => row.includes("← Edited one-sided.ts")));
     assert.doesNotMatch(noChanges.join("\n"), /const unchanged/, "context-only metadata preserves the existing title-only frame projection");
   } finally { controller.restore(); }
@@ -2052,7 +2052,7 @@ test("edit context keeps three available lines around changes and hides only edg
   const details = { diff: generateDiffString(before, after).diff, patch: generateUnifiedPatch("example.txt", before, after) };
   const snapshot = structuredClone(details);
   for (const metadata of [{ diff: details.diff }, { patch: details.patch }]) for (const width of [100, 140]) {
-    const rows = renderEditCard({ args: { path: "example.txt" }, isPartial: false, result: { details: metadata } }, undefined, width, color)!.rows.map(plain);
+    const rows = renderFileCard({ args: { path: "example.txt" }, isPartial: false, result: { details: metadata } }, undefined, width, color)!.rows.map(plain);
     const source = rows.filter((row) => /source_|changed_|inserted_|…/.test(row));
     for (const line of [7, 8, 9, 11, 12, 13, 19, 20, 21, 23, 24, 25]) assert.ok(source.some((row) => new RegExp(`source_${line}(?!\\d)`).test(row)), `nearby context line ${line} is retained`);
     for (const line of [6, 14, 18, 26]) assert.ok(!source.some((row) => new RegExp(`source_${line}(?!\\d)`).test(row)), `fourth context line ${line} is omitted`);
@@ -2065,7 +2065,7 @@ test("edit context keeps three available lines around changes and hides only edg
     assert.match(source.join("\n"), /23 \+ changed_22/, "new-file numbering is never renumbered after context trimming");
   }
   assert.deepEqual(details, snapshot, "context projection is display-only");
-  const literal = renderEditCard({ args: { path: "example.txt" }, isPartial: false, result: { details: { diff: ' ...\n-10 literal … before\n+10 literal … after\n ...' } } }, undefined, 100, color)!.rows.map(plain).join("\n");
+  const literal = renderFileCard({ args: { path: "example.txt" }, isPartial: false, result: { details: { diff: ' ...\n-10 literal … before\n+10 literal … after\n ...' } } }, undefined, 100, color)!.rows.map(plain).join("\n");
   assert.match(literal, /literal … before/); assert.match(literal, /literal … after/);
   assert.equal(literal.split("\n").filter((row) => row.includes("…")).length, 2, "literal ellipsis inside code is not stripped");
 });
@@ -2076,7 +2076,7 @@ test("edit context merges overlapping windows once and marks omitted interiors",
     const before = [...Array.from({ length: 8 }, (_, index) => `lead_${index}`), "OLD_A", ...bridge, "OLD_B", ...Array.from({ length: 8 }, (_, index) => `tail_${index}`)].join("\n") + "\n";
     const after = before.replace("OLD_A", "NEW_A").replace("OLD_B", "NEW_B");
     for (const details of [{ diff: generateDiffString(before, after, 20).diff }, { patch: generateUnifiedPatch("example.txt", before, after, 20) }]) {
-      const rows = renderEditCard({ args: { path: "example.txt" }, isPartial: false, result: { details } }, undefined, 100, color)!.rows.map(plain);
+      const rows = renderFileCard({ args: { path: "example.txt" }, isPartial: false, result: { details } }, undefined, 100, color)!.rows.map(plain);
       const text = rows.join("\n"), indices = [...text.matchAll(/bridge_(\d+)/g)].map((match) => Number(match[1]));
       assert.deepEqual(indices, bridge.map((_, index) => index).filter((index) => index < 3 || index >= length - 3), "overlapping context is shown once; wide interiors keep only nearest three rows");
       assert.equal(rows.filter((row) => row.includes("…")).length, length > 6 ? 1 : 0, "only an actually omitted interior needs an ellipsis row");
@@ -2086,7 +2086,7 @@ test("edit context merges overlapping windows once and marks omitted interiors",
 });
 
 test("edit context constant controls projection without fetching unavailable source", async () => {
-  const url = new URL("../src/edit-card.ts", import.meta.url), source = readFileSync(url, "utf8");
+  const url = new URL("../src/file-card.ts", import.meta.url), source = readFileSync(url, "utf8");
   const declaration = "const DIFF_CONTEXT_LINES = 3;";
   assert.ok(source.includes(declaration), "context is configured by one source constant, defaulting to three");
   const temporary = mkdtempSync(join(tmpdir(), "toolview-edit-context-"));
@@ -2099,7 +2099,7 @@ test("edit context constant controls projection without fetching unavailable sou
       const alternate = await import(pathToFileURL(file).href);
       for (const available of [2, 8]) {
         const node = { args: { path: "example.txt" }, isPartial: false, result: { details: { diff: generateDiffString(before, after, available).diff } } };
-        const text = alternate.renderEditCard(node, undefined, 100, color).rows.map(plain).join("\n");
+        const text = alternate.renderFileCard(node, undefined, 100, color).rows.map(plain).join("\n");
         assert.equal([...text.matchAll(/source_(\d+)/g)].filter((match) => Number(match[1]) !== 10).length, 2 * Math.min(count, available));
         assert.match(text, /10 - source_10/); assert.match(text, /10 \+ changed_10/);
       }
@@ -2123,7 +2123,7 @@ test("edit context projection preserves syntax opened on the omitted fourth cont
         terminal.reset(); await new Promise<void>((done) => terminal.write(nativeTheme.fg("toolOutput", "X"), done));
         assert.notEqual(expected, terminal.buffer.active.getLine(0)!.getCell(0)!.getFgColor(), "template case proves syntax color, not merely default foreground");
       }
-      const rows = renderEditCard({ args: { path: "example.ts" }, isPartial: false,
+      const rows = renderFileCard({ args: { path: "example.ts" }, isPartial: false,
         result: { details: { patch: generateUnifiedPatch("example.ts", before, after) } } }, undefined, width, nativeTheme,
         (code, path) => highlightCode(code, getLanguageFromPath(path)))!.rows;
       assert.ok(!rows.some((row) => plain(row).includes("opening")), "fourth context line is not displayed");
@@ -2174,7 +2174,7 @@ test("edit syntax colors survive changed-row backgrounds, gutters and wrapped sp
   try {
     for (const theme of ["dark", "light"]) {
       initTheme(theme);
-      const painted = renderEditCard(node, undefined, 140, nativeTheme, (code, path) => highlightCode(code, getLanguageFromPath(path)))!;
+      const painted = renderFileCard(node, undefined, 140, nativeTheme, (code, path) => highlightCode(code, getLanguageFromPath(path)))!;
       const row = painted.rows.find((value) => plain(value).includes("before = 10;") && plain(value).includes("after = 20;"))!;
       assert.ok(row, "removed/added replacements share the same split visual row");
       terminal.reset(); await new Promise<void>((done) => terminal.write(row, done));
@@ -2208,7 +2208,7 @@ test("edit syntax colors survive changed-row backgrounds, gutters and wrapped sp
       assert.equal(number.getFgColor(), terminal.buffer.active.getLine(0)!.getCell(before.indexOf("10"))!.getFgColor(), "number matches the public syntax renderer");
     }
     const long = { args: { path: "example.ts" }, isPartial: false, result: { details: { diff: '-1 const short = 1;\n+1 const long = "' + "界é ".repeat(40) + '";\n 2 const next = 2;' } } };
-    const rows = renderEditCard(long, undefined, 121, color)!.rows.map(plain);
+    const rows = renderFileCard(long, undefined, 121, color)!.rows.map(plain);
     const end = rows.findIndex((row) => row.includes("const next = 2;"));
     assert.ok(end > 5, "right pane wraps several rows before the next pair");
     assert.equal(rows[end].match(/const next = 2;/g)?.length, 2, "the next context stays horizontally aligned after unequal wrapping");
@@ -2258,7 +2258,7 @@ test("split edit one-to-many HTML replacement fills empty panes and internal rig
           result: { details: { diff: generateDiffString(oldText, newText).diff, patch: generateUnifiedPatch("index.html", oldText, newText) } } };
         for (const width of [121, 140, 141]) {
           const geometry = cardGeometry(width), paneWidth = geometry.contentWidth, rightX = geometry.contentX + Math.floor(paneWidth / 2);
-          const rows = renderEditCard(node, undefined, width, nativeTheme, (code, path) => highlightCode(code, getLanguageFromPath(path)))!.rows;
+          const rows = renderFileCard(node, undefined, width, nativeTheme, (code, path) => highlightCode(code, getLanguageFromPath(path)))!.rows;
           terminal.resize(width, 60); terminal.reset(); await new Promise<void>((done) => terminal.write(rows.join("\r\n"), done));
           const link = rows.findIndex((row) => plain(row).includes('<link rel="stylesheet"'));
           const context = rows.findIndex((row) => plain(row).includes("<body>"));
@@ -2288,7 +2288,7 @@ test("edit diff has exactly one neutral panel padding cell on both sides", async
       const base = colorToRgb(nativeTheme.colors.toolPendingBg), neutral = (base.r << 16) | (base.g << 8) | base.b;
       for (const width of [100, 121, 140, 141]) {
         const geometry = cardGeometry(width);
-        const rows = renderEditCard({ args: { path: "example.ts" }, isPartial: false, result: { details: { diff: '-1 const before = 10;\n+1 const after = 20;' } } }, undefined, width, nativeTheme)!.rows;
+        const rows = renderFileCard({ args: { path: "example.ts" }, isPartial: false, result: { details: { diff: '-1 const before = 10;\n+1 const after = 20;' } } }, undefined, width, nativeTheme)!.rows;
         const row = rows.find((value) => plain(value).includes("const before"))!;
         terminal.resize(width, 10); terminal.reset(); await new Promise<void>((done) => terminal.write(row, done));
         const line = terminal.buffer.active.getLine(0)!;
@@ -2316,7 +2316,7 @@ test("edit Multiply preserves black/white limits and never brightens RGB or inde
         bg: (_role, text) => nativeTheme.style(text, { bg: colors.toolPendingBg }) };
       const base = colorToRgb(colors.toolPendingBg);
       for (const width of [100, 140]) {
-        const rows = renderEditCard(node, undefined, width, paint)!.rows;
+        const rows = renderFileCard(node, undefined, width, paint)!.rows;
         for (const [word, sign, role] of [["old", "-", "toolDiffRemoved"], ["next", "+", "toolDiffAdded"]] as const) {
           const row = rows.find((value) => plain(value).includes(`const ${word} =`))!;
           terminal.reset(); await new Promise<void>((done) => terminal.write(row, done));
@@ -2341,7 +2341,7 @@ test("edit metadata formats preserve numbered contexts, multiple hunks and no-ne
   const after = before.replace("HEAD", "NEW_HEAD\nINSERTED").replace("TAIL", "NEW_TAIL");
   const diff = generateDiffString(before, after).diff;
   const patch = generateUnifiedPatch("example.txt", before, after);
-  const render = (details: object) => renderEditCard({ args: { path: "/project/example.txt" }, isPartial: false, result: { details } }, "/project", 121, color);
+  const render = (details: object) => renderFileCard({ args: { path: "/project/example.txt" }, isPartial: false, result: { details } }, "/project", 121, color);
   const numbered = render({ diff })!.rows.map(plain).join("\n");
   assert.match(numbered, /← Edited example.txt/);
   assert.match(numbered, /1 - HEAD.*1 \+ NEW_HEAD/);
@@ -2364,7 +2364,7 @@ test("edit presentation sanitizes terminal controls but preserves Unicode, inden
   const result = { details: { diff: "+1 " + source } };
   const snapshot = structuredClone({ args, result });
   for (let width = 1; width < 125; width++) {
-    const rows = renderEditCard({ args, result, isPartial: false }, undefined, width, color)!.rows;
+    const rows = renderFileCard({ args, result, isPartial: false }, undefined, width, color)!.rows;
     assert.ok(rows.every((row) => visibleWidth(row) <= width));
     assert.doesNotMatch(rows.join(""), /\x1b\]|\u202e|\u202c|PROPOSAL/);
     if (width >= 50) assert.match(rows.map(plain).join(""), /    const family = '👨‍👩‍👧‍👦 界é';  hidden/);
@@ -2452,7 +2452,7 @@ test("edit syntax carries multiline string/comment foregrounds across logical an
       const reference = highlightCode(after, "typescript").join("\r\n");
       terminal.reset(); await new Promise<void>((done) => terminal.write(reference, done));
       const expected = [1, 4].map((y) => terminal.buffer.active.getLine(y)!.getCell(0)!.getFgColor());
-      const painted = renderEditCard(node, undefined, width, nativeTheme, (code, path) => highlightCode(code, getLanguageFromPath(path)))!;
+      const painted = renderFileCard(node, undefined, width, nativeTheme, (code, path) => highlightCode(code, getLanguageFromPath(path)))!;
       for (const [index, token] of ["template_tag", "comment_tag"].entries()) {
         const rows = painted.rows.filter((value) => plain(value).includes(token));
         assert.ok(rows.length > 1, "continuation source lines are also physically wrapped");
@@ -2469,7 +2469,7 @@ test("edit syntax carries multiline string/comment foregrounds across logical an
 test("split edit replacements never pair additions/removals from different patch hunks", () => {
   const patch = "--- example.ts\n+++ example.ts\n@@ -1,1 +1,0 @@\n-const removed = 1;\n@@ -8,0 +8,1 @@\n+const inserted = 8;\n";
   const node = { args: { path: "example.ts" }, isPartial: false, result: { details: { patch } } };
-  const rows = renderEditCard(node, undefined, 140, color)!.rows.map(plain);
+  const rows = renderFileCard(node, undefined, 140, color)!.rows.map(plain);
   const removed = rows.find((row) => row.includes("const removed = 1;"))!;
   const inserted = rows.find((row) => row.includes("const inserted = 8;"))!;
   assert.ok(removed); assert.ok(inserted);
@@ -2491,7 +2491,7 @@ test("edit minified wrapping has linear grapheme work and bounded ANSI output", 
     const before = "x+=1;".repeat(repeat), after = "x+=2;".repeat(repeat);
     const patch = `@@ -1 +1 @@\n-${before}\n+${after}\n`;
     visits = 0;
-    const layout = renderEditCard({ args: { path: "minified.ts" }, isPartial: false, result: { details: { patch } } },
+    const layout = renderFileCard({ args: { path: "minified.ts" }, isPartial: false, result: { details: { patch } } },
       undefined, 100, nativeTheme, (code, path) => highlightCode(code, getLanguageFromPath(path)))!;
     const chars = layout.rows.reduce((sum, row) => sum + row.length, 0);
     assert.ok(visits < patch.length * 12, `${repeat}: ${visits} grapheme visits for ${patch.length} input units`);
@@ -2510,7 +2510,7 @@ test("edit Multiply colors are calculated once per render, not once per fragment
     toolDiffAdded: parseColor("#28c870"), toolDiffRemoved: parseColor("#dc3850") },
     style: (text, options) => { backgrounds.add(options.bg); return text; } };
   const patch = `@@ -1,12 +1,12 @@\n${Array.from({ length: 12 }, () => "-" + "before ".repeat(25)).join("\n")}\n${Array.from({ length: 12 }, () => "+" + "after ".repeat(25)).join("\n")}\n`;
-  const layout = renderEditCard({ args: { path: "example.ts" }, isPartial: false, result: { details: { patch } } }, undefined, 100, theme)!;
+  const layout = renderFileCard({ args: { path: "example.ts" }, isPartial: false, result: { details: { patch } } }, undefined, 100, theme)!;
   assert.ok(layout.rows.length > 50, "exercise both signs and many wrapped fragments");
   assert.equal(backgrounds.size, 4, "one code and one gutter color per added/removed role");
 });
@@ -2550,7 +2550,7 @@ test("ignored edit mouse events do not build an unretained diff", () => {
 test("failed edits skip stale diff parsing and syntax work", () => {
   const details = { get patch(): string { return assert.fail("failed edit must not read stale patch metadata"); } };
   const node = { args: { path: "example.ts" }, isPartial: false, result: { isError: true, details } };
-  const layout = renderEditCard(node, undefined, 80, color, () => { assert.fail("failed edit must not highlight"); })!;
+  const layout = renderFileCard(node, undefined, 80, color, () => { assert.fail("failed edit must not highlight"); })!;
   assert.equal(layout.framed, false);
   assert.match(layout.rows.join(""), /← Edited example.ts/);
 });
@@ -2559,7 +2559,7 @@ test("very large edit row counts do not overflow a function argument spread", ()
   const count = 130_000;
   const diff = Array.from({ length: count }, (_, index) => `+${index + 1} x`).join("\n");
   const node = { args: { path: "x.txt" }, isPartial: false, result: { details: { diff } } };
-  const layout = renderEditCard(node, undefined, 5, color)!;
+  const layout = renderFileCard(node, undefined, 5, color)!;
   assert.ok(layout.rows.length >= count, "all changed rows survive without a display cap");
   assert.equal(node.result.details.diff, diff);
 });
@@ -2572,7 +2572,7 @@ test("metadata-only edit measurement preserves render classification and separat
   for (const value of details) for (const isError of [false, true]) for (const width of [0, 1, 5, 24, 100, 140]) {
     const node = { args: { path: "/project/" + "long-folder/".repeat(8) + "example.ts" }, isPartial: false,
       result: { details: value, isError } };
-    const measured = measureEditCard(node, "/project", width), layout = renderEditCard(node, "/project", width, color);
+    const measured = measureFileCard(node, "/project", width), layout = renderFileCard(node, "/project", width, color);
     assert.equal(!!measured, !!layout, "unsupported metadata has exactly the same native fallback");
     if (!measured || !layout) continue;
     assert.equal(measured.framed, layout.framed);
@@ -3079,4 +3079,284 @@ test("bounded compact budgets hold across escaped strings, deep containers and p
     assert.ok(summaryLength(logical) <= 1024);
     assert.ok(logical.startsWith("tool".repeat(63) + "too…"));
   } finally { controller.restore(); }
+});
+
+
+// Write classification is presentation-only: Created also includes an existing empty file.
+test("write success selects Created/Edited/Replaced/Wrote from saved source, not provider identity", () => {
+  const content = 'const proposal = "NOT_RESULT";\n';
+  const cases: [object | undefined, string, string][] = [
+    [undefined, "Wrote", "const proposal"],
+    [{ diff: "+1 const written = 1;\n+2 const next = 2;" }, "Created", "const written"],
+    [{ diff: " 1 const retained = 1;\n+2 const appended = 2;" }, "Edited", "const appended"],
+    [{ diff: "-1 const removed = 1;\n+1 const replaced = 2;" }, "Replaced", "const replaced"],
+    [{ diff: "-1 const cleared = 1;" }, "Replaced", "const cleared"],
+    [{ diff: "", noOp: true }, "Wrote", "const proposal"],
+    [{ diff: " 1 unchanged", noOp: true }, "Wrote", "const proposal"],
+    [{ diff: "+1 INCOMPLETE", truncated: true }, "Wrote", "const proposal"],
+  ];
+  for (const [details, label, source] of cases) {
+    const tool = new Tool("write", { path: "example.ts", content });
+    tool.result = { content: [{ type: "text", text: "RESULT_SENTINEL" }], details };
+    const snapshot = structuredClone({ args: tool.args, result: tool.result });
+    const { controller } = setup([tool]);
+    try {
+      for (const width of [80, 120, 140]) {
+        const rows = tool.render(width).map(plain), text = rows.join("\n");
+        assert.ok(text.includes(`← ${label} example.ts`), label);
+        assert.ok(text.includes(source)); assert.ok(rows.some(row => row.startsWith(" ┃")));
+        assert.doesNotMatch(text, /RESULT_SENTINEL|INCOMPLETE/);
+        if (label === "Created" || label === "Wrote") assert.doesNotMatch(text, /\d+ [+-] /);
+        else assert.match(text, /\d+ [+-] /);
+        if (label === "Replaced" && source === "const replaced")
+          assert.equal(rows.some(row => row.includes("const removed") && row.includes("const replaced")), width > 120);
+        if ((details as { noOp?: boolean })?.noOp) assert.match(text, /No changes/);
+        if ((details as { truncated?: boolean })?.truncated) assert.match(text, /Diff truncated by tool/);
+        assert.ok(rows.every(row => visibleWidth(row) <= width));
+        const builds = controller.cacheStats().builds;
+        assert.deepEqual(tool.render(width).map(plain), rows); assert.equal(controller.cacheStats().builds, builds);
+        assert.equal(controller.cacheStats().cards.entries, 1);
+      }
+      assert.deepEqual({ args: tool.args, result: tool.result }, snapshot);
+    } finally { controller.restore(); }
+  }
+});
+
+test("write lifecycle is path-only compact until final success, including proposed partial/error metadata", (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const tool = new Tool("write", { path: "example.ts", content: "PAYLOAD_NEVER_IN_SUMMARY" });
+  tool.result = undefined; tool.executionStarted = false;
+  const { root, controller, original } = setup([tool]);
+  try {
+    assert.deepEqual(tool.render(80), [" ⚙ write example.ts"]);
+    assert.equal(controller.cacheStats().ordinary.entries, 1); assert.equal(controller.cacheStats().cards.entries, 0);
+    tool.markExecutionStarted(); assert.match(tool.render(80)[0]!, /⠋ write example.ts/);
+    const partial = { content: [], isError: true, details: { diff: "+1 PROPOSED_DIFF" } };
+    tool.updateResult(partial, true); assert.doesNotMatch(root.render(80).join(""), /PROPOSED|PAYLOAD|┃|Created/);
+    tool.updateResult(partial); assert.deepEqual(tool.render(80), [" ⚙ write example.ts"]);
+    assert.equal(controller.cacheStats().cards.entries, 0);
+    tool.updateResult({ content: [], details: { diff: "+1 const written = 1;" } });
+    assert.match(tool.render(80).join(""), /← Created example.ts/);
+    assert.equal(controller.cacheStats().ordinary.entries, 0); assert.equal(controller.cacheStats().cards.entries, 1);
+    const height = tool.render(80).length;
+    assert.ok(tool.handleMouse(mouse(height - 1))?.handled); assert.equal(tool.expanded, true);
+    assert.deepEqual(tool.render(80), original.call(tool, 80));
+    tool.setExpanded(false); tool.updateArgs({ path: "new.ts", content: "NEW_CONTENT" }); tool.updateResult({ content: [] });
+    assert.match(tool.render(80).join(""), /← Wrote new.ts/); assert.match(tool.render(80).join(""), /NEW_CONTENT/);
+  } finally { controller.restore(); }
+});
+
+test("write path-only formatting ignores payload access and uses generic fallback without a valid path", () => {
+  const args = new Proxy({ path: "example.ts", content: "ignored" }, {
+    ownKeys() { assert.fail("path-only write must not enumerate arguments"); },
+    get(target, key, receiver) { if (key === "content") assert.fail("path-only write must not read content"); return Reflect.get(target, key, receiver); },
+  });
+  assert.equal(describeArgs("write", args), "example.ts");
+  for (const path of [undefined, "", null, [], 123]) {
+    const args = { path, content: "VISIBLE_GENERIC" };
+    assert.equal(describeArgs("write", args), describeArgs("ordinary", args));
+    assert.match(describeArgs("write", args), /VISIBLE_GENERIC/);
+  }
+});
+
+
+test("write validates both metadata formats and classifies globally before context projection", async () => {
+  const pairs = [
+    ["", "const fresh = 1;\n", "Created"],
+    ["const retained = 1;\n", "const retained = 1;\nconst extra = 2;\n", "Edited"],
+    ["const old = 1;\n", "const next = 2;\n", "Replaced"],
+    ["const erased = 1;\n", "", "Replaced"],
+    ["const identical = 1;\n", "const identical = 1;\n", "Wrote"],
+  ];
+  for (const [before, after, label] of pairs) {
+    const numbered = generateDiffString(before!, after!).diff, patch = generateUnifiedPatch("example.ts", before!, after!);
+    // A no-op unified patch can contain headers without hunks: unsupported metadata stays native.
+    const metadata = before === after ? [{ diff: numbered }] : [{ diff: numbered }, { patch }, { diff: patch }];
+    for (const details of metadata) {
+      const node = { toolName: "write", args: { path: "example.ts", content: after }, result: { details }, isPartial: false };
+      const rendered = renderFileCard(node, undefined, 140, color)!;
+      assert.match(rendered.rows.map(plain).join("\n"), new RegExp(`← ${label} example.ts`));
+      assert.equal(measureFileCard(node, undefined, 140)!.framed, true);
+    }
+  }
+  const multi = "@@ -1,1 +1,2 @@\n const retained = 1;\n+const first = 2;\n@@ -10,1 +11,0 @@\n-const erased = 10;\n";
+  const node = { toolName: "write", args: { path: "example.ts" }, result: { details: { patch: multi } }, isPartial: false };
+  assert.match(renderFileCard(node, undefined, 140, color)!.rows.join(""), /← Replaced/);
+  const url = new URL("../src/file-card.ts", import.meta.url), source = readFileSync(url, "utf8");
+  const temporary = mkdtempSync(join(tmpdir(), "toolview-write-context-"));
+  try {
+    const alternateSource = source.replace("const DIFF_CONTEXT_LINES = 3;", "const DIFF_CONTEXT_LINES = 0;")
+      .replace(/from "([^"]+)"/gu, (_match, specifier: string) =>
+        `from ${JSON.stringify(specifier.startsWith(".") ? new URL(specifier, url).href : import.meta.resolve(specifier))}`);
+    const file = join(temporary, "file-card.ts"); writeFileSync(file, alternateSource);
+    const alternate = await import(pathToFileURL(file).href);
+    const rows = alternate.renderFileCard({ ...node, result: { details: { diff: " 1 OLD_CONTEXT\n+2 ADDED" } } }, undefined, 140, color).rows.map(plain).join("\n");
+    assert.match(rows, /← Edited/); assert.match(rows, /2 \+ ADDED/); assert.doesNotMatch(rows, /OLD_CONTEXT|Created/);
+  } finally { rmSync(temporary, { recursive: true, force: true }); }
+});
+
+test("write plain source preserves all rows, whitespace, Unicode and filename syntax without diff paint", async () => {
+  const source = '/* open\ncontinued comment */\nconst family = "👩‍💻 界 é";  \n\n' + 'const v = "' + 'x'.repeat(1600) + '";\n\nTAIL_LAST';
+  for (const themeName of ["dark", "light"] as const) {
+    initTheme(themeName);
+    for (const details of [undefined, { diff: source.split("\n").map((line, index) => `+${index + 1} ${line}`).join("\n") }]) {
+      const paints: string[] = [], highlights: string[] = [];
+      const paint: CardTheme = { ...nativeTheme,
+        fg(role, text) { paints.push(role); return nativeTheme.fg(role, text); },
+        bg(role, text) { return nativeTheme.bg(role, text); },
+        style() { return assert.fail("plain write must not compute/apply Multiply diff paint"); } };
+      const node = { toolName: "write", args: { path: "example.ts", content: source }, result: { details }, isPartial: false };
+      for (const width of [24, 80, 140]) {
+        const layout = renderFileCard(node, undefined, width, paint, (code, path) => {
+          assert.equal(path, "example.ts"); highlights.push(code); return highlightCode(code, getLanguageFromPath(path));
+        })!;
+        assert.equal(highlights.at(-1), source, "one full resulting source stream is highlighted before wrapping");
+        assert.ok(layout.rows.every(row => visibleWidth(row) === width));
+        const rows = layout.rows.map(plain), start = rows.findIndex(row => /1 \/\* open/.test(row));
+        const gutter = String(source.split("\n").length).length + 2, geometry = cardGeometry(width);
+        const fragments = rows.slice(start, -1).map(row => row.slice(geometry.contentX + gutter, geometry.contentX + geometry.contentWidth));
+        assert.equal(fragments.join("").replace(/ /g, "").includes('x'.repeat(1600)), true, "long code remains complete, far beyond compact/Bash budgets");
+        assert.ok(rows.some(row => row.includes("TAIL_LAST")));
+        assert.ok(rows.some(row => /┃ +4 +$/.test(row)), "blank source line keeps its number");
+        assert.ok(!paints.some(role => role === "toolDiffAdded" || role === "toolDiffRemoved"));
+        assert.ok(rows.join("").includes("👩‍💻")); assert.ok(rows.join("").includes("é"));
+        const terminal = new xterm.Terminal({ cols: width, rows: 1, allowProposedApi: true });
+        const write = (text: string) => new Promise<void>(resolve => terminal.write("\x1b[0m\r\x1b[2K" + text, resolve));
+        try {
+          await write(nativeTheme.fg("syntaxComment", "X"));
+          const expected = terminal.buffer.active.getLine(0)!.getCell(0)!.getFgColor();
+          const row = layout.rows.find(row => plain(row).includes("continued"))!;
+          await write(row);
+          assert.equal(terminal.buffer.active.getLine(0)!.getCell(plain(row).indexOf("continued"))!.getFgColor(), expected,
+            "native multiline comment color survives plain-source wrapping");
+        } finally { terminal.dispose(); }
+      }
+    }
+  }
+});
+
+test("write metadata/native/compact/image/hidden guards remain authoritative in every lifecycle phase", () => {
+  const states: [Tool["result"], boolean][] = [[undefined, true], [{ content: [], details: { diff: "+1 PROPOSED" } }, true],
+    [{ content: [], isError: true, details: { diff: "+1 STALE" } }, false], [{ content: [], details: { diff: "+1 FINAL" } }, false]];
+  for (const [result, partial] of states) for (const guard of ["native", "expanded", "image", "hidden", "compact"]) {
+    const tool = new Tool("write", { path: "example.ts", content: "CONTENT" }); tool.result = result; tool.isPartial = partial; tool.executionStarted = false;
+    if (guard === "expanded") tool.expanded = true;
+    if (guard === "hidden") tool.hideComponent = true;
+    if (guard === "image") tool.result = { ...result, content: [{ type: "image" }] };
+    const { controller, original } = setup([tool], guard === "compact" ? { cards: ["write"], compact: ["write"] } : guard === "native" ? { cards: ["write"] } : {});
+    try {
+      if (guard === "compact") assert.deepEqual(tool.render(140), [" ⚙ write example.ts"]);
+      else assert.deepEqual(tool.render(140), original.call(tool, 140));
+    } finally { controller.restore(); }
+  }
+  for (const details of [{ patch: "@@ -1 +1 @@\n-before\n", diff: "+1 VALID_BUT_LOWER_PRIORITY" }, { diff: 1 }, { patch: null, diff: "+1 IGNORED" }, { diff: "+1missing_space" }]) {
+    const tool = new Tool("write", { path: "example.ts", content: "INPUT" }); tool.result = { content: [], details };
+    const { controller, original } = setup([tool]);
+    try { assert.deepEqual(tool.render(80), original.call(tool, 80)); assert.equal(controller.cacheStats().cards.entries, 0); }
+    finally { controller.restore(); }
+  }
+  class HiddenWrite extends Tool {
+    getRenderShell() { return "self"; }
+    render(width: number) { return width < 30 ? ["NATIVE_VISIBLE"] : []; }
+    handleMouse(event: TuiMouseEvent) { return super.handleMouse(event); }
+  }
+  const hidden = new HiddenWrite("write", { path: "example.ts", content: "HIDDEN" }), follower = new Tool();
+  const { controller } = setup([hidden, follower]);
+  try {
+    assert.deepEqual(hidden.render(80), []); assert.equal(follower.render(80)[0], " → read a.txt");
+    assert.match(hidden.render(24).join(""), /← Wrote/); assert.equal(follower.render(24)[0], "");
+  } finally { controller.restore(); }
+});
+
+test("write failure skips metadata/payload, uses only error paint and tears down its shared clock", (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const starts = t.mock.method(globalThis, "setInterval"), stops = t.mock.method(globalThis, "clearInterval");
+  const tool = new Tool("write", { path: "example.ts", get content(): string { return assert.fail("failure must not read payload"); } });
+  tool.result = undefined;
+  const root = new Root(); root.addChild(tool); const roles: string[] = [];
+  const controller = installToolview(root, () => ({ fg(role, text) { roles.push(role); return text; } }));
+  try {
+    tool.render(80); assert.equal(starts.mock.calls.length, 1);
+    const details = { get patch(): string { return assert.fail("partial/failure must not parse metadata"); } };
+    tool.updateResult({ content: [], details, isError: true }, true); tool.render(80); assert.equal(stops.mock.calls.length, 0);
+    tool.updateResult({ content: [{ type: "text", text: "ERROR_BODY" }], details, isError: true });
+    assert.equal(stops.mock.calls.length, 1); roles.length = 0;
+    assert.deepEqual(tool.render(80), [" ⚙ write example.ts"]); assert.ok(roles.every(role => role === "error"));
+    const before = root.requests; t.mock.timers.tick(500); assert.equal(root.requests, before);
+  } finally { controller.restore(); }
+});
+
+test("write measurement and rejected clicks never build source and card pool zero stays independent", (t) => {
+  const tool = new Tool("write", { path: "example.ts", content: "LONG_SOURCE_" + "x".repeat(1000) }), follower = new Tool();
+  const { root, controller } = setup([tool, follower], { cardCacheMiB: 0 });
+  const segments = t.mock.method(Intl.Segmenter.prototype, "segment");
+  try {
+    follower.render(80); const builds = controller.cacheStats().builds;
+    assert.ok(!segments.mock.calls.some(call => String(call.arguments[0]).startsWith("LONG_SOURCE_")));
+    segments.mock.resetCalls();
+    for (const event of [{ ...mouse(1), button: "right" as const }, { ...mouse(1), type: "move" as const }, { ...mouse(1), type: "wheel" as const }]) tool.handleMouse(event);
+    assert.ok(!segments.mock.calls.some(call => String(call.arguments[0]).startsWith("LONG_SOURCE_")));
+    assert.equal(controller.cacheStats().builds, builds);
+    const ordinary = controller.cacheStats().ordinary.builds;
+    tool.render(80); tool.render(80); assert.equal(controller.cacheStats().cards.entries, 0);
+    assert.equal(controller.cacheStats().ordinary.builds, ordinary);
+    controller.setCardCacheLimitMiB(128); root.render(80);
+    const warm = controller.cacheStats(); segments.mock.resetCalls(); root.render(80);
+    assert.equal(controller.cacheStats().builds, warm.builds); assert.equal(segments.mock.calls.length, 0);
+    assert.equal(warm.cards.entries, 1); assert.equal(warm.ordinary.entries, 1);
+    assert.equal(tool.handleMouse({ ...mouse(1), x: 0 }), undefined); root.selection = true;
+    assert.equal(tool.handleMouse(mouse(1)), undefined); root.selection = false;
+    assert.ok(tool.handleMouse(mouse(1))?.handled);
+  } finally { controller.restore(); }
+});
+
+
+test("actual SDK write stays provider-neutral for new, empty, replaced and cleared files and delegates expansion", async (t) => {
+  initTheme("dark");
+  const directory = mkdtempSync(join(tmpdir(), "toolview-stock-write-")), root = new Root();
+  const tool = createWriteTool(directory), definition = createWriteToolDefinition(directory);
+  const source = Array.from({ length: 22 }, (_, i) => `const stock_${i + 1} = ${i + 1};`).join("\n");
+  writeFileSync(join(directory, "empty.ts"), ""); writeFileSync(join(directory, "existing.ts"), "OLD_CONTENT");
+  const nodes: NativeToolExecution[] = [];
+  const originalRender = NativeToolExecution.prototype.render;
+  const native = t.mock.method(NativeToolExecution.prototype, "render");
+  const controller = installToolview(root, () => nativeTheme);
+  try {
+    for (const [index, args] of [{ path: "new.ts", content: source }, { path: "empty.ts", content: source },
+      { path: "existing.ts", content: source }, { path: "existing.ts", content: "" }].entries()) {
+      const result = await tool.execute(`write-${index}`, args);
+      assert.equal(result.details, undefined, "stock write provides no diff/creation metadata in any case");
+      assert.equal(readFileSync(join(directory, args.path), "utf8"), args.content);
+      const node = new NativeToolExecution("write", `stock-${index}`, args, undefined, definition, root as never, directory);
+      root.addChild(node); nodes.push(node); node.updateResult({ ...result, isError: false });
+      const rows = node.render(140).map(plain);
+      assert.match(rows.join(""), /← Wrote/); assert.doesNotMatch(rows.join(""), /← Created|← Replaced/);
+      if (args.content) assert.match(rows.join("\n"), /22 const stock_22 = 22;/);
+    }
+    assert.equal(native.mock.calls.length, 0, "stock content-shell writes need no discarded native rendering");
+    root.render(140); const builds = controller.cacheStats().builds;
+    root.render(140); assert.equal(controller.cacheStats().builds, builds); assert.equal(controller.cacheStats().cards.entries, 4);
+    nodes[0]!.setExpanded(true); const actual = nodes[0]!.render(140), original = originalRender.call(nodes[0]!, 140);
+    assert.deepEqual(actual, original); assert.ok(native.mock.calls.length > 0);
+    nodes[0]!.setExpanded(false); assert.match(nodes[0]!.render(140).map(plain).join(""), /← Wrote/);
+    const before = controller.cacheStats().builds;
+    nodes[1]!.updateArgs({ path: "empty.ts", content: "const updated = 99;" });
+    root.render(140); assert.equal(controller.cacheStats().builds, before + 1, "only changed write source is rebuilt");
+    assert.match(nodes[1]!.render(140).map(plain).join(""), /const updated = 99;/);
+  } finally { controller.restore(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("path-only file summaries never read unrelated signature fields", () => {
+  for (const name of ["edit", "write"]) {
+    const args = { path: "example.ts" };
+    for (const field of ["command", "description", "workdir", "content", "pattern", "edits"]) Object.defineProperty(args, field, {
+      enumerable: true, get() { return assert.fail(`ignored ${name} ${field} must not be accessed`); },
+    });
+    const node = new Tool(name, args); node.result = { content: [], isError: true, details: {
+      get exit_code() { return assert.fail("non-Bash signatures must not inspect Bash-only metadata"); },
+    } };
+    const { controller } = setup([node]);
+    try { assert.deepEqual(node.render(80), [` ⚙ ${name} example.ts`]); assert.equal(controller.active, true); }
+    finally { controller.restore(); }
+  }
 });

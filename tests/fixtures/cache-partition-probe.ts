@@ -65,7 +65,7 @@ try {
   const retained = controller.cacheStats(); assert.ok(retained.cards.entries > 0 && retained.ordinary.entries > 0);
   controller.clearCache(); assert.equal(controller.cacheStats().entries, 0); frame("clear-cold", 141);
   controller.restore(); assert.equal(controller.cacheStats().retainedBytes, 0);
-  const sourceHashes = Object.fromEntries(["index", "render-cache", "edit-card"].map(name => [name,
+  const sourceHashes = Object.fromEntries(["index", "render-cache", "file-card"].map(name => [name,
     createHash("sha256").update(readFileSync(new URL(`../../src/${name}.ts`, import.meta.url))).digest("hex")]));
   console.log(JSON.stringify({ sourceHashes, observations, detachedEditCollected: true, afterRestore: controller.cacheStats() }));
 } finally { controller.restore(); }

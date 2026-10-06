@@ -2,7 +2,7 @@ import { createEditToolDefinition, highlightCode, getLanguageFromPath, type Exte
 import { Box, Container, Markdown, visibleWidth, wrapTextWithAnsi, type Component, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { isAbsolute, resolve } from "node:path";
 import { renderBashCard } from "./bash-card.ts";
-import { editPath, measureEditCard, renderEditCard } from "./edit-card.ts";
+import { filePath, measureFileCard, renderFileCard } from "./file-card.ts";
 import { renderUserCard } from "./user-card.ts";
 import { cardGeometry, insidePanel } from "./card-frame.ts";
 import type { CardTheme } from "./card-theme.ts";
@@ -235,9 +235,11 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
   const refresh = () => { tui.invalidate(); tui.requestRender(); };
   function layoutSignature(node: ToolNode, kind: string, width: number, theme: Palette, directory: string | undefined): unknown[] {
     return [kind, width, theme, theme.fg, kind === "bash" ? undefined : node.args, node.result, node.expanded, node.isPartial,
-      node.toolName, node.result?.isError, (node.result?.details as { exit_code?: unknown } | undefined)?.exit_code,
-      node.args.command, node.args.description, node.args.workdir, directory,
-      kind === "edit" ? theme.colors : undefined, kind === "edit" ? theme.style : undefined, kind === "edit" ? theme.bg : undefined];
+      node.toolName, node.result?.isError, kind === "bash" ? (node.result?.details as { exit_code?: unknown } | undefined)?.exit_code : undefined,
+      kind === "bash" ? node.args.command : undefined, kind === "bash" ? node.args.description : undefined,
+      kind === "bash" ? node.args.workdir : undefined, directory,
+      kind === "edit" || kind === "write" ? theme.colors : undefined,
+      kind === "edit" || kind === "write" ? theme.style : undefined, kind === "edit" || kind === "write" ? theme.bg : undefined];
   }
   function memo<T extends Layout>(node: ToolNode, kind: string, width: number, theme: Palette, directory: string | undefined, build: () => T): T {
     const signature = layoutSignature(node, kind, width, theme, directory);
@@ -247,8 +249,8 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
       const value = state.pool.get(state.entry); if (value) return value as T;
     } else { state?.pool.drop(state.entry); }
     const value = build();
-    // Select by the materialized presentation, not tool name: inline/native edit fallback is ordinary.
-    const pool = kind === "bash" || (kind === "edit" && value.framed && !value.native) ? cardCache : cache;
+    // Select by the materialized presentation, not tool name: inline/native file fallback is ordinary.
+    const pool = kind === "bash" || ((kind === "edit" || kind === "write") && value.framed && !value.native) ? cardCache : cache;
     if (!matches) pool.get(undefined); // Attribute exactly one miss to the target pool.
     states.set(node, { signature, pool, entry: pool.put(value, value.rows) });
     return value;
@@ -257,25 +259,25 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     const theme = getTheme(), directory = bashDirectory(node) ?? undefined;
     return memo(node, "bash", width, theme, directory, () => renderBashCard(node, directory, width, theme));
   };
-  const editLayout = (node: ToolNode, width: number) => {
+  const fileLayout = (node: ToolNode, width: number) => {
     const theme = getTheme();
     const context = node.getRenderContext() as { cwd?: unknown } | undefined;
     const cwd = typeof context?.cwd === "string" ? context.cwd : undefined;
-    return memo(node, "edit", width, theme, cwd, () => renderEditCard(node, cwd, width, theme,
+    return memo(node, node.toolName, width, theme, cwd, () => renderFileCard(node, cwd, width, theme,
       theme.colors && theme.style ? (code, path) => highlightCode(code, getLanguageFromPath(path)) : undefined) ??
       { rows: nativeRows(node, width), framed: false, native: true });
   };
-  function editMeasure(node: ToolNode, width: number) {
+  function fileMeasure(node: ToolNode, width: number) {
     const theme = getTheme();
     const context = node.getRenderContext() as { cwd?: unknown } | undefined;
     const cwd = typeof context?.cwd === "string" ? context.cwd : undefined;
-    const state = states.get(node), signature = layoutSignature(node, "edit", width, theme, cwd);
+    const state = states.get(node), signature = layoutSignature(node, node.toolName, width, theme, cwd);
     // Read only the existing exact layout. Never admit another cache entry or retain measurement data.
     if (state && signature.every((value, index) => value === state.signature[index])) {
-      const layout = state.pool.get(state.entry) as ReturnType<typeof renderEditCard>;
+      const layout = state.pool.get(state.entry) as ReturnType<typeof renderFileCard>;
       if (layout) return layout.native ? undefined : { framed: layout.framed, height: layout.rows.length };
     }
-    return measureEditCard(node, cwd, width);
+    return measureFileCard(node, cwd, width);
   }
   const summaryLayout = (node: ToolNode, width: number) => {
     const theme = getTheme();
@@ -331,10 +333,11 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     controller.restore();
     options.warn?.(message);
   };
-  const editSucceeded = (node: ToolNode) => node.toolName === "edit" && !!node.result && !node.isPartial && !node.result.isError;
+  const fileTool = (node: ToolNode) => node.toolName === "edit" || node.toolName === "write";
+  const fileSucceeded = (node: ToolNode) => fileTool(node) && !!node.result && !node.isPartial && !node.result.isError;
   const eligible = (node: Component): node is ToolNode => active && candidate(node) &&
     !node.hideComponent && !node.expanded && (overrides.has(node.toolName) || !cards.has(node.toolName) ||
-      (node.toolName === "edit" && !nativeOverrides.has("edit") && !editSucceeded(node))) &&
+      (fileTool(node) && !nativeOverrides.has(node.toolName) && !fileSucceeded(node))) &&
     !node.result?.content.some((content) => content.type === "image");
   const compact = (node: Component, width: number): node is ToolNode => {
     if (!eligible(node)) return false;
@@ -363,9 +366,9 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     return nativeVisible(node, width);
   }
 
-  function editCard(node: Component, width: number): boolean {
-    if (!active || !candidate(node) || !editSucceeded(node) || node.hideComponent || node.expanded ||
-      overrides.has("edit") || nativeOverrides.has("edit") || !editPath(node.args) ||
+  function fileCard(node: Component, width: number): boolean {
+    if (!active || !candidate(node) || !fileSucceeded(node) || node.hideComponent || node.expanded ||
+      overrides.has(node.toolName) || nativeOverrides.has(node.toolName) || !filePath(node.args) ||
       node.result?.content.some((part) => part.type === "image")) return false;
     return nativeVisible(node, width);
   }
@@ -432,8 +435,8 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     for (let index = current - 1; index >= 0; index--) {
       const previous = siblings[index];
       if (width > 0 && bashCard(previous, width)) return { compact: false, tool: true, height: 3 };
-      if (width > 0 && candidate(previous) && editCard(previous, width)) {
-        const measure = editMeasure(previous, width);
+      if (width > 0 && candidate(previous) && fileCard(previous, width)) {
+        const measure = fileMeasure(previous, width);
         if (measure?.height) return { compact: !measure.framed, tool: true, height: measure.height };
       }
       if (compact(previous, width)) return { compact: true, tool: true, height: summaryLayout(previous, width).rows.length };
@@ -475,9 +478,9 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
           if (!rows.length) return rows;
           return previousLayout(this, width) ? ["", ...rows] : rows;
         }
-        if (editCard(this, width)) {
+        if (fileCard(this, width)) {
           removeAnimation(this);
-          const layout = editLayout(this, width);
+          const layout = fileLayout(this, width);
           const offset = layout.native ? nativeGap(this, width, layout.rows) : layout.framed ? (previousLayout(this, width) ? 1 : 0) : gap(this, width);
           return offset ? [""].concat(layout.rows) : layout.rows;
         }
@@ -504,13 +507,13 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
         tui.requestRender();
         return { handled: true };
       }
-      if (event.width > 0 && editCard(this, event.width)) {
+      if (event.width > 0 && fileCard(this, event.width)) {
         const rejected = !this.result || this.isPartial || tui.hasActiveSelection?.() || event.type !== "click" || event.button !== "left";
         if (rejected) {
           // Unsupported metadata must still delegate; supported cards need no body to reject an event.
-          if (editMeasure(this, event.width)) return undefined;
+          if (fileMeasure(this, event.width)) return undefined;
         } else {
-          const layout = editLayout(this, event.width);
+          const layout = fileLayout(this, event.width);
           if (!layout.native) {
             const offset = layout.framed ? (previousLayout(this, event.width) ? 1 : 0) : gap(this, event.width);
             const hit = layout.framed ? insidePanel(cardGeometry(event.width), layout.rows.length, event.x, event.y - offset) :
@@ -636,7 +639,7 @@ export default function toolview(pi: ExtensionAPI) {
   pi.registerFlag("toolview-card", { type: "string", description: "Additional comma-separated tool names that retain native cards" });
   pi.registerFlag("toolview-compact", { type: "string", description: "Comma-separated tool names that use compact summaries instead of native cards" });
   pi.registerFlag("toolview-cache-mb", { type: "string", description: "Ordinary render-cache budget in MiB (0–64; default 8)" });
-  pi.registerFlag("toolview-card-cache-mb", { type: "string", description: "Bash/edit-diff render-cache budget in MiB (0–128; default 128)" });
+  pi.registerFlag("toolview-card-cache-mb", { type: "string", description: "Bash/edit/write-card render-cache budget in MiB (0–128; default 128)" });
   let cacheMiB: number | undefined, cardCacheMiB: number | undefined;
   function cacheLimit(text: string, maximum = 64): number {
     const value = Number(text);

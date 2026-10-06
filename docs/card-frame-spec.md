@@ -1,10 +1,10 @@
 # Shared card frame specification
 
-This specification defines the shared frame for Bash, user-message and [edit cards](edit-card-spec.md). Other tool cards and native expanded results are unchanged. The common host/module boundaries are described in [architecture](architecture.md).
+This specification defines the shared frame for Bash, user-message, [edit cards](edit-card-spec.md) and [write cards](write-card-spec.md). Other tool cards and native expanded results are unchanged. The common host/module boundaries are described in [architecture](architecture.md).
 
 ## Scope and architecture
 
-One Toolview adapter owns live-host hooks, runtime lifecycle and mouse routing. The shared frame is a pure layout/painting module independent of tools, commands, results, expansion and host component classes. Callers supply already styled content rendered for its reported content width and painting callbacks. Bash, edit and user-message presenters supply their own content and paint; Bash toggles its custom output and completed edit cards expand to native content. All use the same frame and sole host adapter, without another extension or another set of container/input hooks. There is no plugin registry, new tool execution, session format, global theme modification or external shared package.
+One Toolview adapter owns live-host hooks, runtime lifecycle and mouse routing. The shared frame is a pure layout/painting module independent of tools, commands, results, expansion and host component classes. Callers supply already styled content rendered for its reported content width and painting callbacks. Bash, edit/write and user-message presenters supply their own content and paint; Bash toggles its custom output and completed edit/write cards expand to native content. All use the same frame and sole host adapter, without another extension or another set of container/input hooks. There is no plugin registry, new tool execution, session format, global theme modification or external shared package.
 
 ## Reference and geometry
 

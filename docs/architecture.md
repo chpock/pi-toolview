@@ -2,16 +2,16 @@
 
 Pi Toolview changes interactive terminal presentation, not tool execution or conversation data. Pi loads `src/index.ts` directly as a TypeScript extension. Runtime host libraries are wildcard peer dependencies; development copies are pinned to Pi/pi-tui 1.0.0. They are not bundled or privately imported.
 
-For user-facing behavior and controls, start with the [README](../README.md). Exact presentation rules belong to the five linked specifications below; this document describes their common implementation boundaries.
+For user-facing behavior and controls, start with the [README](../README.md). Exact presentation rules belong to the six linked specifications below; this document describes their common implementation boundaries.
 
 ## Modules and dependencies
 
 | Module | Responsibility |
 | --- | --- |
 | `src/index.ts` | The sole live-host adapter, presentation selection, compact summaries, transcript separation, normalized tool clicks, invalidation, animation and extension lifecycle |
-| `src/summary-args.ts` | Pure bounded argument previews, edit path-only formatting, field priority, Unicode/control handling and display-only secret masking |
+| `src/summary-args.ts` | Pure bounded argument previews, edit/write path-only formatting, field priority, Unicode/control handling and display-only secret masking |
 | `src/bash-card.ts` | Bash command/comments, bounded collapsed output preview, available expanded output and metadata-derived footer |
-| `src/edit-card.ts` | Persisted-diff validation, source highlighting, context projection, numbered unified/split content and validation-only measurement |
+| `src/file-card.ts` | Shared edit/write saved-source validation/classification, highlighting, context projection, numbered plain/unified/split content and validation-only measurement |
 | `src/user-card.ts` | Reframing native Markdown output and terminal navigation zones without reparsing user text |
 | `src/card-frame.ts` | Pure geometry, caller-supplied frame paint and panel hit bounds |
 | `src/card-theme.ts` | Active-theme tool-panel paint |
@@ -38,14 +38,15 @@ Selection is based on the current lifecycle and safeguards, not output size:
 
 | Presentation | Default routing |
 | --- | --- |
-| Compact summary | Collapsed text-only tools other than native-card defaults; also incomplete/partial/failed `edit` calls |
+| Compact summary | Collapsed text-only tools other than native-card defaults; also incomplete/partial/failed `edit`/`write` calls |
 | Bash frame | Exact `bash` with displayable command/context, collapsed or expanded |
 | Edit diff frame | Final successful exact `edit` with a path and supported persisted diff metadata |
 | Edit inline title/native fallback | Successful `edit` without diff metadata / with malformed or unsupported metadata |
-| Native tool presentation | `powershell`, `write`, ordinary expanded calls, images, intentional hiding and explicit native opt-outs |
+| Write frame | Final successful exact `write`: saved changes or submitted source, classified by available metadata; malformed metadata stays native |
+| Native tool presentation | `powershell`, ordinary expanded calls, images, intentional hiding and explicit native opt-outs |
 | User frame | Compatible ordinary native user messages, using the original Markdown renderer |
 
-Exact-name `--toolview-card` adds native-card policy; naming `bash` or `edit` opts out of its custom presentation. `--toolview-compact` wins over that policy, but not over expansion, images or native hiding. The edit-success condition is shared by render, spacing, mouse and animation teardown: partial errors are still running summaries, final errors are wholly error-colored summaries, and only final non-errors can enter the diff presenter.
+Exact-name `--toolview-card` adds native-card policy; naming `bash`, `edit` or `write` opts out of its custom presentation. `--toolview-compact` wins over that policy, but not over expansion, images or native hiding. The file-success condition is shared by render, spacing, mouse and animation teardown: partial errors are still running summaries, final errors are wholly error-colored summaries, and only final non-errors can enter the file presenter.
 
 ### Native visibility
 
@@ -55,9 +56,10 @@ One narrow Pi 1.0.0 exception avoids discarded native edit rows. Every visit ver
 
 ## Data and rendering boundaries
 
-- Compact summaries format supplied arguments independently of third-party schemas. The exact `edit` path-only rule, field priorities, bounded grapheme/container previews, top-level secret masking and control sanitization are display-only; there is no generic payload suppression. Native expansion and saved/model data are not abbreviated or redacted.
+- Compact summaries format supplied arguments independently of third-party schemas. The exact `edit`/`write` path-only rule, field priorities, bounded grapheme/container previews, top-level secret masking and control sanitization are display-only; there is no generic payload suppression. Native expansion and saved/model data are not abbreviated or redacted.
 - Bash consumes already-returned text and persisted status metadata. It never infers process status from text, reads output files or reconstructs upstream truncation. Its one approved semantic display exception removes an exact separated duplicate of its own metadata-derived final footer.
 - Edit consumes persisted `details.patch`/`details.diff`, never input proposals or a file reread. It highlights old/new supplied source independently with Pi's public file-language resolver and highlighter before projecting context. It preserves multiline token state and hunk boundaries. OpenCode supplies the format reference, not an identical syntax engine or screenshot guarantee.
+- Write uses compatible saved diff shapes without producer identification; additions-only become plain Created source, additions/context use Edited diff, any removals use Replaced diff, absent/no-change diff uses Wrote submitted content. Created includes existing empty files. Explicit truncation shows submitted content with a warning, not guessed complete changes or final post-format bytes. See the [write contract](write-card-spec.md).
 - User cards call the original renderer at the frame's content width plus twice the native horizontal padding, remove only known geometric padding, and relocate OSC 133 zones. Markdown transformations, token styles, links and source text are retained. Native image-protocol rows and impossible tiny-width glyphs fall back at the real width.
 - The frame owns geometry and restores enclosing panel paint after child ANSI background/full resets. It never truncates a caller's body or paints exterior margins.
 
@@ -65,9 +67,9 @@ Toolview does not replace tool definitions or execution, rewrite results/session
 
 ## Cache, separation and animation
 
-Two independent instances of the same rendered-data LRU isolate **8 MiB ordinary views** from **128 MiB Bash/edit-diff frames**, each capped at 2048 entries. A weak component state points to one latest layout/signature/pool, never a width history. The recency lists contain rendered values/accounting, not owners, raw args/results or builder closures. User layouts always use the ordinary pool. Pool selection follows the materialized view, not the tool name.
+Two independent instances of the same rendered-data LRU isolate **8 MiB ordinary views** from **128 MiB Bash/edit-diff/write frames**, each capped at 2048 entries. A weak component state points to one latest layout/signature/pool, never a width history. The recency lists contain rendered values/accounting, not owners, raw args/results or builder closures. User layouts always use the ordinary pool. Pool selection follows the materialized view, not the tool name.
 
-Body retention excludes outside transcript separators. The adapter records parent/index edges, repairs stale positions lazily, and finds the previous visible sibling. It uses existing row counts or cheap classification: Bash does not format output for spacing; edit measurement reads an exact retained layout or validates metadata without highlighting/painting/admitting another body. Native/unknown predecessors may still need rendering. Separator and executing-spinner composition can allocate row arrays; unchanged completed summaries without a separator return retained arrays directly.
+Body retention excludes outside transcript separators. The adapter records parent/index edges, repairs stale positions lazily, and finds the previous visible sibling. It uses existing row counts or cheap classification: Bash does not format output for spacing; file-card measurement reads an exact retained layout or validates metadata without highlighting/painting/admitting another body. Native/unknown predecessors may still need rendering. Separator and executing-spinner composition can allocate row arrays; unchanged completed summaries without a separator return retained arrays directly.
 
 The sole Toolview timer is an unreferenced 100 ms clock for attached, painted compact calls during actual execution. It tracks weak running-node references and attachment edges, not the whole transcript. Ticks replace only the leading glyph and request a frame without invalidating cached content. Argument streaming does not start it; final results, expansion, disappearance, off and restoration stop participation, and the last participant stops the timer. There is no idle cache-maintenance polling or host-frame throttling.
 
@@ -78,6 +80,7 @@ Cold layouts and actual width/theme changes prepare full required content by des
 - [Tool summaries](tool-summary-spec.md): argument formatting, status, wrapping and compact input.
 - [Bash cards](bash-card-spec.md): command/output/footer semantics and expansion.
 - [Edit cards](edit-card-spec.md): metadata, syntax, diff format and lifecycle.
+- [Write cards](write-card-spec.md): source classification, completeness and plain/diff fallback.
 - [Shared frame](card-frame-spec.md): geometry, paint, user messages and click bounds.
 - [Render cache](render-cache-spec.md): invalidation, ownership, pool controls and measurable work.
 - [Testing](testing.md): reproducible checks, actual CLI/SDK controls and explicit coverage limits.

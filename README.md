@@ -1,6 +1,6 @@
 # Pi Toolview
 
-An alternative presentation for Pi: concise tool summaries, terminal-style bash cards, framed user messages, OpenCode-style syntax-colored edit diffs, and native rich cards for other commands and writes.
+An alternative presentation for Pi: concise tool summaries, terminal-style bash cards, framed user messages, OpenCode-style syntax-colored edit diffs, source-aware write cards, and native rich cards for other commands.
 
 ```text
  → read src/app.ts [offset=5, limit=10]
@@ -43,9 +43,10 @@ Pi loads the TypeScript source directly. No build, fork, copying into `~/.pi`, o
 - `bash` uses a terminal-style card with the complete command, optional description/workdir, a ten-visual-row output preview and a metadata-derived error footer. Expansion shows all already-available output, never rereads output files or reconstructs upstream truncation.
 - Ordinary user messages share the frame, using `customMessageLabel` for the stripe and `userMessageBg` for the panel. Native Markdown styles, transformations, selection/copy and navigation zones are preserved; user cards have no expansion behavior.
 - `edit` uses a compact `edit <path>` before completion and on failure, ignoring every other argument when `path` is a nonempty string; without that path it uses generic formatting. Only final success enters the syntax-colored diff presenter: `← Edited <path>`, original line numbers, up to three unchanged context lines per side (`DIFF_CONTEXT_LINES`), and syntax highlighting inside changed code. Addition-only/removal-only diffs are always unified; mixed changes split above 120 columns. Missing metadata gives an inline success title; unsupported metadata delegates to native.
-- `powershell` and `write` keep their original renderers. Ordinary expanded calls, images and intentional native hiding remain native; expanded Bash retains its custom card unless opted out.
+- `write` follows edit's path-only compact lifecycle, then shows `Created` (additions only), `Edited` (additions plus context), `Replaced` (any removals), or `Wrote` (no changes/diff or explicitly truncated diff). Created/Wrote use numbered syntax-colored source without diff signs/tint; Edited/Replaced reuse edit's diff. All available changes remain visible. `Created` includes filling an existing empty file, not proof of new-file creation. No-diff Wrote shows submitted content, not guaranteed post-format bytes; explicit truncation is noted.
+- `powershell` keeps its original renderer. Ordinary expanded calls, images and intentional native hiding remain native; expanded Bash retains its custom card unless opted out.
 - Consecutive single-row summaries are adjacent; a wrapped summary introduces one blank row before the following tool. Card content has one exterior and one interior column per side, a left-only stripe and no hover paint.
-- Ctrl+O remains Pi's global expansion control. In fullscreen mode, completed summaries/edit panels expand on click and expandable Bash panels toggle; exterior margins/separators are not targets. Card clicks do not interrupt active selection. Regular mode uses terminal-owned mouse handling, so use Ctrl+O there.
+- Ctrl+O remains Pi's global expansion control. In fullscreen mode, completed summaries/edit/write panels expand on click and expandable Bash panels toggle; exterior margins/separators are not targets. Card clicks do not interrupt active selection. Regular mode uses terminal-owned mouse handling, so use Ctrl+O there.
 - Colors follow the active Pi theme and layouts follow the actual viewport width. Tool execution, model-facing results and saved session data are unchanged.
 
 Exact formatting, metadata, geometry and safeguards are defined in the [specifications](#documentation).
@@ -66,8 +67,8 @@ Rendered layouts use two independent least-recently-used caches, each capped at 
 
 | Pool | Default budget | Contents |
 | --- | ---: | --- |
-| `ordinary` | 8 MiB | Summaries, user cards, edit headings/native fallback |
-| `cards` | 128 MiB | Collapsed/expanded Bash cards and successful edit-diff frames |
+| `ordinary` | 8 MiB | Summaries, user cards, edit headings and edit/write native fallback |
+| `cards` | 128 MiB | Collapsed/expanded Bash, successful edit diffs and write frames |
 
 Card pressure cannot evict ordinary views. Each component keeps only its latest width/state; unchanged frames reuse prepared rows. Actual width/theme and relevant state changes rebuild affected content. The execution spinner changes only its prefix and has no idle timer.
 
@@ -84,7 +85,7 @@ pi -e ./src/index.ts --toolview-card Agent,ask_user_question
 pi -e ./src/index.ts --toolview-compact write
 ```
 
-`--toolview-card` adds to the native-card defaults; explicitly naming `bash` or `edit` restores its original Pi card. `--toolview-compact` takes precedence over that list, but never over expansion, image, or hidden-component safeguards. There is no separate configuration file.
+`--toolview-card` adds to the native-card defaults; explicitly naming `bash`, `edit` or `write` restores its original Pi card. `--toolview-compact` takes precedence over that list, but never over expansion, image, or hidden-component safeguards. There is no separate configuration file.
 
 ## Compatibility
 
@@ -115,6 +116,7 @@ The installed-package smoke test is version-audited and explicitly skips unavail
 - [Tool summary specification](docs/tool-summary-spec.md) — arguments, status, wrapping and compact input.
 - [Bash card specification](docs/bash-card-spec.md) — command/output/footer semantics and expansion.
 - [Edit card specification](docs/edit-card-spec.md) — persisted metadata, syntax, diff format and lifecycle.
+- [Write card specification](docs/write-card-spec.md) — source classification, numbered plain/diff bodies and fallbacks.
 - [Shared frame specification](docs/card-frame-spec.md) — geometry, paint, user cards and click bounds.
 - [Render-cache specification](docs/render-cache-spec.md) — invalidation, memory pools, controls and performance guarantees.
 - [Testing and coverage](docs/testing.md) — automated gates, strict native/data controls and coverage limits.

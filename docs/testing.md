@@ -25,6 +25,7 @@ For a focused edit check, without claiming the unrelated full CLI suite was reru
 
 ```sh
 node --test --test-name-pattern='OpenCode-style edit syntax' --test-concurrency=1 tests/terminal.test.mjs
+node --test --test-name-pattern='write cards' --test-concurrency=1 tests/terminal.test.mjs
 ```
 
 Test names, scenario switches and audited package versions live in the test sources; do not maintain a second version inventory or fixed historical test total here.
@@ -34,7 +35,7 @@ Test names, scenario switches and audited package versions live in the test sour
 | Layer | Purpose |
 | --- | --- |
 | `tests/unit.test.ts` | Pure formatting/geometry/state regressions, actual SDK integration, compatibility guards and ownership/counter tests |
-| `tests/fixtures/cache-probe.ts` | Actual-SDK viewport work and first-installer collection with an active adapter, including an active execution clock |
+| `tests/fixtures/cache-probe.ts` | Actual-SDK viewport work and first-installer collection with an active adapter, including an active execution clock and retained write-source rows |
 | `tests/fixtures/cache-partition-probe.ts` | Actual-SDK mixed transcript, independent ordinary/card pressure and detached-edit collection |
 | `tests/terminal.test.mjs` | Real bundled CLI execution, physical terminal cells, keyboard/mouse, controls and same-session replay |
 | `tests/fixtures/driver.ts` | Offline provider, representative custom tools, explicit metadata-shape scenarios and test-only diagnostics/gates |
@@ -64,10 +65,11 @@ The harness writes fresh evidence under `.test-artifacts/terminal-<timestamp>-<p
 
 | Area | Required controls |
 | --- | --- |
-| Compact summaries | Exact edit path-only/generic fallback and action-first parameter order; visible payloads and exact masking; 256-grapheme values and 1024-grapheme total preview, balanced abbreviations and bounded source-value visits; comma/CJK/grapheme wrapping; continuation origins and one-cell right margin; tiny/zero widths; complete failure colors; no result bodies/badges by default; native expansion |
+| Compact summaries | Exact edit/write path-only/generic fallback and action-first parameter order; visible payloads and exact masking; 256-grapheme values and 1024-grapheme total preview, balanced abbreviations and bounded source-value visits; comma/CJK/grapheme wrapping; continuation origins and one-cell right margin; tiny/zero widths; complete failure colors; no result bodies/badges by default; native expansion |
 | Shared frame and Bash | Complete multiline commands; comments/workdir; ten-row visual preview and overflow; partial/final metadata; exact separated footer exception; tabs/Unicode/controls; panel/stripe/margins in both themes; selection-safe whole-panel clicks; regular/fullscreen controls |
 | User cards | Original Markdown transformations and semantic styles at equal content widths; OSC 133 zones; physical geometry/colors; native selection and copied text; no user expansion; off/on/reload and replay |
 | Edit cards | Actual built-in successes/failures; argument-streaming and executing gates; final failure summaries; old/new syntax including multiline tokens and hidden opening context; metadata formats/hunks/numbers; context cap and omission rules; one-sided unified/mixed split; exact Multiply colors; empty-pane/right-padding paint; native click expansion |
+| Write cards | Actual stock creation/empty-file fill/replacement/clearing/failure; isolated compatible metadata shapes; Created/Edited/Replaced/Wrote classification before context projection; no-op/truncated/malformed/hidden cases; full available numbered source without diff signs/tint; shared diff geometry/syntax; native expansion and lifecycle/replay controls |
 | Edit computation | Complete minified source and bounded ANSI output; monotonic grapheme/ANSI work; per-build colors; validation-only uncached spacing/rejected input; malformed native fallback; large changed blocks without argument-spread overflow |
 | Lifecycle/compatibility | Existing/future/history components; hidden/image/native safeguards; exact-name overrides; reload/shutdown/later-owner restoration; native TUI renderer replacement; active-adapter first-installer collection |
 
@@ -77,7 +79,7 @@ CLI edit controls cover dark/light themes, narrow/unified/wide layouts and regul
 
 Use observable work counters, not timings as the sole proof:
 
-- Compact argument formatting must serialize only bounded string prefixes and visit only the displayed prefix of structured values; path-only edits must not enumerate/read ignored fields. Unicode caps preserve whole graphemes/escapes. These counters do not claim that Pi's native argument processing or root key enumeration becomes bounded.
+- Compact argument formatting must serialize only bounded string prefixes and visit only the displayed prefix of structured values; path-only edits/writes must not enumerate/read ignored fields. Unicode caps preserve whole graphemes/escapes. These counters do not claim that Pi's native argument processing or root key enumeration becomes bounded.
 - An unchanged retained frame must build no custom body and repeat no custom highlighting/wrapping/color work. Updating one tool rebuilds that tool; actual width/theme changes legitimately rebuild affected layouts. Height-only changes/scrolling should reuse retained bodies.
 - Proven stock edit custom states must make no discarded native visibility render calls. Unpatched/expanded native controls must remain positive. Custom/mixed/reused-Box self-render visibility must remain native-authoritative, with no phantom neighbor spacing.
 - Ordinary and card limits/recency are independent. Card pressure must not evict/rebuild ordinary views. Check per-pool zero/limit reduction, oversized skips, clear/off/shutdown and exact aggregate arithmetic. Lookup misses are not body builds: metadata-only spacing may miss without materializing a diff.

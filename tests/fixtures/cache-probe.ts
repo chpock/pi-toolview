@@ -7,6 +7,7 @@ import { ToolExecutionComponent } from "../../node_modules/@earendil-works/pi-co
 import { UserMessageComponent } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/user-message.js";
 import { initTheme, theme } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { installToolview } from "../../src/index.ts";
+import { createWriteToolDefinition } from "@earendil-works/pi-coding-agent";
 
 initTheme("dark", false);
 class Root extends Container { requestRender() {} }
@@ -20,7 +21,7 @@ const tools: (ToolExecutionComponent | undefined)[] = Array.from({ length: 8 }, 
 let enabled = false, segments = 0;
 const original = Intl.Segmenter.prototype.segment;
 Intl.Segmenter.prototype.segment = function (input) {
-  if (enabled && input.startsWith("CACHE_PROBE_")) segments++;
+  if (enabled && (input.startsWith("CACHE_PROBE_") || input.startsWith("WRITE_CACHE_PROBE_"))) segments++;
   return original.call(this, input);
 };
 root.render(80);
@@ -131,5 +132,20 @@ try {
      assert.equal(reference.deref(), undefined, "active user hooks/cache must not retain their first installer");
      observations.push({ firstUserInstallerCollected: true, userCache: userController.cacheStats() });
    } finally { userController.restore(); }
+   const writeRoot = new Root(), writeViewport = new ScrollView(writeRoot, { scrollbar: "hidden", primary: true });
+   let writeNode: ToolExecutionComponent | undefined = new ToolExecutionComponent("write", "first-write-installer",
+     { path: "example.txt", content: "WRITE_CACHE_PROBE_" + "x".repeat(2000) }, undefined, createWriteToolDefinition("/tmp"), writeRoot as never, "/tmp");
+   writeNode.updateResult({ content: [{ type: "text", text: "STOCK_WRITE_RESULT" }], isError: false }); writeRoot.addChild(writeNode);
+   const writeController = installToolview(writeRoot as never, () => theme);
+   const writeFrame = () => { segments = 0; enabled = true; renderLayoutFrame(writeViewport, 80, 24, () => {}); enabled = false; return segments; };
+   try {
+     assert.equal(writeFrame(), 1); const cold = writeController.cacheStats();
+     assert.equal(cold.cards.entries, 1); assert.equal(cold.ordinary.entries, 0);
+     assert.equal(writeFrame(), 0); assert.equal(writeController.cacheStats().builds, cold.builds);
+     const reference = new WeakRef(writeNode); writeRoot.removeChild(writeNode); writeNode = undefined; writeFrame();
+     for (let i = 0; i < 12; i++) { await new Promise<void>(resolve => setImmediate(resolve)); globalThis.gc!(); }
+     assert.equal(reference.deref(), undefined, "active write hooks and retained code rows do not own the first write installer");
+     observations.push({ firstWriteInstallerCollected: true, writeColdSegments: 1, writeWarmSegments: 0, ...writeController.cacheStats() });
+   } finally { writeController.restore(); }
    console.log(JSON.stringify(observations));
 } finally { controller.restore(); Intl.Segmenter.prototype.segment = original; }

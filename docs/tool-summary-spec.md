@@ -1,12 +1,12 @@
 # Tool summary specification
 
-This specification defines compact tool calls, with one exact-name short-view rule for `edit`. Native cards, ordinary-tool expansion, images and hidden renderers retain native behavior; execution and persisted data are unchanged. The separate [bash card specification](bash-card-spec.md) governs bash's default collapsed/expanded card; these summary rules apply to bash only when explicitly forced compact. The separate [edit card specification](edit-card-spec.md) governs edit's default collapsed presentation; these summary rules apply to edit by default before completion and on final failure, and to every state when explicitly forced compact.
+This specification defines compact tool calls, with one shared exact-name short-view rule for `edit` and `write`. Native cards, ordinary-tool expansion, images and hidden renderers retain native behavior; execution and persisted data are unchanged. The separate [bash card specification](bash-card-spec.md) governs bash's default collapsed/expanded card; these summary rules apply to bash only when explicitly forced compact. The separate [edit card specification](edit-card-spec.md) governs edit's default collapsed presentation; these summary rules apply to edit by default before completion and on final failure, and to every state when explicitly forced compact. The [write card specification](write-card-spec.md) uses the same compact lifecycle before success and on failure.
 
 ## 1. Primary description
 
 Given the explicitly supplied argument object:
 
-1. For exact, case-sensitive tool name `edit`, a nonempty primitive string `path` takes precedence over everything else, including `pattern`. Show only `edit <formatted path>`: do not enumerate, sort, read or format any other argument. This applies wherever compact presentation is selected, including a forced-compact successful edit. Absent, empty or non-string `path` falls through to the generic rules below. Native/diff-card routing is unchanged.
+1. For exact, case-sensitive tool names `edit` and `write`, a nonempty primitive string `path` takes precedence over everything else, including `pattern`. Show only `<tool name> <formatted path>`: do not enumerate, sort, read or format any other argument. This applies wherever compact presentation is selected, including a forced-compact successful edit/write. Absent, empty or non-string `path` falls through to the generic rules below. This formatting rule does not select the successful file card.
 2. Otherwise, if `pattern` is a string, including `""`, it takes precedence. Show its quoted value. If `path` is a nonempty string, append ` in ` and the formatted path. Consume only those used fields. Other object candidates remain ordinary parameters in this branch.
 3. Otherwise choose the first nonempty string value in this exact priority: `path`, `target`, `url`, `scope`. Show it as the primary object and consume that field only. Other candidates remain ordinary parameters.
 4. Empty strings and all other types (including arrays, null, numbers, booleans and structured objects) remain named parameters; they are not discarded or interpreted as primary locations. A primary location must be a primitive string with supplied length greater than zero; no implicit trimming is performed.
@@ -41,8 +41,8 @@ Render as `[key=value, key=value]`. Omit the entire block when no parameters rem
 - Preparation is bounded as well as output: read only a bounded grapheme prefix of each input string **before** control cleanup and JSON escaping, and recursively visit only the visible prefix of container values. Do not stringify a full large array/object or scan/sanitize a full large string and then slice its result. Raw-prefix limits may abbreviate a long input whose whitespace/control cleanup would otherwise produce a shorter value. Root key enumeration/sorting remains proportional to the supplied key count; this is not an O(1) or whole-host CPU guarantee.
 - Remove terminal control sequences and invisible directional controls from displayed string prefixes; collapse whitespace to single spaces. Preserve Unicode joining marks needed by emoji and scripts. Nested strings use the same rules. Formatting never modifies the original argument object or its strings.
 - Encountered cyclic graphs or scalar serialization failures use the visible quoted placeholder `"[unavailable]"` within the same budget. Exotic JavaScript objects are outside the JSON tool-input contract; omitted branches are not inspected just to validate them.
-- Mask values of these exact top-level keys as `"<redacted>"` **before** value formatting: `password`, `passwd`, `api_key`, `apiKey`, `authorization`, `Authorization`, `access_token`, `refresh_token`, `secret`, `token`. Undefined values remain omitted. There is no payload hiding beyond the dedicated edit-path rule.
-- Masking is not recursive and does not inspect URL credentials or free text. It is a presentation precaution, not a security boundary. Native expansion and model/session data remain complete and unredacted by this extension. Fields such as `maxTokens` are not matched by substring. Native cards, Bash output/commands, edit diff bodies and user messages do not acquire these compact-text budgets.
+- Mask values of these exact top-level keys as `"<redacted>"` **before** value formatting: `password`, `passwd`, `api_key`, `apiKey`, `authorization`, `Authorization`, `access_token`, `refresh_token`, `secret`, `token`. Undefined values remain omitted. There is no payload hiding beyond the dedicated edit/write-path rule.
+- Masking is not recursive and does not inspect URL credentials or free text. It is a presentation precaution, not a security boundary. Native expansion and model/session data remain complete and unredacted by this extension. Fields such as `maxTokens` are not matched by substring. Native cards, Bash output/commands, edit/write source bodies and user messages do not acquire these compact-text budgets.
 
 An abbreviation ellipsis belongs to the call description and is independent of `SHOW_COMPLETION_MARKERS`: disabling pending/completion markers does not disable visible truncation indicators.
 
@@ -65,7 +65,7 @@ Only a completed result with `isError` marks a summary failed; a partial result 
 
 The source constant `SHOW_COMPLETION_MARKERS = false` in `src/index.ts` disables all trailing status indicators: pending/partial `…`, success `✓`, and failure `✗`. Their code remains available: changing this one constant to `true` restores them, without restoring error-body previews. The leading execution spinner is independent of this constant. A hidden indicator adds no separator space and occupies no layout column. There is no runtime setting or command for this source-level policy.
 
-After Pi marks actual execution as started, a visible compact call uses a one-column Braille spinner (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`) in place of its leading tool glyph. Argument streaming before execution does not animate. Partial results, including partial errors, keep the spinner; a final result immediately restores `→`/`⚙`, with the complete-summary error color on failure. Native representations and Bash cards do not acquire this spinner. See the [animation lifetime and cached-work contract](render-cache-spec.md#execution-spinner).
+After Pi marks actual execution as started, a visible compact call uses a one-column Braille spinner (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`) in place of its leading tool glyph. Argument streaming before execution does not animate. Partial results, including partial errors, keep the spinner; a final result immediately restores `→`/`⚙`, with the complete-summary error color on failure. Native representations and successful Bash/edit/write cards do not acquire this spinner. See the [animation lifetime and cached-work contract](render-cache-spec.md#execution-spinner).
 
 ## 5. Wrapping and indentation
 
@@ -115,11 +115,12 @@ Agent [description="Review rendering", subagent_type="reviewer", prompt="Inspect
 ctx_memory [action="write", category="CONSTRAINTS", content="Durable project fact"]
 edit src/app.ts
 edit [oldText="before", newText="after"]
-write src/app.ts [content="export const result = 1;"]
+write src/app.ts
+write [content="export const result = 1;"]
 custom [query="find this", limit=0, api_key="<redacted>", enabled=false]
 ```
 
-Generic formatting is shared by all tools, except the exact `edit` path-only rule. Native card policy is a separate choice; these formatting rules also apply when a normally native tool is explicitly forced compact.
+Generic formatting is shared by all tools, except the exact `edit`/`write` path-only rule. Native card policy is a separate choice; these formatting rules also apply when a normally native tool is explicitly forced compact.
 
 ## Verification
 
