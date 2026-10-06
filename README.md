@@ -1,6 +1,6 @@
 # Pi Toolview
 
-An alternative presentation for Pi: concise tool summaries, terminal-style bash cards, framed user messages, OpenCode-style syntax-colored edit diffs, source-aware write cards, and native rich cards for other commands.
+An alternative presentation for Pi: concise tool summaries, terminal-style bash cards, framed user messages and input, OpenCode-style syntax-colored edit diffs, source-aware write cards, and native rich cards for other commands.
 
 ```text
  → read src/app.ts [offset=5, limit=10]
@@ -38,10 +38,11 @@ Pi loads the TypeScript source directly. No build, fork, copying into `~/.pi`, o
 
 ## Behavior
 
-- Collapsed text-only tools use compact summaries by default, including third-party tools. Action/target fields precede auxiliary and content fields; payloads are visible and exact top-level secrets remain masked. Displayed values are capped at 256 Unicode graphemes, with 1024 for the complete name/argument preview; `…` marks abbreviation and wrapping adds no further truncation.
+- Collapsed text-only tools use compact summaries by default, including third-party tools. Action/target fields precede auxiliary and content fields; payloads are visible and exact top-level secrets remain masked. Displayed values are capped at 256 Unicode graphemes, with 1024 for the complete name/argument preview; `…` marks abbreviation and wrapping adds no further truncation. Oversized words fill preceding-row space and prefer nearby path/URL separators without wasting more than half the available space; fitting words remain whole.
 - Summaries show `→` for `read`, `←` for `edit`/`write`, otherwise `⚙`. Actual execution replaces that glyph with a shared spinner. Final failures color the entire summary with `error`; result/error bodies stay available through native expansion. Trailing status markers are disabled by the source constant `SHOW_COMPLETION_MARKERS = false`.
 - `bash` uses a terminal-style card with the complete command, optional description/workdir, a ten-visual-row output preview and a metadata-derived error footer. Expansion shows all already-available output, never rereads output files or reconstructs upstream truncation.
 - Ordinary user messages share the frame, using `customMessageLabel` for the stripe and `userMessageBg` for the panel. Native Markdown styles, transformations, selection/copy and navigation zones are preserved; user cards have no expansion behavior.
+- Main text input shares the user-card stripe/background, without horizontal borders or a prompt glyph. The same native editor retains paste/image markers, undo/history, shortcuts and autocomplete; native menus stay below the panel. No agent/model row is added. Custom editor factories remain native; impossible tiny widths delegate to Pi. See the [editor contract](docs/card-frame-spec.md#main-input-editor).
 - `edit` uses a compact `edit <path>` before completion and on failure, ignoring every other argument when `path` is a nonempty string; without that path it uses generic formatting. Only final success enters the syntax-colored diff presenter: `← Edited <path>`, original line numbers, up to three unchanged context lines per side (`DIFF_CONTEXT_LINES`), and syntax highlighting inside changed code. Addition-only/removal-only diffs are always unified; mixed changes split above 120 columns. Missing metadata gives an inline success title; unsupported metadata delegates to native.
 - `write` follows edit's path-only compact lifecycle, then shows `Created` (additions only), `Edited` (additions plus context), `Replaced` (any removals), or `Wrote` (no changes/diff or explicitly truncated diff). Created/Wrote use numbered syntax-colored source without diff signs/tint; Edited/Replaced reuse edit's diff. All available changes remain visible. `Created` includes filling an existing empty file, not proof of new-file creation. No-diff Wrote shows submitted content, not guaranteed post-format bytes; explicit truncation is noted.
 - `powershell` keeps its original renderer. Ordinary expanded calls, images and intentional native hiding remain native; expanded Bash retains its custom card unless opted out.
@@ -76,7 +77,7 @@ Card pressure cannot evict ordinary views. Each component keeps only its latest 
 
 Budgets estimate retained custom data, not upfront allocation or total process memory. Oversized entries are not retained. Reported heap usage is **whole Pi process**, not Toolview. Native host work and transient formatting remain outside these budgets; see the [cache contract](docs/render-cache-spec.md).
 
-Controls apply to the current extension runtime only. Disabling restores the original rendering methods; re-enabling covers existing and future calls. Reload creates a fresh enabled runtime.
+Controls apply to the current extension runtime only. Disabling restores the original presentation methods, including the editor, without transferring its draft; re-enabling covers existing and future components. Reload creates a fresh enabled runtime.
 
 Use exact, case-sensitive tool names to customize the presentation for one invocation:
 
@@ -89,11 +90,13 @@ pi -e ./src/index.ts --toolview-compact write
 
 ## Compatibility
 
-The supported/tested host is **Pi 1.0.0**. One adapter obtains the stable TUI reference through a public widget factory and narrowly wraps private component rendering, normalized tool clicks, UI updates and child attachment. Native methods still execute; no tool execution or raw input is intercepted. Host libraries are not bundled or privately imported. See [architecture](docs/architecture.md) for the integration and ownership boundaries.
+The supported/tested host is **Pi 1.0.0**. One adapter obtains the stable TUI reference through a public widget factory and narrowly wraps private component rendering, normalized tool clicks, UI updates, stock-editor presentation and child attachment. Native methods still execute; no tool execution or raw input is intercepted. Host libraries are not bundled or privately imported. See [architecture](docs/architecture.md) for the integration and ownership boundaries.
 
 This is intentionally a compatibility-sensitive integration. If the inspected component contract cannot be established, Toolview warns and retains native rendering. Runtime restoration does not overwrite hooks subsequently replaced by another extension. Arbitrary extensions wrapping the same private methods and future Pi versions are not guaranteed compatible; run the terminal checks after upgrading.
 
-The extension is inactive in print, JSON, and RPC modes. Presentation changes are limited to interactive terminal tools and ordinary user messages, not HTML exports or standalone user shell messages.
+**Main-input styling is stock-editor-only.** If another extension installs or replaces its own editor (for example, `pi-powerline-footer`), Toolview leaves that editor and its appearance under the owning extension's control. It does not disable the extension or replace its editing behavior. This input-only limitation does not disable Toolview's tool or user-message cards, which retain their own eligibility safeguards. Footer-only extensions that do not replace or override the editor are not excluded by this rule. See the [editor contract](docs/card-frame-spec.md#main-input-editor).
+
+The extension is inactive in print, JSON, and RPC modes. Presentation changes are limited to interactive terminal tools, ordinary user messages and the stock main editor, not HTML exports or standalone user shell messages.
 
 ## Development
 
@@ -117,7 +120,7 @@ The installed-package smoke test is version-audited and explicitly skips unavail
 - [Bash card specification](docs/bash-card-spec.md) — command/output/footer semantics and expansion.
 - [Edit card specification](docs/edit-card-spec.md) — persisted metadata, syntax, diff format and lifecycle.
 - [Write card specification](docs/write-card-spec.md) — source classification, numbered plain/diff bodies and fallbacks.
-- [Shared frame specification](docs/card-frame-spec.md) — geometry, paint, user cards and click bounds.
+- [Shared frame specification](docs/card-frame-spec.md) — geometry, paint, user cards, main input and click bounds.
 - [Render-cache specification](docs/render-cache-spec.md) — invalidation, memory pools, controls and performance guarantees.
 - [Testing and coverage](docs/testing.md) — automated gates, strict native/data controls and coverage limits.
 

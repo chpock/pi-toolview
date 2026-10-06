@@ -26,6 +26,8 @@ For a focused edit check, without claiming the unrelated full CLI suite was reru
 ```sh
 node --test --test-name-pattern='OpenCode-style edit syntax' --test-concurrency=1 tests/terminal.test.mjs
 node --test --test-name-pattern='write cards' --test-concurrency=1 tests/terminal.test.mjs
+node --test --test-name-pattern='^main editor user-card' --test-concurrency=1 tests/terminal.test.mjs
+node --test --test-name-pattern='long-word summaries|comma wrap points|width-21 colored-segment boundary|complete multiline summaries' --test-concurrency=1 tests/terminal.test.mjs
 ```
 
 Test names, scenario switches and audited package versions live in the test sources; do not maintain a second version inventory or fixed historical test total here.
@@ -35,10 +37,11 @@ Test names, scenario switches and audited package versions live in the test sour
 | Layer | Purpose |
 | --- | --- |
 | `tests/unit.test.ts` | Pure formatting/geometry/state regressions, actual SDK integration, compatibility guards and ownership/counter tests |
-| `tests/fixtures/cache-probe.ts` | Actual-SDK viewport work and first-installer collection with an active adapter, including an active execution clock and retained write-source rows |
+| `tests/fixtures/cache-probe.ts` | Actual-SDK viewport work and first-installer collection with an active adapter, including an active execution clock, retained write-source rows and the stock input editor |
 | `tests/fixtures/cache-partition-probe.ts` | Actual-SDK mixed transcript, independent ordinary/card pressure and detached-edit collection |
 | `tests/terminal.test.mjs` | Real bundled CLI execution, physical terminal cells, keyboard/mouse, controls and same-session replay |
 | `tests/fixtures/driver.ts` | Offline provider, representative custom tools, explicit metadata-shape scenarios and test-only diagnostics/gates |
+| `tests/fixtures/editor-driver.ts` | Real production-extension editor controls and draft-safe shortcut observations; exact public stock identity, not fake-editor execution |
 | `tests/fixtures/pty_bridge.py` | Real pseudo-terminal transport used by the CLI harness |
 | `tests/fixtures/integration-profile.mjs` | Version-audited, isolated installed-extension profile with explicit exclusions |
 
@@ -65,15 +68,18 @@ The harness writes fresh evidence under `.test-artifacts/terminal-<timestamp>-<p
 
 | Area | Required controls |
 | --- | --- |
-| Compact summaries | Exact edit/write path-only/generic fallback and action-first parameter order; visible payloads and exact masking; 256-grapheme values and 1024-grapheme total preview, balanced abbreviations and bounded source-value visits; comma/CJK/grapheme wrapping; continuation origins and one-cell right margin; tiny/zero widths; complete failure colors; no result bodies/badges by default; native expansion |
+| Compact summaries | Exact edit/write path-only/generic fallback and action-first parameter order; visible payloads and exact masking; 256-grapheme values and 1024-grapheme total preview, balanced abbreviations and bounded source-value visits; comma/CJK/grapheme wrapping; oversized-fragment remainder fill and nearest separator cuts with 20-grapheme/half-free-column bounds and JSON escape controls; continuation origins and one-cell right margin; tiny/zero widths; complete failure colors; no result bodies/badges by default; native expansion |
 | Shared frame and Bash | Complete multiline commands; comments/workdir; ten-row visual preview and overflow; partial/final metadata; exact separated footer exception; tabs/Unicode/controls; panel/stripe/margins in both themes; selection-safe whole-panel clicks; regular/fullscreen controls |
 | User cards | Original Markdown transformations and semantic styles at equal content widths; OSC 133 zones; physical geometry/colors; native selection and copied text; no user expansion; off/on/reload and replay |
+| Main editor | Same native instance/state; user geometry/paint; full-width hardware marker; native padding/menu/status and overflow; CJK/combining normalized clicks; expanded-paste maps and atomic programmatic text insertion, undo/history and shortcuts; custom-factory/subclass/instance/later-owner guards; active first-installer GC; both modes, themes/resizes, off/on and empty-draft reload |
 | Edit cards | Actual built-in successes/failures; argument-streaming and executing gates; final failure summaries; old/new syntax including multiline tokens and hidden opening context; metadata formats/hunks/numbers; context cap and omission rules; one-sided unified/mixed split; exact Multiply colors; empty-pane/right-padding paint; native click expansion |
 | Write cards | Actual stock creation/empty-file fill/replacement/clearing/failure; isolated compatible metadata shapes; Created/Edited/Replaced/Wrote classification before context projection; no-op/truncated/malformed/hidden cases; full available numbered source without diff signs/tint; shared diff geometry/syntax; native expansion and lifecycle/replay controls |
 | Edit computation | Complete minified source and bounded ANSI output; monotonic grapheme/ANSI work; per-build colors; validation-only uncached spacing/rejected input; malformed native fallback; large changed blocks without argument-spread overflow |
 | Lifecycle/compatibility | Existing/future/history components; hidden/image/native safeguards; exact-name overrides; reload/shutdown/later-owner restoration; native TUI renderer replacement; active-adapter first-installer collection |
 
 CLI edit controls cover dark/light themes, narrow/unified/wide layouts and regular/fullscreen same-session replay. Unit controls additionally cover file-type dispatch beyond the CLI TypeScript/HTML files, alternate metadata shapes, impossible tiny glyphs and native image-protocol fallback. These are distinct layers, not exhaustive parser or graphical-terminal coverage. Compact-preview CLI fixtures use CJK and combining characters for physical Unicode checks; joined-emoji preservation is additionally asserted in unit/source rows. The default headless Unicode 6 provider measures a joined family emoji as four cells while Pi measures two, so exact physical joined-emoji width is not claimed by this harness.
+
+Editor CLI observations use a test-only shortcut so capture does not submit or exchange the draft. The observer loads production Toolview unchanged, controls its actual registered command and verifies native editor identity/state. Remove only the exact zero-column hardware cursor marker when comparing projected strings to physical cells; do not normalize source characters. Native tiny-width wide-glyph recursion, actual OS IME windows and graphical image insertion are outside this gate; unit checks retain native tiny authority, expanded-paste state and atomic programmatic text insertion. Clipboard-image callback/map behavior is not directly exercised; keyboard input and host image handling remain native. Pi's own editor-factory state-transfer/reload limitations are not claimed fixed.
 
 ## Performance counter discipline
 

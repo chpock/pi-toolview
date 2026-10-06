@@ -1,9 +1,10 @@
-import { createEditToolDefinition, highlightCode, getLanguageFromPath, type ExtensionAPI, type ExtensionContext, type ThemeColor } from "@earendil-works/pi-coding-agent";
-import { Box, Container, Markdown, visibleWidth, wrapTextWithAnsi, type Component, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
+import { CustomEditor, createEditToolDefinition, highlightCode, getLanguageFromPath, type ExtensionAPI, type ExtensionContext, type ThemeColor } from "@earendil-works/pi-coding-agent";
+import { Box, Container, Editor, Markdown, visibleWidth, type Component, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { isAbsolute, resolve } from "node:path";
 import { renderBashCard } from "./bash-card.ts";
 import { filePath, measureFileCard, renderFileCard } from "./file-card.ts";
 import { renderUserCard } from "./user-card.ts";
+import { EDITOR_TOP, EDITOR_BOTTOM, renderEditorCard, type EditorLayout } from "./editor-card.ts";
 import { cardGeometry, insidePanel } from "./card-frame.ts";
 import type { CardTheme } from "./card-theme.ts";
 import { RenderCache, type CacheEntry, type CacheStats } from "./render-cache.ts";
@@ -62,6 +63,8 @@ export interface ToolviewOptions {
   warn?: (reason: string) => void;
   cacheMiB?: number;
   cardCacheMiB?: number;
+  /** Do not compete with a public editor factory owned by another extension. */
+  nativeEditor?: () => boolean;
 }
 export interface ToolviewCacheStats extends CacheStats { ordinary: CacheStats; cards: CacheStats }
 export interface ToolviewController {
@@ -83,25 +86,40 @@ const SPINNER_INTERVAL_MS = 100;
 
 
 const summaryGraphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-// Match Pi 1.0.0's plain-text token boundaries; punctuation is otherwise part of a word.
+// Keep Pi's CJK/space boundaries and the existing parameter-comma soft breaks.
 const summaryCjkBreak = /[\p{Script_Extensions=Han}\p{Script_Extensions=Hiragana}\p{Script_Extensions=Katakana}\p{Script_Extensions=Hangul}\p{Script_Extensions=Bopomofo}]/u;
+const SUMMARY_SPLIT_LOOKBACK = 20;
+// Path/URL/identifier separators, not quotes or brackets. Match whole graphemes.
+const summarySplitSeparators = new Set(["/", "\\", ".", "-", "_", ":", ",", ";", "?", "!", "&", "=", "+", "@", "#", "%"]);
 
-/** Commas in parameters are soft breaks, not inserted spaces or modified JSON. */
+/** Wrap plain source before coloring; only oversized tokens gain preferred cuts. */
 function wrapSummary(text: string, width: number, parameterStart: number, parameterLength: number): string[] {
-  const parameters = text.slice(parameterStart, parameterStart + parameterLength);
-  if (!parameters.includes(",")) return wrapTextWithAnsi(text, width);
-  const tokens: string[] = [];
-  let word = "", wordIsSpace = false;
-  const flushWord = () => { if (word) tokens.push(word); word = ""; };
+  const tokens: { text: string; start: number }[] = [];
+  const preferred = new Set<number>();
+  let word = "", wordStart = 0, wordIsSpace = false, quoted = false, escapeEnd = 0;
+  const flushWord = () => { if (word) tokens.push({ text: word, start: wordStart }); word = ""; };
   for (const { segment, index } of summaryGraphemes.segment(text)) {
+    const end = index + segment.length;
+    // JSON syntax and grapheme boundaries are independent: quotes may share a
+    // grapheme with following marks or preceding Unicode Prepend characters.
+    // Visit every code unit for ASCII syntax; prefer cuts only after whole units.
+    for (let position = index; position < end; position++) {
+      if (position < escapeEnd) continue;
+      if (text[position] === '"') quoted = !quoted;
+      else if (quoted && text[position] === "\\") {
+        const escape = /^\\(?:u[\da-fA-F]{4}|["\\/bfnrt])/u.exec(text.slice(position, position + 6));
+        if (escape) escapeEnd = position + escape[0].length;
+      }
+    }
+    if (summarySplitSeparators.has(segment) && end >= escapeEnd) preferred.add(end);
     if (summaryCjkBreak.test(segment)) {
-      flushWord(); tokens.push(segment); continue;
+      flushWord(); tokens.push({ text: segment, start: index }); continue;
     }
     const space = segment === " ";
     if (word && wordIsSpace !== space) flushWord();
+    if (!word) wordStart = index;
     word += segment;
     wordIsSpace = space;
-    // A comma with a combining mark is not a standalone grapheme boundary.
     if (segment === "," && index >= parameterStart && index < parameterStart + parameterLength) flushWord();
   }
   flushWord();
@@ -109,21 +127,44 @@ function wrapSummary(text: string, width: number, parameterStart: number, parame
   let line = "", lineWidth = 0;
   const flush = () => { if (line.trimEnd()) rows.push(line.trimEnd()); line = ""; lineWidth = 0; };
   for (const token of tokens) {
-    const tokenWidth = visibleWidth(token);
-    const whitespace = token.trim() === "";
+    const tokenWidth = visibleWidth(token.text);
+    const whitespace = token.text.trim() === "";
     if (tokenWidth > width && !whitespace) {
-      flush();
-      const broken = wrapTextWithAnsi(token, width);
-      for (let i = 0; i < broken.length - 1; i++) rows.push(broken[i]!);
-      line = broken.at(-1)!;
-      lineWidth = visibleWidth(line);
+      // Segment this oversized token once. Prefix widths make each bounded
+      // lookback constant work; no rescanning the remaining suffix per row.
+      const units = Array.from(summaryGraphemes.segment(token.text));
+      const columns = [0];
+      for (const unit of units) columns.push(columns.at(-1)! + visibleWidth(unit.segment));
+      let from = 0;
+      while (from < units.length) {
+        const remaining = width - lineWidth;
+        let hardEnd = from;
+        while (hardEnd < units.length && columns[hardEnd + 1]! - columns[from]! <= remaining) hardEnd++;
+        if (hardEnd === from && line) { flush(); continue; }
+        // Preserve an indivisible over-wide grapheme at impossible tiny widths,
+        // rather than dropping it or looping without progress, as native does.
+        if (hardEnd === from) hardEnd++;
+        let cut = hardEnd;
+        if (hardEnd < units.length) {
+          for (let candidate = hardEnd; candidate > from && hardEnd - candidate <= SUMMARY_SPLIT_LOOKBACK; candidate--) {
+            const end = units[candidate - 1]!.index + units[candidate - 1]!.segment.length;
+            const filled = columns[candidate]! - columns[from]!;
+            if (filled * 2 < remaining) break; // Never waste over half this row's free columns.
+            if (preferred.has(token.start + end)) { cut = candidate; break; }
+          }
+        }
+        const end = cut < units.length ? units[cut]!.index : token.text.length;
+        line += token.text.slice(units[from]!.index, end);
+        lineWidth += columns[cut]! - columns[from]!;
+        from = cut;
+        if (from < units.length) flush();
+      }
     } else if (lineWidth + tokenWidth > width) {
       flush();
-      if (!whitespace) { line = token; lineWidth = tokenWidth; }
+      if (!whitespace) { line = token.text; lineWidth = tokenWidth; }
     } else {
-      // Dropping leading wrap whitespace keeps rows source-substring compatible.
       if (!line && whitespace) continue;
-      line += token;
+      line += token.text;
       lineWidth += tokenWidth;
     }
   }
@@ -297,7 +338,7 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     setCacheLimitMiB: (value) => cache.setLimit(value * 1024 * 1024),
     setCardCacheLimitMiB: (value) => cardCache.setLimit(value * 1024 * 1024),
     restore() {
-      if (!active && !patches.size && !userPatches.size) return;
+      if (!active && !patches.size && !userPatches.size && !editorPatches.size) return;
       active = false;
       stopSpinner(); animated.clear(); animationRefs = new WeakMap();
       clearCache();
@@ -324,6 +365,12 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
         }
       }
       userPatches.clear();
+      for (const [prototype, hooks] of editorPatches) for (const hook of hooks) {
+        if (Object.getOwnPropertyDescriptor(prototype, hook.name)?.value !== hook.wrapper) continue;
+        if (hook.original) Object.defineProperty(prototype, hook.name, hook.original);
+        else Reflect.deleteProperty(prototype, hook.name);
+      }
+      editorPatches.clear(); editorStates = new WeakMap(); editorPasses = new WeakMap();
       refresh();
     },
   };
@@ -605,11 +652,82 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     for (const update of updates) Object.defineProperty(prototype, update.name,
       { configurable: true, writable: true, ...update.original, value: update.wrapper });
   }
+  type EditorHook = { name: string; original: PropertyDescriptor | undefined; wrapper: Function };
+  const editorPatches = new Map<object, EditorHook[]>();
+  let editorStates = new WeakMap<CustomEditor, Omit<EditorLayout, "rows"> & { width: number }>();
+  let editorPasses = new WeakMap<CustomEditor, { width: number; top: string; bottom: string }>();
+  // Public stock identities are resolved before installing any hooks. No editor
+  // instance is captured in these persistent closures; editing methods stay native.
+  const editorRender = Editor.prototype.render, editorMouse = Editor.prototype.handleMouse;
+  const editorPrototype = CustomEditor.prototype as unknown as Record<string, Function>;
+  const editorTop = editorPrototype.renderTopBorder!, editorBottom = editorPrototype.renderBottomBorder!;
+  function stockEditor(node: CustomEditor): boolean {
+    const hooks = editorPatches.get(CustomEditor.prototype);
+    return Object.getPrototypeOf(node) === CustomEditor.prototype && Object.getPrototypeOf(CustomEditor.prototype) === Editor.prototype &&
+      ["render", "handleMouse", "renderTopBorder", "renderBottomBorder"].every(name =>
+        (node as unknown as Record<string, unknown>)[name] === hooks?.find(hook => hook.name === name)?.wrapper) &&
+      node.getPaddingX === Editor.prototype.getPaddingX && node.getText === Editor.prototype.getText &&
+      typeof node.borderColor === "function" && !!Object.getOwnPropertyDescriptor(node, "borderColor")?.writable &&
+      (options.nativeEditor?.() ?? true) && attached(node);
+  }
+  function patchEditorPrototype(prototype: object) {
+    if (editorPatches.has(prototype)) return;
+    if (editorPrototype.render !== editorRender || editorPrototype.handleMouse !== editorMouse ||
+      editorPrototype.renderBottomBorder !== editorBottom) return;
+    const patchedRender = function (this: CustomEditor, width: number): string[] {
+      if (!active || !stockEditor(this) || (width > 0 && width < 7)) {
+        editorStates.delete(this); return editorRender.call(this, width);
+      }
+      try {
+        const layout = renderEditorCard(width, this.getPaddingX(), getTheme(), (size, borderWidth) => {
+          if (borderWidth === undefined) return { rows: editorRender.call(this, size), top: "", bottom: "" };
+          const pass = { width: borderWidth, top: "", bottom: "" };
+          editorPasses.set(this, pass);
+          try { return { rows: editorRender.call(this, size), top: pass.top, bottom: pass.bottom }; }
+          finally { editorPasses.delete(this); }
+        });
+        const { rows, ...mapping } = layout;
+        editorStates.set(this, { ...mapping, width });
+        return rows;
+      } catch {
+        fail("Toolview could not render this editor; native rendering restored");
+        return editorRender.call(this, width);
+      }
+    };
+    const patchedMouse = function (this: CustomEditor, event: TuiMouseEvent) {
+      const state = editorStates.get(this);
+      if (!active || !stockEditor(this) || !state?.framed || state.width !== event.width)
+        return editorMouse.call(this, event);
+      return editorMouse.call(this, { ...event, x: event.x - state.offsetX, width: state.nativeWidth });
+    };
+    const border = (name: "top" | "bottom", original: Function) => function (this: CustomEditor, width: number, hidden: number): string {
+      const pass = editorPasses.get(this);
+      if (!pass) return original.call(this, width, hidden) as string;
+      const descriptor = Object.getOwnPropertyDescriptor(this, "borderColor")!, color = this.borderColor;
+      // Only stock border-decoration fragments pass through this callback.
+      // Native status literals/semantic styles use independent indicator callbacks.
+      Object.defineProperty(this, "borderColor", { ...descriptor, value: (text: string) => color.call(this, text.replaceAll("─", " ")) });
+      try { pass[name] = original.call(this, pass.width, hidden) as string; }
+      finally { Object.defineProperty(this, "borderColor", descriptor); }
+      return name === "top" ? EDITOR_TOP : EDITOR_BOTTOM;
+    };
+    const replacements = { render: patchedRender, handleMouse: patchedMouse,
+      renderTopBorder: border("top", editorTop), renderBottomBorder: border("bottom", editorBottom) };
+    const hooks = Object.entries(replacements).map(([name, wrapper]) => {
+      const original = Object.getOwnPropertyDescriptor(prototype, name);
+      if (original && (!original.writable || !original.configurable)) throw new Error("Native editor presentation hooks cannot be restored");
+      return { name, original, wrapper };
+    });
+    editorPatches.set(prototype, hooks);
+    for (const hook of hooks) Object.defineProperty(prototype, hook.name,
+      { configurable: true, writable: true, ...hook.original, value: hook.wrapper });
+  }
   function visit(node: Component, parent?: Container, index = -1) {
     if (!active) return;
     if (parent) parents.set(node, { parent, index });
     if (candidate(node)) install(node);
     else if (userCandidate(node)) installUser(node);
+    else if (Object.getPrototypeOf(node) === CustomEditor.prototype) patchEditorPrototype(CustomEditor.prototype);
     if (node instanceof Container) node.children.forEach((child, index) => visit(child, node, index));
   }
   function patchedAdd(this: Container, child: Component) {
@@ -664,6 +782,7 @@ export default function toolview(pi: ExtensionAPI) {
     ctx.ui.setWidget("pi-toolview-capture", (tui) => {
       controller = installToolview(tui, () => ctx.ui.theme, {
         cards: names("toolview-card"), compact: names("toolview-compact"), cacheMiB, cardCacheMiB,
+        nativeEditor: () => ctx.ui.getEditorComponent() === undefined,
         warn: (message) => ctx.ui.notify(`Pi Toolview disabled: ${message}`, "warning"),
       });
       return { render: () => [], invalidate() {} };

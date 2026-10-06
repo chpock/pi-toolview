@@ -190,6 +190,9 @@ export class PiTerminal {
     }, `live capture ${name}`);
     await this.settle(animated);
     this.session = dump.session;
+    return this.captureScreen(name, dump);
+  }
+  captureScreen(name, dump) {
     const screen = this.screen();
     writeFileSync(join(this.output, `${name}.screen.txt`), screen.join('\n'));
     writeFileSync(join(this.output, 'terminal.ansi'), Buffer.concat(this.raw));
@@ -198,7 +201,7 @@ export class PiTerminal {
       const cell = buffer.getLine(buffer.viewportY + y)?.getCell(x);
       return cell ? { text: cell.getChars(), width: cell.getWidth(),
         fg: cell.getFgColor(), fgMode: cell.getFgColorMode(), dim: cell.isDim(), bold: cell.isBold(),
-        italic: cell.isItalic(), underline: cell.isUnderline(), bg: cell.getBgColor(), bgMode: cell.getBgColorMode() } : null;
+        italic: cell.isItalic(), underline: cell.isUnderline(), inverse: !!cell.isInverse(), bg: cell.getBgColor(), bgMode: cell.getBgColorMode() } : null;
     }));
     writeFileSync(join(this.output, `${name}.screen.json`), JSON.stringify(cells));
     return { ...dump, screen, cells };
@@ -806,6 +809,89 @@ test('real CLI: comma wrap points preserve array members and index lists in live
     } finally {
       for (const terminal of terminals.reverse()) { await terminal.close(); terminal.dispose(); }
     }
+  });
+
+test('real CLI: long-word summaries fill preceding space and prefer bounded punctuation cuts',
+  { skip: stockOnly, timeout: 240000 }, async (t) => {
+    for (const mode of ['fullscreen', 'regular']) await t.test(mode, async () => {
+      const terminals = [];
+      const start = async (name, options = {}) => {
+        const terminal = new PiTerminal(`long-word-${mode}-${name}`, { mode, ...options }); terminals.push(terminal);
+        await terminal.ready(); await terminal.resize(100, 80); return terminal;
+      };
+      const activity = terminal => {
+        const events = terminal.events();
+        assert.equal(events.filter(event => event.type === 'call').length, 4);
+        assert.equal(events.filter(event => event.type === 'result').length, 4);
+        assert.equal(events.filter(event => event.type === 'model_context').length, 5);
+        return events.filter(event => ['call', 'result', 'model_context'].includes(event.type));
+      };
+      const check = async (dump, width) => {
+        assert.equal(dump.tools.length, 4);
+        const args = persisted(dump).filter(entry => entry.arguments).map(entry => entry.arguments);
+        const expected = [
+          `read ${args[0].path}`,
+          `read ${args[1].path} [offset=1, limit=1]`,
+          `tv_summary ${args[2].url} [fixtureError=true]`,
+          `tv_summary ${args[3].target} [query=${JSON.stringify(args[3].query)}, offset=1, limit=1]`,
+        ];
+        let checkedRows = 0;
+        for (const [index, tool] of dump.tools.entries()) {
+          const rows = compactContent(tool);
+          assert.equal(summaryText(tool), summaryExpected(expected[index]), 'all source characters survive wrapping');
+          await assertFits(tool.lines, width - 1);
+          if (index < 2) assert.ok(rows[0].startsWith(' → read long-directory/'), 'oversized path starts after the tool name with and without commas');
+          if (index === 2) assert.ok(rows[0].endsWith({ 24: '/', 36: '.', 100: '_' }[width]), 'the nearest eligible URL separator determines the physical first-row cut');
+          const y = dump.screen.findIndex((row, at) => row === rows[0] && rows.every((value, offset) => dump.screen[at + offset] === value));
+          assert.ok(y >= 0, `complete tool ${index} is present on the physical ${mode} screen`);
+          for (let offset = 0; offset < rows.length; offset++) {
+            assert.ok(['', ' '].includes(dump.cells[y + offset][width - 1].text));
+            assert.equal(dump.cells[y + offset][width - 1].bgMode, 0);
+            if (offset) assert.equal(rows[offset].slice(0, 3), '   ');
+            checkedRows++;
+          }
+        }
+        await errorSummaryColors(dump, dump.tools[2]);
+        return checkedRows;
+      };
+      try {
+        const stock = await start('stock'); await stock.run('long-word-wrap'); const native = await stock.capture('native');
+        const live = await start('toolview', { toolview: true, workspace: stock.work });
+        await live.run('long-word-wrap'); const wide = await live.capture('wide');
+        let checkedRows = await check(wide, 100);
+        assert.deepEqual(activity(live), activity(stock)); assert.deepEqual(persisted(wide), persisted(native));
+        const sessionBytes = readFileSync(wide.session);
+        for (const width of [36, 24]) {
+          await live.resize(width, 80); const dump = await live.capture(`width-${width}`);
+          checkedRows += await check(dump, width); assert.deepEqual(persisted(dump), persisted(wide));
+        }
+        await live.resize(100, 80); const back = await live.capture('wide-again');
+        assert.deepEqual(toolLines(back), toolLines(wide));
+        await live.command('/tv-theme light'); const light = await live.capture('light'); checkedRows += await check(light, 100);
+        await live.command('/tv-theme dark');
+        stock.send('\x0f'); await stock.settle(); const nativeExpanded = await stock.capture('expanded');
+        live.send('\x0f'); await live.settle(); const expanded = await live.capture('expanded');
+        assert.ok(expanded.tools.every(tool => tool.expanded)); assert.deepEqual(toolLines(expanded), toolLines(nativeExpanded));
+        live.send('\x0f'); await live.settle(); await check(await live.capture('collapsed'), 100);
+        await live.command('/toolview off'); assert.deepEqual(toolLines(await live.capture('off')), toolLines(native));
+        await live.command('/toolview on'); await check(await live.capture('on'), 100);
+        const starts = live.events().filter(event => event.type === 'start').length;
+        await live.command('/reload'); await live.event('start', starts + 1);
+        const reloaded = await live.capture('reloaded'); await check(reloaded, 100);
+        assert.deepEqual(activity(live), activity(stock)); assert.deepEqual(readFileSync(wide.session), sessionBytes);
+        await live.close();
+        const replay = await start('replay', { toolview: true, session: wide.session, workspace: stock.work });
+        const resumed = await replay.capture('resumed'); await check(resumed, 100);
+        assert.deepEqual(toolLines(resumed), toolLines(reloaded)); assert.deepEqual(persisted(resumed), persisted(wide));
+        assert.deepEqual(readFileSync(wide.session), sessionBytes);
+        assert.equal(replay.events().filter(event => ['call', 'result', 'model_context'].includes(event.type)).length, 0);
+        writeFileSync(join(artifacts, `long-word-${mode}-coverage.json`), JSON.stringify({
+          mode, calls: 4, results: 4, modelContexts: 5, widths: [24, 36, 100], checkedRows,
+          colors: ['dark', 'light', 'all error rows'], controls: ['native', 'expansion', 'off/on', 'reload', 'zero-execution replay'],
+          scope: 'Built-in read in the owned workspace and explicit generic URL/quoted Unicode fixtures; no installed package execution',
+        }, null, 2));
+      } finally { for (const terminal of terminals.reverse()) { await terminal.close(); terminal.dispose(); } }
+    });
   });
 
 test('real CLI: failed summaries are wholly error-colored, hide bodies and final badges, and expose native errors on click',
@@ -1432,6 +1518,15 @@ async function panelCells(dump, index, needle, { error = false } = {}) {
     assert.equal(dump.cells[y][x].text, ' ', 'full top/bottom panel padding');
   return panel;
 }
+// Locate the actual stock editor's complete painted block, not horizontal
+// border glyphs: input is now a user panel and never a transcript/tool frame.
+function physicalEditor(dump) {
+  assert.ok(dump.editor, 'actual public stock editor is recorded');
+  const expected = dump.editor.lines.map(row => plain(row.replaceAll('\x1b_pi:c\x07', '')));
+  const top = dump.screen.findLastIndex((_row, start) => expected.every((row, offset) => dump.screen[start + offset]?.trimEnd() === row));
+  assert.ok(top >= 0, 'complete actual editor block is physically visible');
+  return { top, bottom: top + expected.length - 1 };
+}
 // Real mouse transport and public selection observation; no component mutation or handler calls.
 async function bashPointerChecks(live, initial) {
   let current = initial;
@@ -1457,9 +1552,8 @@ async function bashPointerChecks(live, initial) {
     await panelCells(current, 2, anchor);
   }
   await moveAt(live, 5, panel().command); await snapshot('before-editor'); await panelCells(current, 2, anchor);
-  const editor = current.screen.findLastIndex((line) => /^─/u.test(line));
-  assert.ok(editor >= 0, 'native editor boundary visible');
-  await moveAt(live, 5, editor + 1); await snapshot('editor-leave'); await panelCells(current, 2, anchor);
+  const editor = physicalEditor(current);
+  await moveAt(live, 5, editor.top + 1); await snapshot('editor-leave'); await panelCells(current, 2, anchor);
   await moveAt(live, 5, panel().command); await snapshot('before-focus'); await panelCells(current, 2, anchor);
   live.send('\x1b[O'); await live.settle(); await snapshot('focus-out'); await panelCells(current, 2, anchor);
   live.send('\x1b[I'); await live.settle(); await snapshot('focus-in'); await panelCells(current, 2, anchor);
@@ -2094,14 +2188,14 @@ test('real CLI: isolated bash presentation exceptions partial-to-final gate',
 // Width regression: only ANSI-parsed physical cells are the display authority.
 // Do not reuse the manual tool.render(viewportWidth) geometry/content oracle.
 async function actualCommandCells(dump, commands, { mode, scrollbar }) {
-  const panels = [];
+  const panels = [], editor = physicalEditor(dump);
   // An always-visible native scrollbar also uses ┃, outside the tool allocation.
   const reserved = mode === 'fullscreen' && scrollbar === 'always' ? 1 : 0;
   const hasCardBorder = (row) => row.slice(0, row.length - reserved).some((cell) => cell?.text === '┃');
   for (let y = 0; y < dump.cells.length; y++) {
-    if (!hasCardBorder(dump.cells[y])) continue;
+    if ((y >= editor.top && y <= editor.bottom) || !hasCardBorder(dump.cells[y])) continue;
     const top = y;
-    while (y + 1 < dump.cells.length && hasCardBorder(dump.cells[y + 1])) y++;
+    while (y + 1 < dump.cells.length && y + 1 !== editor.top && hasCardBorder(dump.cells[y + 1])) y++;
     panels.push({ top, bottom: y });
   }
   assert.equal(panels.length, commands.length + dump.users.length,
@@ -3221,3 +3315,106 @@ for (const shape of [false, true]) test(`real CLI: write cards ${shape ? 'repres
       reference.dispose(); for (const terminal of terminals.reverse()) { await terminal.close(); terminal.dispose(); }
     }
   });
+
+
+test('main editor user-card styling preserves real draft input, cursor, menus and lifecycle', { skip: stockOnly }, async () => {
+  const terminals = [];
+  const observe = async (terminal, name, action = 'snapshot') => {
+    writeFileSync(join(terminal.output, 'editor-request.json'), JSON.stringify({ name, action }));
+    terminal.send('\x1b\x04');
+    const dump = await until(() => {
+      terminal.health();
+      try { return JSON.parse(readFileSync(join(terminal.output, `${name}.json`), 'utf8')); }
+      catch (error) { if (error.code === 'ENOENT' || error instanceof SyntaxError) return false; throw error; }
+    }, `editor ${name}`);
+    await terminal.settle(); terminal.session = dump.session;
+    assert.deepEqual(dump.after, dump.before, 'observation/style changes never transfer or rewrite the native draft');
+    assert.equal(dump.exactStockPrototype, true); assert.equal(dump.sharedEditorPrototype, true);
+    assert.equal(dump.inputMethodUnchanged, true);
+    return terminal.captureScreen(name, dump);
+  };
+  const check = async (dump, needle) => {
+    assert.ok(dump.rows.every(row => !row.includes('\0')), 'projection sentinels never reach the terminal');
+    assert.ok(dump.rows.some(row => plain(row).includes('┃')), 'actual stock editor is framed');
+    assert.ok(dump.rows.every(row => !plain(row).includes('─')), 'no native horizontal borders');
+    const y = dump.screen.findIndex(row => row.includes(needle));
+    assert.ok(y >= 0, `${needle} is physically painted`);
+    const cells = dump.cells[y], border = cells.findIndex(cell => cell.text === '┃');
+    assert.equal(border, 1, 'editor shares the user-card exterior margin');
+    assert.equal(cells[2].text, ' ', 'one internal left pad');
+    const background = await referenceCell(dump.styles.background), stripe = await referenceCell(dump.styles.border);
+    for (let x = 2; x < dump.width - 1; x++) {
+      assert.equal(cells[x].bgMode, background.bgMode); assert.equal(cells[x].bg, background.bg);
+    }
+    assert.equal(cells[1].fg, stripe.fg); assert.equal(cells[1].bgMode, 0);
+    assert.equal(cells[0].bgMode, 0); assert.equal(cells.at(-1).bgMode, 0);
+    const matching = dump.rows.findIndex(row => plain(row).includes(needle));
+    assert.equal(dump.rows.filter(row => row.includes('\x1b_pi:c')).length, 1, 'native hardware-cursor marker is retained');
+    assert.equal(dump.screen[y].trimEnd(), plain(dump.rows[matching].replaceAll('\x1b_pi:c\x07', '')), 'physical row equals actual component paint (cursor marker is zero-column metadata)');
+    await assertFits(dump.rows, dump.width);
+  };
+  try {
+    for (const mode of ['fullscreen', 'regular']) {
+      const terminal = new PiTerminal(`editor-${mode}`, { mode, extensions: [join(fixtures, 'editor-driver.ts')] });
+      terminals.push(terminal); await terminal.ready();
+      const draft = 'EDITOR_FIRST\n  EDITOR_SECOND 界é\n> literal';
+      terminal.send('\x1b[200~' + draft + '\x1b[201~'); await terminal.settle();
+      let dump = await observe(terminal, 'draft'); await check(dump, 'EDITOR_FIRST');
+      assert.equal(dump.after.expanded, draft);
+      const identity = dump.identity;
+      dump = await observe(terminal, 'off', 'off'); assert.equal(dump.identity, identity);
+      assert.ok(dump.rows.some(row => plain(row).includes('─')));
+      dump = await observe(terminal, 'on', 'on'); assert.equal(dump.identity, identity); await check(dump, 'EDITOR_FIRST');
+      dump = await observe(terminal, 'light', 'light'); await check(dump, 'EDITOR_FIRST');
+      dump = await observe(terminal, 'dark', 'dark'); await check(dump, 'EDITOR_FIRST');
+      for (const width of [60, 24, 100]) {
+        await terminal.resize(width); dump = await observe(terminal, `width-${width}`);
+        assert.equal(dump.after.expanded, draft); await check(dump, 'EDITOR_FIRST');
+      }
+      if (mode === 'fullscreen') {
+        const y = dump.screen.findIndex(row => row.includes('EDITOR_FIRST'));
+        await sgrAt(terminal, 3, y); dump = await observe(terminal, 'click-start');
+        assert.deepEqual(dump.after.cursor, { line: 0, col: 0 });
+        terminal.send('Z'); await terminal.settle(); dump = await observe(terminal, 'insert-after-click');
+        assert.equal(dump.after.expanded, 'Z' + draft);
+        terminal.send('\x1f'); await terminal.settle();
+      }
+      terminal.send('\x1f'); await terminal.settle(); // Undo the original multiline paste.
+      dump = await observe(terminal, 'undo-paste'); assert.equal(dump.after.expanded, '');
+      const paste = 'LONG_EDITOR_PASTE_界é_'.repeat(100);
+      terminal.send('\x1b[200~' + paste + '\x1b[201~'); await terminal.settle();
+      dump = await observe(terminal, 'large-paste'); assert.match(dump.after.text, /\[paste #/u);
+      assert.equal(dump.after.expanded, paste);
+      for (const action of ['off', 'on']) {
+        dump = await observe(terminal, `large-${action}`, action);
+        assert.equal(dump.identity, identity); assert.equal(dump.after.expanded, paste);
+      }
+      terminal.send('\x1f'); await terminal.settle();
+      terminal.send('/tv-d'); await terminal.settle(); dump = await observe(terminal, 'menu');
+      assert.equal(dump.menu, true); assert.equal(dump.after.text, '/tv-d');
+      const menu = dump.screen.findIndex(row => row.includes('tv-dump') && !row.includes('/tv-d'));
+      assert.ok(menu >= 0, 'native command menu remains visible below the panel');
+      assert.equal(dump.cells[menu].some(cell => cell.text === '┃'), false, 'autocomplete is not framed as editor text');
+      terminal.send('\t'); await terminal.settle(); dump = await observe(terminal, 'completed');
+      assert.match(dump.after.text, /^\/tv-dump/u);
+      terminal.send('\x03'); await terminal.settle();
+      await terminal.command('/reload'); await terminal.event('start', 2);
+      terminal.send('EDITOR_RELOAD'); await terminal.settle(); dump = await observe(terminal, 'reload');
+      await check(dump, 'EDITOR_RELOAD');
+      terminal.send('\x03'); await terminal.settle();
+      const fullWidth = dump.width;
+      const full = 'EDITOR_FULL_' + 'x'.repeat(fullWidth - 5 - 'EDITOR_FULL_'.length);
+      terminal.send(full); await terminal.settle(); dump = await observe(terminal, 'full-line');
+      await check(dump, 'EDITOR_FULL_');
+      const fullY = dump.screen.findIndex(row => row.includes('EDITOR_FULL_'));
+      assert.equal(dump.cells[fullY][fullWidth - 2].inverse, true, 'end cursor consumes internal right padding only');
+      assert.equal(dump.cells[fullY][fullWidth - 1].inverse, false, 'exterior margin is never inverted');
+      for (const cell of dump.cells[fullY + 1]) assert.equal(cell.inverse, false, 'bottom padding is never inverted');
+      terminal.send('\x03'); await terminal.settle();
+      await terminal.run('user-card'); const final = await terminal.capture('editor-transcript');
+      assert.equal(final.tools.length, 2); assert.equal(final.tools[0].name, 'bash');
+      const user = final.branch.filter(entry => entry.type === 'message' && entry.message.role === 'user').at(-1);
+      assert.deepEqual(user.message.content, [{ type: 'text', text: 'run user-card' }]);
+    }
+  } finally { for (const terminal of terminals) { await terminal.close(); terminal.dispose(); } }
+});

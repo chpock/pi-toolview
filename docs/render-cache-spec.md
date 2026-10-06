@@ -10,6 +10,10 @@ Two independent LRU pools retain custom layouts: ordinary views default to 8 MiB
 
 Cache hits are not free whole-document frames: Pi still assembles/traverses its transcript, unknown self renderers may perform native visibility work, and separator/spinner composition may allocate arrays. Native updates, edit preflight and selection rendering also remain host work. Cold/width/theme builds prepare full required content by design; no off-screen/source-context shortcut or total-process-memory guarantee is implied. See [architecture](architecture.md#cache-separation-and-animation) for the common rendering boundaries.
 
+### Main input exclusion
+
+The stock main editor is not a transcript-layout cache consumer. Each render projects already-rendered native visible rows into the shared user frame; no draft strings, paste maps, providers or editor layouts enter either LRU. Its weak adapter metadata records only current native width/mouse offset and a call-local border packet. Native wrapping/rendering and working-status animation remain host work; no Toolview editor timer, invalidation subscription or warm-frame zero-work claim is introduced. Off/on preserves the same edit engine rather than exchanging text with a replacement. See the [editor contract](card-frame-spec.md#main-input-editor).
+
 ## Execution spinner
 
 Use one adapter-owned 100 ms interval (at most ten animation render requests per second, independent of the number of running tools), created only when an attached, visible compact call is rendered after actual execution has started. Argument streaming, completed/history calls, zero-width or native-zero-row calls, expanded/native/image tools, and default Bash/edit/write cards start no clock. There is no idle/background housekeeping interval. The timer is unreferenced so it cannot keep the process alive.

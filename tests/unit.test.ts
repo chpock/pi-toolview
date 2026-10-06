@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import xterm from "@xterm/headless";
-import { Box, Container, Spacer, Text, visibleWidth, parseColor, colorToRgb, TuiAltScreen, TuiMainScreen, type Terminal, type TuiMouseEvent } from "@earendil-works/pi-tui";
-import { ToolExecutionComponent as NativeToolExecution, createEditToolDefinition, createWriteToolDefinition, createWriteTool, highlightCode, getLanguageFromPath, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Box, Container, Editor, CURSOR_MARKER, Spacer, Text, visibleWidth, parseColor, colorToRgb, TuiAltScreen, TuiMainScreen, type Terminal, type TuiMouseEvent } from "@earendil-works/pi-tui";
+import { CustomEditor, ToolExecutionComponent as NativeToolExecution, createEditToolDefinition, createWriteToolDefinition, createWriteTool, highlightCode, getLanguageFromPath, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import toolview, { installToolview, describeArgs, sanitize, type ToolviewOptions } from "../src/index.ts";
 import { cardGeometry, frameRows, insidePanel } from "../src/card-frame.ts";
 import { renderUserCard } from "../src/user-card.ts";
@@ -979,6 +979,108 @@ test("comma wrapping still hard-wraps oversized array members and expands contin
     assert.equal(tool.handleMouse(mouse(2, 30))?.handled, true);
     assert.equal(tool.expanded, true);
     assert.deepEqual(tool.render(30), ["", "NATIVE custom", "FULL_OUTPUT"]);
+  } finally { controller.restore(); }
+});
+
+test("summary long-word fills remaining space with and without parameter commas", () => {
+  const path = "abcdefghijklmnopqrstuvwxyz";
+  const tool = new Tool("read", { path });
+  const { controller } = setup([tool]);
+  try {
+    for (const extras of [{}, { offset: 1, limit: 1 }]) {
+      tool.updateArgs({ path, ...extras });
+      const rows = tool.render(24).map(plain);
+      assert.equal(rows[0], " → read abcdefghijklmno");
+      assert.ok(rows[1]!.startsWith("   pqrstuvwxyz"));
+      assert.equal(rows.map(row => row.slice(3)).join("").replace(/ /g, ""),
+        (`read ${describeArgs("read", tool.args)}`).replace(/ /g, ""));
+    }
+    tool.updateArgs({ query: "x".repeat(50) });
+    assert.ok(plain(tool.render(24)[0]!).startsWith(' → read [query="'), "oversized named tokens also use the first row");
+  } finally { controller.restore(); }
+});
+
+test("summary long-word chooses the nearest separator after it without splitting fitting words", () => {
+  const tool = new Tool("read", { path: "abcdefghij/kl/mnopqrstuvwxyz0123456789" });
+  const { controller } = setup([tool]);
+  try {
+    const rows = tool.render(24).map(plain);
+    assert.equal(rows[0], " → read abcdefghij/kl/");
+    assert.ok(rows[1]!.startsWith("   mnop"));
+    assert.equal(rows.map(row => row.slice(3)).join(""), `read ${tool.args.path}`);
+    tool.updateArgs({ path: "abcdefghijklmnoqrs" });
+    assert.deepEqual(tool.render(24).map(plain), [" → read", "   abcdefghijklmnoqrs"], "a word fitting a full row remains intact");
+  } finally { controller.restore(); }
+});
+
+test("summary long-word limits punctuation retreat to twenty graphemes and half the remaining columns", () => {
+  const tool = new Tool("read");
+  const { controller } = setup([tool]);
+  try {
+    tool.updateArgs({ path: "/" + "x".repeat(50) });
+    assert.equal(plain(tool.render(24)[0]!), " → read /" + "x".repeat(14), "a leading slash must not waste fourteen free columns");
+    for (const distance of [20, 21, 30]) {
+      const path = "x".repeat(74 - distance) + "/" + "y".repeat(60);
+      tool.updateArgs({ path });
+      const first = plain(tool.render(84)[0]!);
+      assert.equal(first, " → read " + path.slice(0, distance === 20 ? 55 : 75), `retreat distance ${distance}`);
+    }
+  } finally { controller.restore(); }
+});
+
+test("summary long-word excludes quotes and brackets and respects preferred JSON escape boundaries", () => {
+  const tool = new Tool("read");
+  const { controller } = setup([tool]);
+  try {
+    const quoted = "x".repeat(8) + '"' + "y".repeat(30);
+    tool.updateArgs({ path: quoted });
+    assert.equal(plain(tool.render(24)[0]!), " → read " + JSON.stringify(quoted).slice(0, 15), "escaped quote's backslash is not a preferred cut");
+    const attachedQuote = "\u0301" + quoted;
+    tool.updateArgs({ path: attachedQuote });
+    assert.equal(plain(tool.render(24)[0]!), " → read " + JSON.stringify(attachedQuote).slice(0, 16), "quote with an attached combining mark still opens JSON escape tracking");
+    const windows = "x".repeat(8) + "\\" + "y".repeat(30);
+    tool.updateArgs({ path: windows });
+    assert.equal(plain(tool.render(24)[0]!), " → read " + JSON.stringify(windows).slice(0, 11), "cut after both serialized backslashes");
+    for (const extras of [{}, { offset: 1, limit: 1 }]) {
+      tool.updateArgs({ query: "\u0301" + "x".repeat(3) + '"' + "y".repeat(30), ...extras });
+      assert.equal(plain(tool.render(24)[0]!).slice(3), (`read ${describeArgs("read", tool.args)}`).slice(0, 21), "quoted parameter with an attached mark retains escape tracking, with or without commas");
+    }
+    tool.updateArgs({ query: "x\uD800" + "y".repeat(30) });
+    assert.equal(plain(tool.render(24)[0]!), ' → read [query="x\\ud800', "backslash within a Unicode escape is not preferred");
+    tool.updateArgs({ query: "a\u0600", content: "x".repeat(8) + '"' + "y".repeat(40) });
+    assert.equal(plain(tool.render(44)[0]!), ' → read [query="a\u0600", content="xxxxxxxx\\"yyyy', "a Prepend character must not hide the earlier closing quote and leak escape state into another value");
+    for (const mark of ['"', "(", ")", "[", "]", "{", "}"]) {
+      tool.updateArgs({ query: "x".repeat(3) + mark + "y".repeat(30) });
+      const expected = `read ${describeArgs("read", tool.args)}`;
+      assert.equal(plain(tool.render(24)[0]!).slice(3), expected.slice(0, 20), `no preferred split at ${mark}`);
+    }
+  } finally { controller.restore(); }
+});
+
+test("summary long-word preserves Unicode graphemes, all text, failure styles, clicks and warm cache hits", () => {
+  const path = ("ab/é👩‍👩‍👧‍👦_cdefghijklmno.").repeat(6);
+  const tool = new Tool("read", { path, offset: 1, limit: 1 });
+  tool.result!.isError = true;
+  const root = new Root(); root.addChild(tool);
+  const palette = { fg: (_role: string, text: string) => `\x1b[31m${text}\x1b[39m` };
+  const controller = installToolview(root, () => palette);
+  try {
+    const expected = `read ${describeArgs("read", tool.args)}`.replace(/ /g, "");
+    for (let width = 6; width <= 100; width++) {
+      const colored = tool.render(width), rows = colored.map(plain);
+      assert.equal(rows.map(row => row.slice(3)).join("").replace(/ /g, ""), expected, `text at width ${width}`);
+      assert.ok(rows.every(row => visibleWidth(row) <= width - 1), `one-column margin at ${width}`);
+      assert.ok(rows.every(row => !/^[\u0301\u200d]/u.test(row.slice(3))), "no orphan combining or joining mark");
+      for (const row of rows) assert.equal(row.split("👩‍👩‍👧‍👦").join("").includes("👩"), false, "no partial family grapheme");
+      assert.ok(colored.every(row => row.includes("\x1b[31m")), "all failed rows retain error styling");
+      const builds = controller.cacheStats().builds;
+      assert.strictEqual(tool.render(width), colored);
+      assert.equal(controller.cacheStats().builds, builds);
+    }
+    const last = tool.render(40).length - 1;
+    assert.equal(tool.handleMouse(mouse(last, 40))?.handled, true);
+    assert.equal(tool.expanded, true);
+    assert.deepEqual(tool.render(40), ["", "NATIVE read", "FULL_OUTPUT"]);
   } finally { controller.restore(); }
 });
 
@@ -3360,4 +3462,266 @@ test("path-only file summaries never read unrelated signature fields", () => {
     try { assert.deepEqual(node.render(80), [` ← ${name} example.ts`]); assert.equal(controller.active, true); }
     finally { controller.restore(); }
   }
+});
+
+// Use the real stock editor: presentation changes must not exchange its private editing state.
+function editorSetup(paddingX = 0) {
+  const root = Object.assign(new Root(), { terminal: { rows: 24 } });
+  const theme = { borderColor: (text: string) => text,
+    selectList: { selectedPrefix: (text: string) => text, selectedText: (text: string) => text,
+      description: (text: string) => text, scrollInfo: (text: string) => text, noMatch: (text: string) => text } };
+  const keybindings = { matches: (_data: string, _action: string) => false };
+  const editor = new CustomEditor(root as never, theme, keybindings as never, { paddingX, embedWorkingStatus: true });
+  editor.focused = true; root.addChild(editor);
+  return { root, editor, theme, keybindings };
+}
+const editorPlain = (row: string) => stripVTControlCharacters(row.replaceAll(CURSOR_MARKER, ""));
+
+test("editor card uses user geometry without exchanging native state or caching input", () => {
+  for (const padding of [0, 1, 2, 6]) {
+    const { root, editor } = editorSetup(padding), originalInput = editor.handleInput;
+    editor.setText("EDITOR_LINE\n  indented\n> literal");
+    const before = { text: editor.getText(), expanded: editor.getExpandedText(), cursor: editor.getCursor() };
+    const controller = installToolview(root, () => color);
+    try {
+      for (const width of [100, 24, 12, 8, 7]) {
+        const rows = editor.render(width), geometry = cardGeometry(width);
+        assert.ok(rows.every(row => visibleWidth(row) <= width), `editor fits width ${width}, native padding ${padding}`);
+        assert.ok(rows.every(row => editorPlain(row)[geometry.panelX] === "┃"), "top/bottom padding and every text row share the stripe");
+        assert.doesNotMatch(rows.map(editorPlain).join(""), /─/u);
+        assert.equal(rows.filter(row => row.includes(CURSOR_MARKER)).length, 1);
+        assert.deepEqual({ text: editor.getText(), expanded: editor.getExpandedText(), cursor: editor.getCursor() }, before);
+      }
+      assert.equal(editor.handleInput, originalInput, "input implementation is never wrapped");
+      assert.equal(controller.cacheStats().entries, 0, "draft rows never enter either transcript pool");
+      assert.equal(controller.cacheStats().builds, 0);
+    } finally { controller.restore(); }
+    assert.match(editor.render(100).map(editorPlain).join(""), /─/u);
+  }
+});
+
+test("editor card retains full-width hardware cursor in right internal padding", () => {
+  for (const padding of [0, 1, 2]) {
+    const { root, editor } = editorSetup(padding);
+    const controller = installToolview(root, () => color);
+    try {
+      const width = 24, geometry = cardGeometry(width);
+      editor.setText("x".repeat(geometry.contentWidth));
+      const rows = editor.render(width), cursorRow = rows.find(row => row.includes(CURSOR_MARKER))!;
+      assert.ok(cursorRow, "focused end cursor survives framing");
+      assert.equal(visibleWidth(cursorRow.slice(0, cursorRow.indexOf(CURSOR_MARKER))), width - 2);
+      assert.equal(editorPlain(cursorRow).slice(geometry.contentX, width - 2), editor.getText());
+      assert.equal(visibleWidth(cursorRow), width);
+      assert.equal(editorPlain(cursorRow).at(-1), " ", "cursor never consumes exterior margin");
+    } finally { controller.restore(); }
+  }
+});
+
+test("editor card keeps paste maps undo history shortcuts and nested text insertion on the same engine", () => {
+  const { root, editor } = editorSetup(2), input = editor.handleInput;
+  const paste = "PASTE_界é_".repeat(200);
+  editor.handleInput("\x1b[200~" + paste + "\x1b[201~");
+  editor.handleInput("\x1b[D");
+  const text = editor.getText(), cursor = editor.getCursor();
+  let controller = installToolview(root, () => color);
+  try {
+    editor.render(60); assert.equal(editor.getExpandedText(), paste);
+    assert.equal(editor.getText(), text); assert.deepEqual(editor.getCursor(), cursor);
+    assert.equal(editor.handleInput, input);
+    controller.restore(); editor.render(60);
+    assert.equal(editor.getExpandedText(), paste); assert.deepEqual(editor.getCursor(), cursor);
+    controller = installToolview(root, () => color); editor.render(24);
+    assert.equal(editor.getExpandedText(), paste); assert.equal(editor.getText(), text);
+    editor.insertTextAtCursor("PROGRAMMATIC_TEXT_INSERTION");
+    editor.handleInput("\x1f");
+    assert.equal(editor.getExpandedText(), paste, "native undo restores expanded paste, not marker text");
+    editor.addToHistory("NATIVE_HISTORY"); editor.setText(""); editor.handleInput("\x1b[A");
+    assert.equal(editor.getText(), "NATIVE_HISTORY");
+  } finally { controller.restore(); }
+});
+
+test("editor card maps normalized clicks to native CJK combining and wrapped cursor positions", () => {
+  const originalRender = Editor.prototype.render, originalMouse = Editor.prototype.handleMouse;
+  for (const padding of [0, 1, 2]) {
+    const { root, editor, theme, keybindings } = editorSetup(padding);
+    const control = new CustomEditor(root as never, theme, keybindings as never, { paddingX: padding });
+    const value = "word 界é ".repeat(8);
+    editor.setText(value); control.setText(value);
+    const controller = installToolview(root, () => color);
+    try {
+      for (const width of [24, 60]) {
+        const geometry = cardGeometry(width), nativeWidth = geometry.contentWidth + (padding ? 2 * padding : 1);
+        const actualRows = editor.render(width); originalRender.call(control, nativeWidth);
+        for (const [x, y] of [[geometry.contentX, 1], [geometry.contentX + 7, 2], [width - 2, actualRows.length - 2]]) {
+          editor.handleMouse({ ...mouse(y!, width), x: x!, screenX: x!, height: actualRows.length });
+          originalMouse.call(control, { ...mouse(y!, nativeWidth), x: x! - geometry.contentX + padding, height: actualRows.length });
+          assert.deepEqual(editor.getCursor(), control.getCursor(), `cursor mapping padding ${padding} width ${width}`);
+          assert.equal(editor.getText(), value);
+        }
+        for (const type of ["press", "drag", "release", "wheel"] as const)
+          assert.equal(editor.handleMouse({ ...mouse(1, width), type }), undefined, "native selection/wheel authority is unchanged");
+      }
+    } finally { controller.restore(); }
+  }
+});
+
+test("editor card preserves native status literals scroll indicators and border-color ownership", () => {
+  const { root, editor } = editorSetup();
+  const border = Object.getOwnPropertyDescriptor(editor, "borderColor");
+  editor.setWorkingStatusIndicator({ renderInBorder: () => "RUN─STATUS", renderSpinnerInBorder: () => "S" } as never);
+  editor.setText(Array.from({ length: 20 }, (_, i) => `EDITOR_SCROLL_${i}`).join("\n"));
+  const controller = installToolview(root, () => color);
+  try {
+    const rows = editor.render(60).map(editorPlain);
+    assert.ok(rows[0]!.includes("RUN─STATUS"), "native status is not an optional model information row");
+    assert.match(rows[0]!, /↑ \d+ more/u);
+    assert.equal(rows[0]!.replace("RUN─STATUS", "").includes("─"), false, "only known horizontal decoration is removed");
+    assert.deepEqual(Object.getOwnPropertyDescriptor(editor, "borderColor"), border);
+    editor.handleInput("\x01"); for (let i = 0; i < 25; i++) editor.handleInput("\x1b[A");
+    assert.match(editor.render(60).map(editorPlain).at(-1)!, /↓ \d+ more/u);
+  } finally { controller.restore(); }
+});
+
+test("editor card leaves custom editors and later presentation owners native", () => {
+  const { root, editor, theme, keybindings } = editorSetup();
+  class AlternateEditor extends CustomEditor {}
+  const alternate = new AlternateEditor(root as never, theme, keybindings as never);
+  root.addChild(alternate);
+  const native = alternate.render(60);
+  const original = Object.getOwnPropertyDescriptor(CustomEditor.prototype, "render");
+  const controller = installToolview(root, () => color);
+  try {
+    assert.deepEqual(alternate.render(60), native, "inherited wrappers do not style a subclass");
+    assert.match(editor.render(60).map(editorPlain).join(""), /┃/u);
+    const later = () => ["LATER_EDITOR_OWNER"];
+    Object.defineProperty(CustomEditor.prototype, "render", { configurable: true, writable: true, value: later });
+    controller.restore(); assert.equal(CustomEditor.prototype.render, later);
+  } finally {
+    controller.restore();
+    if (original) Object.defineProperty(CustomEditor.prototype, "render", original);
+    else Reflect.deleteProperty(CustomEditor.prototype, "render");
+  }
+});
+
+
+test("editor card keeps native autocomplete outside frame and routes its normalized click", async () => {
+  const { root, editor } = editorSetup(2);
+  editor.setAutocompleteProvider({
+    getSuggestions: async () => ({ items: [{ value: "/editor-result", label: "/editor-result", description: "NATIVE_MENU" }], prefix: "/ed" }),
+    applyCompletion: () => ({ lines: ["/editor-result "], cursorLine: 0, cursorCol: 15 }),
+  });
+  const controller = installToolview(root, () => color);
+  try {
+    editor.handleInput("/ed"); await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(editor.isShowingAutocomplete(), true);
+    const rows = editor.render(60), menu = rows.findIndex(row => editorPlain(row).includes("NATIVE_MENU"));
+    assert.ok(menu > 0);
+    assert.equal(editorPlain(rows[menu]!).includes("┃"), false);
+    assert.equal(editorPlain(rows[menu - 1]!)[1], "┃", "menu begins below bottom panel padding");
+    assert.equal(editor.handleMouse({ ...mouse(menu, 60), x: 5, height: rows.length })?.handled, true);
+    assert.equal(editor.getText(), "/editor-result ");
+    assert.equal(editor.isShowingAutocomplete(), false);
+  } finally { controller.restore(); }
+});
+
+test("editor card skips unknown factory instance overrides and preexisting renderer owners", () => {
+  for (const method of ["renderTopBorder", "renderBottomBorder", "handleMouse", "getPaddingX"] as const) {
+    const { root, editor } = editorSetup();
+    const original = (editor as unknown as Record<string, Function>)[method]!;
+    Object.defineProperty(editor, method, { configurable: true, writable: true, value: function (this: CustomEditor, ...args: unknown[]) { return original.apply(this, args); } });
+    const controller = installToolview(root, () => color);
+    try { assert.doesNotMatch(editor.render(60).map(editorPlain).join(""), /┃/u, `instance ${method} override is not stock proof`); }
+    finally { controller.restore(); }
+  }
+  const { root, editor } = editorSetup();
+  const controller = installToolview(root, () => color, { nativeEditor: () => false });
+  try { assert.doesNotMatch(editor.render(60).map(editorPlain).join(""), /┃/u, "a registered editor factory retains authority"); }
+  finally { controller.restore(); }
+  const previous = Object.getOwnPropertyDescriptor(CustomEditor.prototype, "render");
+  const other = () => ["OTHER_EDITOR_RENDERER"];
+  Object.defineProperty(CustomEditor.prototype, "render", { configurable: true, writable: true, value: other });
+  const guarded = installToolview(root, () => color);
+  try { assert.deepEqual(editor.render(60), ["OTHER_EDITOR_RENDERER"]); assert.equal(CustomEditor.prototype.render, other); }
+  finally {
+    guarded.restore();
+    if (previous) Object.defineProperty(CustomEditor.prototype, "render", previous); else Reflect.deleteProperty(CustomEditor.prototype, "render");
+  }
+});
+
+test("editor card restores exact paint descriptor on failures and zero/tiny widths remain native", () => {
+  const { root, editor } = editorSetup();
+  editor.setText("界");
+  const original = Editor.prototype.render;
+  const descriptor = Object.getOwnPropertyDescriptor(editor, "borderColor");
+  const controller = installToolview(root, () => color);
+  try {
+    assert.deepEqual(editor.render(0), []);
+    for (const width of [1, 2]) {
+      assert.throws(() => original.call(editor, width), RangeError, "stock Pi wide-glyph recursion is not repaired here");
+      assert.throws(() => editor.render(width), RangeError);
+      assert.equal(controller.active, true, "native tiny-width failures are not custom projection failures");
+    }
+    for (const width of [3, 4, 5, 6])
+      assert.deepEqual(editor.render(width), original.call(editor, width), `native authority for impossible width ${width}`);
+    editor.setWorkingStatusIndicator({ renderInBorder: () => { throw new Error("STATUS_FAILURE"); } } as never);
+    assert.throws(() => editor.render(60), /STATUS_FAILURE/u);
+    assert.deepEqual(Object.getOwnPropertyDescriptor(editor, "borderColor"), descriptor);
+    assert.equal(controller.active, false, "projection failure restores owned hooks");
+  } finally { controller.restore(); }
+});
+
+test("editor card foreground and padding retain user paint after the native inverse-cursor reset", async () => {
+  const terminal = new xterm.Terminal({ cols: 24, rows: 10, allowProposedApi: true });
+  try {
+    for (const mode of ["dark", "light"]) {
+      initTheme(mode);
+      const { root, editor } = editorSetup(2); editor.setText("BEFORE AFTER");
+      for (let i = 0; i < 6; i++) editor.handleInput("\x1b[D");
+      const controller = installToolview(root, () => nativeTheme);
+      try {
+        const rows = editor.render(24);
+        terminal.reset(); await new Promise<void>(resolve => terminal.write(rows.join("\r\n"), resolve));
+        const bg = colorToRgb(nativeTheme.colors.userMessageBg), fg = colorToRgb(nativeTheme.colors.userMessageText);
+        const line = terminal.buffer.active.getLine(1)!;
+        for (let x = 2; x < 23; x++) {
+          assert.equal(line.getCell(x)!.getBgColor(), (bg.r << 16) | (bg.g << 8) | bg.b);
+          assert.equal(line.getCell(x)!.getFgColor(), (fg.r << 16) | (fg.g << 8) | fg.b);
+        }
+        assert.equal(line.getCell(0)!.getBgColorMode(), 0); assert.equal(line.getCell(23)!.getBgColorMode(), 0);
+        assert.equal(line.getCell(1)!.getBgColorMode(), 0);
+        assert.ok(line.getCell(9)!.isInverse(), "native fake cursor style survives");
+      } finally { controller.restore(); }
+    }
+  } finally { terminal.dispose(); }
+});
+
+
+test("editor card keeps excessive native padding bounded by actual-width delegation", (t) => {
+  const { root, editor } = editorSetup(1_000_000); editor.setText("x");
+  const native = Editor.prototype.render, widths: number[] = [];
+  const probe = t.mock.method(Editor.prototype, "render", function (this: Editor, width: number) {
+    widths.push(width); return native.call(this, width);
+  });
+  const controller = installToolview(root, () => color);
+  try {
+    const rows = editor.render(60);
+    assert.deepEqual(widths, [60], "do not materialize million-column native padding for a small input frame");
+    assert.deepEqual(rows, native.call(editor, 60));
+    assert.equal(controller.active, true);
+  } finally { controller.restore(); probe.mock.restore(); }
+});
+
+
+test("editor full-line cursor inverse never paints exterior margins or subsequent padding", async () => {
+  initTheme("dark");
+  const terminal = new xterm.Terminal({ cols: 24, rows: 10, allowProposedApi: true });
+  const { root, editor } = editorSetup(); editor.setText("x".repeat(cardGeometry(24).contentWidth));
+  const controller = installToolview(root, () => nativeTheme);
+  try {
+    await new Promise<void>(resolve => terminal.write(editor.render(24).join("\r\n"), resolve));
+    const line = terminal.buffer.active.getLine(1)!;
+    assert.ok(line.getCell(22)!.isInverse(), "end cursor occupies internal right padding");
+    assert.equal(line.getCell(23)!.isInverse(), 0, "exterior right margin must not inherit inverse cursor");
+    for (let x = 0; x < 24; x++) assert.equal(terminal.buffer.active.getLine(2)!.getCell(x)!.isInverse(), 0);
+  } finally { controller.restore(); terminal.dispose(); }
 });

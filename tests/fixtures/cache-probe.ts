@@ -7,7 +7,7 @@ import { ToolExecutionComponent } from "../../node_modules/@earendil-works/pi-co
 import { UserMessageComponent } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/user-message.js";
 import { initTheme, theme } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { installToolview } from "../../src/index.ts";
-import { createWriteToolDefinition } from "@earendil-works/pi-coding-agent";
+import { CustomEditor, getSelectListTheme, createWriteToolDefinition } from "@earendil-works/pi-coding-agent";
 
 initTheme("dark", false);
 class Root extends Container { requestRender() {} }
@@ -147,5 +147,17 @@ try {
      assert.equal(reference.deref(), undefined, "active write hooks and retained code rows do not own the first write installer");
      observations.push({ firstWriteInstallerCollected: true, writeColdSegments: 1, writeWarmSegments: 0, ...writeController.cacheStats() });
    } finally { writeController.restore(); }
-   console.log(JSON.stringify(observations));
+    const editorRoot = Object.assign(new Root(), { terminal: { rows: 24 } });
+    let editor: CustomEditor | undefined = new CustomEditor(editorRoot as never,
+      { borderColor: text => theme.fg("border", text), selectList: getSelectListTheme() }, { matches: () => false } as never);
+    editorRoot.addChild(editor);
+    const editorController = installToolview(editorRoot as never, () => theme);
+    try {
+      assert.ok(editor.render(80).some(row => row.includes("┃")));
+      const reference = new WeakRef(editor); editorRoot.removeChild(editor); editor = undefined;
+      for (let i = 0; i < 12; i++) { await new Promise<void>(resolve => setImmediate(resolve)); globalThis.gc!(); }
+      assert.equal(reference.deref(), undefined, "active editor prototype hooks must not retain their first installer or draft engine");
+      observations.push({ firstEditorInstallerCollected: true, editorCache: editorController.cacheStats() });
+    } finally { editorController.restore(); }
+    console.log(JSON.stringify(observations));
 } finally { controller.restore(); Intl.Segmenter.prototype.segment = original; }

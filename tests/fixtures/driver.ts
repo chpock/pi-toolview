@@ -1,5 +1,5 @@
 // Offline real-CLI fixture: built-ins stay real unless the isolated bash-shape opt-in is set.
-import { ToolExecutionComponent, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { CustomEditor, ToolExecutionComponent, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createAssistantMessageEventStream, Type, type ToolCall } from "@earendil-works/pi-ai";
 import { Container, Text } from "@earendil-works/pi-tui";
 import { appendFileSync, existsSync, writeFileSync } from "node:fs";
@@ -326,6 +326,12 @@ export default function terminalDriver(pi: ExtensionAPI) {
     ] } },
     { name: "tv_summary", arguments: { drop: Array.from({ length: 60 }, (_, i) => i + 1).join(",") } },
   ];
+  const longWordWrap: Pick<ToolCall, "name" | "arguments">[] = [
+    { name: "read", arguments: { path: longReadPath } },
+    { name: "read", arguments: { path: longReadPath, offset: 1, limit: 1 } },
+    { name: "tv_summary", arguments: { url: "https://example.invalid/" + "segment.with-dashes_".repeat(6) + "?key=" + "v".repeat(24), fixtureError: true } },
+    { name: "tv_summary", arguments: { query: "\u0301" + "q".repeat(12) + '"' + "r".repeat(75), target: "é界/".repeat(12), offset: 1, limit: 1 } },
+  ];
   const boundedSummaries: Pick<ToolCall, "name" | "arguments">[] = [
     { name: "tv_summary", arguments: { op: "inspect", action: "preview", command: "echo", query: "STRING_BEGIN_" + "x".repeat(1000),
       paths: ["src"], symbol: "render", limit: 0, wait: false, mystery: "UNKNOWN", api_key: "COMPACT_SECRET_NEVER_VISIBLE",
@@ -396,7 +402,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
         const scenario = prompt?.includes("run write-stock") ? "write-stock" : prompt?.includes("run write-shapes") ? "write-shapes" : prompt?.includes("run edit-performance") ? "edit-performance" : prompt?.includes("run edit-cards") ? "edit-cards" : prompt?.includes("run user-card") ? "user-card" : prompt === "run cache-performance" ? "cache-performance" : prompt?.includes("bash-width") ? "bash-width" : prompt?.includes("bash-stream") ? "bash-stream" : prompt?.includes("bash-real") ? "bash-real" :
           prompt?.includes("bash-shape-exception-stream") ? "bash-shape-exception-stream" : prompt?.includes("bash-shape-exceptions") ? "bash-shape-exceptions" :
           prompt?.includes("bash-shape-stream") ? "bash-shape-stream" : prompt?.includes("bash-shapes") ? "bash-shapes" :
-          prompt?.includes("bounded-summaries") ? "bounded-summaries" : prompt?.includes("compact-errors") ? "compact-errors" : prompt?.includes("comma-wrap") ? "comma-wrap" : prompt?.includes("boundary") ? "boundary" : prompt?.includes("multiline") ? "multiline" : prompt?.includes("integration") ? "integration" :
+          prompt?.includes("long-word-wrap") ? "long-word-wrap" : prompt?.includes("bounded-summaries") ? "bounded-summaries" : prompt?.includes("compact-errors") ? "compact-errors" : prompt?.includes("comma-wrap") ? "comma-wrap" : prompt?.includes("boundary") ? "boundary" : prompt?.includes("multiline") ? "multiline" : prompt?.includes("integration") ? "integration" :
           prompt?.includes("pending") ? "pending" : prompt?.includes("fallback") ? "fallback" :
           prompt?.includes("future") ? "future" : "suite";
         const results = context.messages.slice(last + 1).filter((m) => m.role === "toolResult");
@@ -421,7 +427,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
             "printf 'LIVE_FINAL\\n'" } }] : scenario === "boundary" ? [
           { name: "read", arguments: { path: "abcdefghijklm", limit: 1 } },
           { name: "tv_summary", arguments: { path: "abcdefghijklm", query: "x".repeat(40) } },
-        ] : scenario === "bounded-summaries" ? boundedSummaries : scenario === "compact-errors" ? compactErrors : scenario === "comma-wrap" ? commaWrap : scenario === "multiline" ? multiline : scenario === "integration" ? [
+        ] : scenario === "long-word-wrap" ? longWordWrap : scenario === "bounded-summaries" ? boundedSummaries : scenario === "compact-errors" ? compactErrors : scenario === "comma-wrap" ? commaWrap : scenario === "multiline" ? multiline : scenario === "integration" ? [
           { name: "TaskCreate", arguments: { subject: "TERMINAL_LOCAL_TASK", description: "Offline installed renderer smoke; do not execute." } },
           { name: "TaskList", arguments: {} },
         ] : scenario === "pending" ? [
@@ -575,6 +581,8 @@ export default function terminalDriver(pi: ExtensionAPI) {
       }
       writeFileSync(join(output, `${name}.json`), JSON.stringify({
         session: ctx.sessionManager.getSessionFile(), width, cwd: ctx.cwd, bashShape, writeShape,
+        editor: nodes.filter(node => Object.getPrototypeOf(node) === CustomEditor.prototype).map(node =>
+          ({ width, text: node.getText(), lines: node.render(width) }))[0],
         ...(spinnerDiagnostics ? { spinnerStats, spinnerWork } : {}),
         ...(editDiagnostics ? { nativeRenderCalls } : {}),
         selectionActive: typeof tui.hasActiveSelection === "function" ? tui.hasActiveSelection() : false,

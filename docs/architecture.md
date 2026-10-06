@@ -8,11 +8,12 @@ For user-facing behavior and controls, start with the [README](../README.md). Ex
 
 | Module | Responsibility |
 | --- | --- |
-| `src/index.ts` | The sole live-host adapter, presentation selection, compact summaries, transcript separation, normalized tool clicks, invalidation, animation and extension lifecycle |
+| `src/index.ts` | The sole live-host adapter, presentation selection, compact summaries, transcript separation, normalized tool/editor mouse forwarding, invalidation, animation and extension lifecycle |
 | `src/summary-args.ts` | Pure bounded argument previews, edit/write path-only formatting, field priority, Unicode/control handling and display-only secret masking |
 | `src/bash-card.ts` | Bash command/comments, bounded collapsed output preview, available expanded output and metadata-derived footer |
 | `src/file-card.ts` | Shared edit/write saved-source validation/classification, highlighting, context projection, numbered plain/unified/split content and validation-only measurement |
 | `src/user-card.ts` | Reframing native Markdown output and terminal navigation zones without reparsing user text |
+| `src/editor-card.ts` | Pure projection of native editor rows into user geometry, cursor preservation and unframed autocomplete alignment |
 | `src/card-frame.ts` | Pure geometry, caller-supplied frame paint and panel hit bounds |
 | `src/card-theme.ts` | Active-theme tool-panel paint |
 | `src/render-cache.ts` | Bounded rendered-data accounting and least-recently-used retention, independent of components |
@@ -22,13 +23,13 @@ The adapter passes presentation data and active-theme callbacks to the presenter
 ## Host integration and lifecycle
 
 1. On `session_start` in TUI mode, a temporary empty public widget factory supplies Pi's stable TUI reference. The widget is removed immediately and contributes no rows.
-2. The adapter validates the shared host `Container` and the inspected tool/user component contracts, then visits the existing tree. Observing `Container.addChild` also covers future calls and prebuilt history subtrees.
-3. Tool prototypes receive rendering and normalized mouse wrappers. Native `updateArgs`, `updateResult`, `setExpanded`, `invalidate` and the UI notification `markExecutionStarted` continue to execute; wrappers manage custom layout/animation state. Ordinary user-message prototypes receive rendering and `rebuild`/`setOutputPad`/`invalidate` wrappers.
+2. The adapter validates the shared host `Container` and the inspected tool/user/editor component contracts, then visits the existing tree. Observing `Container.addChild` also covers future calls and prebuilt history subtrees.
+3. Tool prototypes receive rendering and normalized mouse wrappers. Native `updateArgs`, `updateResult`, `setExpanded`, `invalidate` and the UI notification `markExecutionStarted` continue to execute; wrappers manage custom layout/animation state. Ordinary user-message prototypes receive rendering and `rebuild`/`setOutputPad`/`invalidate` wrappers. Plain stock `CustomEditor` receives presentation/border and normalized mouse wrappers; keyboard input and draft state remain native, with no editor factory replacement.
 4. Off, failure and shutdown stop animation, release both caches and restore owned descriptors. Restoration checks that Toolview still owns each hook and does not overwrite a later extension's replacement. On re-enablement, existing and future components are covered again. Reload creates a fresh runtime.
 
 This integration deliberately depends on inspected private component shapes, while obtaining host classes/functions through public imports. It does not import an internal component class from a second package location. Incompatible contracts or rendering exceptions disable Toolview with a warning and restore native rendering.
 
-The stable TUI reference survives native fullscreen/regular renderer replacement. Public method/child access is sufficient; no receiver-capture probe, raw input observer, private `handleViewportInput` wrapper or input-hook migration is used. Pi retains focus, selection and terminal mouse processing. Toolview handles only normalized tool clicks; user cards add no mouse handler. Regular mode uses terminal-owned mouse handling, so expansion there uses native keyboard controls.
+The stable TUI reference survives native fullscreen/regular renderer replacement. Public method/child access is sufficient; no receiver-capture probe, raw input observer, private `handleViewportInput` wrapper or input-hook migration is used. Pi retains focus, selection and terminal mouse processing. Toolview handles normalized tool clicks and forwards stock-editor normalized mouse coordinates after translating its frame geometry; user cards add no mouse handler. Regular mode uses terminal-owned mouse handling, so expansion there uses native keyboard controls.
 
 Persistent prototype wrappers are constructed in prototype-only factory scopes, not in an installer scope containing a component parameter. Otherwise a shared V8 closure context can retain the first installer even when all explicit component maps are weak. Ownership tests must collect the first installer while the adapter remains active, including an executing installer while another call keeps the clock running.
 
@@ -45,6 +46,7 @@ Selection is based on the current lifecycle and safeguards, not output size:
 | Write frame | Final successful exact `write`: saved changes or submitted source, classified by available metadata; malformed metadata stays native |
 | Native tool presentation | `powershell`, ordinary expanded calls, images, intentional hiding and explicit native opt-outs |
 | User frame | Compatible ordinary native user messages, using the original Markdown renderer |
+| Main editor frame | Exactly recognized stock editor with no competing public factory, using its existing editing engine |
 
 Exact-name `--toolview-card` adds native-card policy; naming `bash`, `edit` or `write` opts out of its custom presentation. `--toolview-compact` wins over that policy, but not over expansion, images or native hiding. The file-success condition is shared by render, spacing, mouse and animation teardown: partial errors are still running summaries, final errors are wholly error-colored summaries, and only final non-errors can enter the file presenter.
 
@@ -61,13 +63,14 @@ One narrow Pi 1.0.0 exception avoids discarded native edit rows. Every visit ver
 - Edit consumes persisted `details.patch`/`details.diff`, never input proposals or a file reread. It highlights old/new supplied source independently with Pi's public file-language resolver and highlighter before projecting context. It preserves multiline token state and hunk boundaries. OpenCode supplies the format reference, not an identical syntax engine or screenshot guarantee.
 - Write uses compatible saved diff shapes without producer identification; additions-only become plain Created source, additions/context use Edited diff, any removals use Replaced diff, absent/no-change diff uses Wrote submitted content. Created includes existing empty files. Explicit truncation shows submitted content with a warning, not guessed complete changes or final post-format bytes. See the [write contract](write-card-spec.md).
 - User cards call the original renderer at the frame's content width plus twice the native horizontal padding, remove only known geometric padding, and relocate OSC 133 zones. Markdown transformations, token styles, links and source text are retained. Native image-protocol rows and impossible tiny-width glyphs fall back at the real width.
+- Main editor presentation keeps the same instance and native edit/paste/undo/history engine. Stock border hooks delimit native text and autocomplete; status decoration is projected without altering status literals. Normalized mouse x/width match native wrapped-input geometry; row/y mapping and the hardware/IME cursor marker stay native. See the [editor contract](card-frame-spec.md#main-input-editor).
 - The frame owns geometry and restores enclosing panel paint after child ANSI background/full resets. It never truncates a caller's body or paints exterior margins.
 
 Toolview does not replace tool definitions or execution, rewrite results/session entries, add model requests, change global themes, read files to prepare its views or style HTML exports/standalone user shell messages. Native host updates and edit preflight still execute unchanged; their work must not be attributed to Toolview file reads or suppressed to improve counters.
 
 ## Cache, separation and animation
 
-Two independent instances of the same rendered-data LRU isolate **8 MiB ordinary views** from **128 MiB Bash/edit-diff/write frames**, each capped at 2048 entries. A weak component state points to one latest layout/signature/pool, never a width history. The recency lists contain rendered values/accounting, not owners, raw args/results or builder closures. User layouts always use the ordinary pool. Pool selection follows the materialized view, not the tool name.
+Two independent instances of the same rendered-data LRU isolate **8 MiB ordinary views** from **128 MiB Bash/edit-diff/write frames**, each capped at 2048 entries. A weak component state points to one latest layout/signature/pool, never a width history. The recency lists contain rendered values/accounting, not owners, raw args/results or builder closures. User layouts always use the ordinary pool. Pool selection follows the materialized view, not the tool name. Main input does not join these caches: its rows remain transient and its weak state retains only paint/mouse geometry, not drafts or owner references.
 
 Body retention excludes outside transcript separators. The adapter records parent/index edges, repairs stale positions lazily, and finds the previous visible sibling. It uses existing row counts or cheap classification: Bash does not format output for spacing; file-card measurement reads an exact retained layout or validates metadata without highlighting/painting/admitting another body. Native/unknown predecessors may still need rendering. Separator and executing-spinner composition can allocate row arrays; unchanged completed summaries without a separator return retained arrays directly.
 
@@ -81,7 +84,7 @@ Cold layouts and actual width/theme changes prepare full required content by des
 - [Bash cards](bash-card-spec.md): command/output/footer semantics and expansion.
 - [Edit cards](edit-card-spec.md): metadata, syntax, diff format and lifecycle.
 - [Write cards](write-card-spec.md): source classification, completeness and plain/diff fallback.
-- [Shared frame](card-frame-spec.md): geometry, paint, user messages and click bounds.
+- [Shared frame](card-frame-spec.md): geometry, paint, user messages, main input and click bounds.
 - [Render cache](render-cache-spec.md): invalidation, ownership, pool controls and measurable work.
 - [Testing](testing.md): reproducible checks, actual CLI/SDK controls and explicit coverage limits.
 
