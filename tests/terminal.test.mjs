@@ -262,7 +262,7 @@ const summaryExpected = (value) => value.replace(/\s/gu, '');
 function compactContent(tool) {
   const rows = lines(tool);
   assert.ok(rows.length > 0, `compact content exists: ${tool.id}`);
-  assert.equal(rows[0].slice(0, 3), tool.name === 'read' ? ' → ' : ' ⚙ ', `compact prefix: ${tool.id}`);
+  assert.equal(rows[0].slice(0, 3), tool.name === 'read' ? ' → ' : ['edit', 'write'].includes(tool.name) ? ' ← ' : ' ⚙ ', `compact prefix: ${tool.id}`);
   for (const row of rows.slice(1)) assert.match(row, /^ {3}\S/, `continuation aligns at tool-name column: ${tool.id}`);
   assert.doesNotMatch(rows.join(''), /✓|✗/u, `completion markers are disabled: ${tool.id}`);
   assert.ok(!rows.at(-1).endsWith(' '), `hidden marker leaves no trailing separator space: ${tool.id}`);
@@ -663,7 +663,7 @@ test('real CLI: complete multiline summaries, adaptive separation, continuation 
       await t.test('live component render at widths 1–5 preserves a tool glyph without completion badges', async () => {
         for (const tool of compactTools) {
           for (const width of [1, 2, 3, 4, 5]) {
-            assert.deepEqual(tool.tinyLines[width].map(plain).filter((row) => row.trim()), [tool.name === 'read' ? '→' : '⚙'], `width ${width} retains the tool glyph`);
+            assert.deepEqual(tool.tinyLines[width].map(plain).filter((row) => row.trim()), [tool.name === 'read' ? '→' : ['edit', 'write'].includes(tool.name) ? '←' : '⚙'], `width ${width} retains the tool glyph`);
             await assertFits(tool.tinyLines[width], Math.max(1, width - 1));
           }
         }
@@ -2776,7 +2776,7 @@ test('real CLI: OpenCode-style edit syntax, numbered unified/split format, error
       const { pending, running } = await run(live);
       for (const dump of [pending, running]) assert.equal(dump.nativeRenderCalls.edit ?? 0, 0, 'stock edit streaming/execution performs no native visibility render');
       compactContent(pending.tools[0]);
-      assert.match(lines(pending.tools[0]).join(''), /⚙ edit edit-example.ts/);
+      assert.match(lines(pending.tools[0]).join(''), /← edit edit-example.ts/);
       assert.doesNotMatch(lines(pending.tools[0]).join(''), /┃|← Edited/);
       assert.match(lines(running.tools[0]).join(''), /^[\s]*[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] edit edit-example.ts/);
       assert.doesNotMatch(lines(running.tools[0]).join(''), /┃|← Edited/);
@@ -3143,10 +3143,10 @@ for (const shape of [false, true]) test(`real CLI: write cards ${shape ? 'repres
       const live = await start('toolview', { toolview: true, workspace: stock.work }); const phases = await run(live);
       for (const phase of [phases.pending, phases.running]) {
         const tool = phase.tools[0], text = lines(tool).join('\n');
-        assert.match(text, /write write-(created|stock)\.ts/); assert.doesNotMatch(text, /┃|←|write comment|ARGS_CREATED|PROPOSED_WRITE|content=/);
+        assert.match(text, /write write-(created|stock)\.ts/); assert.doesNotMatch(text, /┃|← (?:Created|Edited|Replaced|Wrote)|write comment|ARGS_CREATED|PROPOSED_WRITE|content=/);
         assert.equal(lines(tool).length, 1);
-        assert.match(text, tool.executionStarted ? /^ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] write /u : /^ ⚙ write /u, 'only actual execution animates the leading glyph');
-        assert.ok(phase.screen.some(row => tool.executionStarted ? /^ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] write /u.test(row) : /^ ⚙ write /u.test(row)), 'compact lifecycle is physically painted');
+        assert.match(text, tool.executionStarted ? /^ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] write /u : /^ ← write /u, 'only actual execution animates the leading glyph');
+        assert.ok(phase.screen.some(row => tool.executionStarted ? /^ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] write /u.test(row) : /^ ← write /u.test(row)), 'compact lifecycle is physically painted');
       }
       const liveFirst = await live.capture('pointer-write-wide'); await check(liveFirst);
       assert.deepEqual(events(live), events(stock)); assert.deepEqual(persisted(liveFirst), persisted(nativeControl));

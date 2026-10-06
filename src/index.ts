@@ -380,7 +380,7 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     const pending = node.isPartial || !node.result;
     const marker = SHOW_COMPLETION_MARKERS ? pending ? "…" : failed ? "✗" : "✓" : "";
     const statusColor = failed ? "error" : pending ? "muted" : "success";
-    const glyph = node.toolName === "read" ? "→" : "⚙";
+    const glyph = node.toolName === "read" ? "→" : fileTool(node) ? "←" : "⚙";
     if (available < 5) {
       const prefix = theme.fg(marker ? statusColor : failed ? "error" : "dim", marker || glyph);
       return { rows: [prefix], prefixLength: prefix.length };

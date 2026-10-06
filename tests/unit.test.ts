@@ -609,8 +609,8 @@ test("empty self-rendered tools remain hidden even when hideComponent is false a
   } finally { controller.restore(); }
 });
 
-test("only exact read summaries use an arrow; every other compact tool uses a one-column gear", async () => {
-  const names = ["read", "Read", "grep", "aft_inspect", "ctx_reduce", "TaskList", "custom", "write", "edit", "bash"];
+test("exact read/edit/write summaries use directional arrows; other compact tools keep the one-column gear", async () => {
+  const names = ["read", "Read", "grep", "aft_inspect", "ctx_reduce", "TaskList", "custom", "write", "edit", "Write", "Edit", "write_custom", "edit_custom", "bash"];
   const tools = names.map((name) => new Tool(name, { path: "a.txt", query: "x".repeat(50) }));
   const root = new Root(); tools.forEach((tool) => root.addChild(tool));
   const controller = installToolview(root, () => ({ fg: (role, text) =>
@@ -619,7 +619,7 @@ test("only exact read summaries use an arrow; every other compact tool uses a on
   try {
     assert.equal(visibleWidth(" ⚙ "), 3, "literal gear has no emoji variation selector or extra column");
     for (const tool of tools) {
-      const glyph = tool.toolName === "read" ? "→" : "⚙";
+      const glyph = tool.toolName === "read" ? "→" : tool.toolName === "edit" || tool.toolName === "write" ? "←" : "⚙";
       const args = structuredClone(tool.args);
       for (const state of ["pending", "partial", "success", "error"]) {
         tool.isPartial = state === "partial";
@@ -632,7 +632,8 @@ test("only exact read summaries use an arrow; every other compact tool uses a on
         assert.ok(rows.slice(1).every((row) => plain(row).startsWith("   ")));
         assert.ok(rows.every((row) => visibleWidth(row) <= 29));
         assert.deepEqual(tool.args, args);
-        assert.deepEqual(tool.render(5).map(plain).filter((row) => row.trim()), [leading], "tiny viewports retain pending state or tool glyph");
+        for (let width = 1; width <= 5; width++)
+          assert.deepEqual(tool.render(width).map(plain).filter((row) => row.trim()), [leading], "tiny viewports retain pending state or tool glyph");
       }
       terminal.reset();
       const row = tool.render(80).find((line) => plain(line).trim())!;
@@ -2140,7 +2141,7 @@ test("edit compact pending/error states, metadata updates, native/compact overri
   const edit = new Tool("edit", { path: "example.ts" }); edit.result = undefined; edit.executionStarted = false;
   const { controller, original } = setup([edit]);
   try {
-    assert.match(edit.render(80).map(plain).join(""), /⚙ edit example.ts/);
+    assert.match(edit.render(80).map(plain).join(""), /← edit example.ts/);
     assert.doesNotMatch(edit.render(80).map(plain).join(""), /┃|← Edited/);
     edit.updateResult({ content: [{ type: "text", text: "FAILURE_BODY" }], isError: true, details: { diff: editDiff } });
     assert.doesNotMatch(edit.render(80).map(plain).join(""), /const before|FAILURE_BODY/);
@@ -2159,7 +2160,7 @@ test("edit compact pending/error states, metadata updates, native/compact overri
     const context = setup([edit], options);
     try {
       if (options.cards) assert.deepEqual(edit.render(80), context.original.call(edit, 80));
-      else assert.match(edit.render(80).map(plain).join(""), /⚙ edit example.ts/);
+      else assert.match(edit.render(80).map(plain).join(""), /← edit example.ts/);
     } finally { context.controller.restore(); }
   }
 });
@@ -2606,7 +2607,7 @@ test("edit uses ordinary summaries until final success and follows the shared sp
   const { root, controller, original } = setup([edit, next]);
   try {
     const pending = edit.render(140).map(plain);
-    assert.match(pending.join(""), /⚙ edit example.ts/);
+    assert.match(pending.join(""), /← edit example.ts/);
     assert.doesNotMatch(pending.join(""), /┃|← Edited/);
     assert.equal(starts.mock.calls.length, 0, "argument streaming has no animation clock");
     assert.equal(edit.handleMouse(mouse(0, 140)), undefined, "argument streaming cannot expand");
@@ -2635,7 +2636,7 @@ test("edit uses ordinary summaries until final success and follows the shared sp
     assert.equal(root.requests, idleRequests, "success leaves no idle animation redraws");
     edit.updateResult({ content: [{ type: "text", text: "FAILURE_BODY" }], isError: true, details: proposed });
     const failure = edit.render(140).map(plain).join("");
-    assert.match(failure, /⚙ edit example.ts/); assert.doesNotMatch(failure, /┃|← Edited|FAILURE_BODY|const after/);
+    assert.match(failure, /← edit example.ts/); assert.doesNotMatch(failure, /┃|← Edited|FAILURE_BODY|const after/);
     assert.equal(starts.mock.calls.length, 1, "no clock for final failure");
     const offset = edit.render(140)[0] === "" ? 1 : 0;
     assert.equal(edit.handleMouse(mouse(offset, 140))?.handled, true);
@@ -2694,7 +2695,7 @@ test("edit state policy keeps native safeguards and explicit compact override pr
       try {
         assert.equal(controller.active, true);
         if (guard === "compact") {
-          assert.match(edit.render(140).map(plain).join(""), /⚙ edit example.ts/);
+          assert.match(edit.render(140).map(plain).join(""), /← edit example.ts/);
           assert.doesNotMatch(edit.render(140).map(plain).join(""), /┃|← Edited/);
         } else assert.deepEqual(edit.render(140), original.call(edit, 140), `${guard} delegates in every edit phase`);
       } finally { controller.restore(); }
@@ -2762,7 +2763,7 @@ test("stock edit visibility proof rejects same-name custom renderers and is chec
     custom.renderCall = definition.renderCall!; custom.renderResult = definition.renderResult!;
     node.updateArgs({ path: "example.ts" });
     const before = native.mock.calls.length;
-    assert.match(node.render(140).map(plain).join(""), /⚙ edit example.ts/);
+    assert.match(node.render(140).map(plain).join(""), /← edit example.ts/);
     assert.equal(native.mock.calls.length, before, "the stock pair skips visibility without a retained proof cache");
     custom.renderCall = emptyCall;
     node.updateArgs({ path: "example.ts" });
@@ -2947,13 +2948,13 @@ test("bounded compact edit path bypasses every other argument and preserves life
   const tool = new Tool("edit", args); tool.result = undefined; tool.executionStarted = false;
   const { controller } = setup([tool]);
   try {
-    assert.deepEqual(tool.render(80), [' ⚙ edit "src/my file.ts"']);
+    assert.deepEqual(tool.render(80), [' ← edit "src/my file.ts"']);
     tool.markExecutionStarted();
     assert.equal(plain(tool.render(80)[0]!), ' ⠋ edit "src/my file.ts"');
     t.mock.timers.tick(100);
     assert.equal(plain(tool.render(80)[0]!), ' ⠙ edit "src/my file.ts"');
     tool.updateResult({ isError: true, content: [{ type: "text", text: "NATIVE_ERROR" }] });
-    assert.deepEqual(tool.render(80), [' ⚙ edit "src/my file.ts"']);
+    assert.deepEqual(tool.render(80), [' ← edit "src/my file.ts"']);
     tool.setExpanded(true);
     assert.deepEqual(tool.render(80), ["", "NATIVE edit", "FULL_OUTPUT"]);
     tool.setExpanded(false); tool.updateArgs({ path: "example.ts", query: "ignored", edits: [] });
@@ -3128,12 +3129,12 @@ test("write lifecycle is path-only compact until final success, including propos
   tool.result = undefined; tool.executionStarted = false;
   const { root, controller, original } = setup([tool]);
   try {
-    assert.deepEqual(tool.render(80), [" ⚙ write example.ts"]);
+    assert.deepEqual(tool.render(80), [" ← write example.ts"]);
     assert.equal(controller.cacheStats().ordinary.entries, 1); assert.equal(controller.cacheStats().cards.entries, 0);
     tool.markExecutionStarted(); assert.match(tool.render(80)[0]!, /⠋ write example.ts/);
     const partial = { content: [], isError: true, details: { diff: "+1 PROPOSED_DIFF" } };
     tool.updateResult(partial, true); assert.doesNotMatch(root.render(80).join(""), /PROPOSED|PAYLOAD|┃|Created/);
-    tool.updateResult(partial); assert.deepEqual(tool.render(80), [" ⚙ write example.ts"]);
+    tool.updateResult(partial); assert.deepEqual(tool.render(80), [" ← write example.ts"]);
     assert.equal(controller.cacheStats().cards.entries, 0);
     tool.updateResult({ content: [], details: { diff: "+1 const written = 1;" } });
     assert.match(tool.render(80).join(""), /← Created example.ts/);
@@ -3245,7 +3246,7 @@ test("write metadata/native/compact/image/hidden guards remain authoritative in 
     if (guard === "image") tool.result = { ...result, content: [{ type: "image" }] };
     const { controller, original } = setup([tool], guard === "compact" ? { cards: ["write"], compact: ["write"] } : guard === "native" ? { cards: ["write"] } : {});
     try {
-      if (guard === "compact") assert.deepEqual(tool.render(140), [" ⚙ write example.ts"]);
+      if (guard === "compact") assert.deepEqual(tool.render(140), [" ← write example.ts"]);
       else assert.deepEqual(tool.render(140), original.call(tool, 140));
     } finally { controller.restore(); }
   }
@@ -3281,7 +3282,7 @@ test("write failure skips metadata/payload, uses only error paint and tears down
     tool.updateResult({ content: [], details, isError: true }, true); tool.render(80); assert.equal(stops.mock.calls.length, 0);
     tool.updateResult({ content: [{ type: "text", text: "ERROR_BODY" }], details, isError: true });
     assert.equal(stops.mock.calls.length, 1); roles.length = 0;
-    assert.deepEqual(tool.render(80), [" ⚙ write example.ts"]); assert.ok(roles.every(role => role === "error"));
+    assert.deepEqual(tool.render(80), [" ← write example.ts"]); assert.ok(roles.every(role => role === "error"));
     const before = root.requests; t.mock.timers.tick(500); assert.equal(root.requests, before);
   } finally { controller.restore(); }
 });
@@ -3356,7 +3357,7 @@ test("path-only file summaries never read unrelated signature fields", () => {
       get exit_code() { return assert.fail("non-Bash signatures must not inspect Bash-only metadata"); },
     } };
     const { controller } = setup([node]);
-    try { assert.deepEqual(node.render(80), [` ⚙ ${name} example.ts`]); assert.equal(controller.active, true); }
+    try { assert.deepEqual(node.render(80), [` ← ${name} example.ts`]); assert.equal(controller.active, true); }
     finally { controller.restore(); }
   }
 });
