@@ -1,0 +1,48 @@
+{
+  "node": "v22.19.0",
+  "harnessVersion": 2,
+  "records": 48,
+  "sourceHash": "6ddf560938abd989a0ea75a40da9cfb81ae8e8b61c04d42643b520be81b10e7e",
+  "engines": {
+    "tree-native": {
+      "timingProcesses": 5,
+      "memoryProcesses": 3,
+      "phaseProcesses": 4,
+      "qualitySamples": 9,
+      "equalityCases": 36,
+      "equalityUpdates": 852,
+      "zeroWorkCases": 8
+    },
+    "tree-wasm": {
+      "timingProcesses": 5,
+      "memoryProcesses": 3,
+      "phaseProcesses": 4,
+      "qualitySamples": 9,
+      "equalityCases": 36,
+      "equalityUpdates": 852,
+      "zeroWorkCases": 8
+    },
+    "shiki-js": {
+      "timingProcesses": 5,
+      "memoryProcesses": 3,
+      "phaseProcesses": 4,
+      "qualitySamples": 9,
+      "equalityCases": 18,
+      "equalityUpdates": 426,
+      "zeroWorkCases": 4
+    },
+    "shiki-onig": {
+      "timingProcesses": 5,
+      "memoryProcesses": 3,
+      "phaseProcesses": 4,
+      "qualitySamples": 9,
+      "equalityCases": 18,
+      "equalityUpdates": 426,
+      "zeroWorkCases": 4
+    }
+  },
+  "localLinks": 18,
+  "withinFamilyRoleEquality": true,
+  "productionTestsRun": false,
+  "candidateReplayRun": false
+}

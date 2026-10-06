@@ -1,0 +1,16 @@
+import {readFileSync,writeFileSync}from'node:fs';
+const all=readFileSync(new URL('./results.jsonl',import.meta.url),'utf8').trim().split('\n').map(s=>JSON.parse(s));
+const median=xs=>[...xs].sort((a,b)=>a-b)[Math.floor(xs.length/2)];
+const kinds=['tree-native','tree-wasm','shiki-js','shiki-onig'];
+const summary={};
+for(const kind of kinds){
+ const b=all.filter(r=>r.kind===kind&&r.scenario==='bench'),m=all.filter(r=>r.kind===kind&&r.scenario==='memory');
+ const init=b.map(r=>r.initializationMs);
+ summary[kind]={init:{medianMs:median(init),minMs:Math.min(...init),maxMs:Math.max(...init)},full:b[0].full.map((r,i)=>({lang:r.lang,lines:r.lines,units:r.units,tokens:r.tokens,spansMs:median(b.map(x=>x.full[i].spans.medianMs)),ansiMs:median(b.map(x=>x.full[i].ansi.medianMs)),ansiP95Ms:median(b.map(x=>x.full[i].ansi.p95Ms))})),real:{units:b[0].real.units,lines:b[0].real.lines,medianMs:median(b.map(r=>r.real.medianMs))},longLine:{units:b[0].longLine.units,medianMs:median(b.map(r=>r.longLine.medianMs))},stream:b[0].stream.map((r,i)=>({...r,totalMedianMs:median(b.map(x=>x.stream[i].totalMedianMs)),maxMedianMs:median(b.map(x=>x.stream[i].maxMedianMs))})),middle:b[0].middle.map((r,i)=>({...r,medianMs:median(b.map(x=>x.middle[i].medianMs)),p95Ms:median(b.map(x=>x.middle[i].p95Ms))})),memory:{}};
+ for(const phase of ['initialized','afterWarm','activeBeforeLarge','releasedBeforeLarge','afterLarge','twentyActive','releasedSessions','disposed'])summary[kind].memory[phase]=Object.fromEntries(['rss','heapUsed','external','arrayBuffers','maxRSS'].map(k=>[k,{absoluteMiB:median(m.map(x=>x[phase][k]/1048576)),deltaMiB:median(m.map(x=>(x[phase][k]-x.baseline[k])/1048576))}]));
+}
+for(const kind of kinds)summary[kind].profiles=all.filter(r=>r.kind===kind&&r.scenario==='profile').map(r=>({lang:r.lang,lines:r.lines,units:r.units,baselineRSSMiB:r.baseline.rss/1048576,phases:r.phases.map(p=>({phase:p.phase,rssMiB:p.rss/1048576,heapUsedMiB:p.heapUsed/1048576,externalMiB:p.external/1048576,heapTotalMiB:p.heapTotal/1048576,maxRSSMiB:p.maxRSS/1048576}))}));
+writeFileSync(new URL('./summary.json',import.meta.url),JSON.stringify(summary,null,2)+'\n');
+for(const [k,s]of Object.entries(summary)){console.log(k,'init',s.init.medianMs.toFixed(1),'ms');console.log('full1000',s.full.filter(r=>r.lines===1000).map(r=>`${r.lang}:${r.ansiMs.toFixed(1)}`).join(' '),'real',s.real.medianMs.toFixed(1),'long',s.longLine.medianMs.toFixed(1));console.log('stream',s.stream.map(r=>`${r.name}/${r.mode}:${r.totalMedianMs.toFixed(1)},max${r.maxMedianMs.toFixed(1)}`).join(' '));console.log('middle',s.middle.map(r=>`${r.lang}/${r.mode}:${r.medianMs.toFixed(1)}`).join(' '));console.log('memoryRSSdelta',Object.entries(s.memory).map(([p,v])=>`${p}:${v.rss.deltaMiB.toFixed(1)}`).join(' '),'peakAbs',s.memory.disposed.maxRSS.absoluteMiB.toFixed(1));}
+for(const [k,s]of Object.entries(summary))for(const phase of ['afterWarm','afterLarge','twentyActive','releasedSessions']) console.log('memory-breakdown',k,phase,JSON.stringify(Object.fromEntries(Object.entries(s.memory[phase]).map(([metric,v])=>[metric,Number(v.absoluteMiB.toFixed(1))]))));
+for(const [k,s]of Object.entries(summary))for(const p of s.profiles)console.log('profile',k,p.lang,p.lines,p.phases.map(x=>`${x.phase}:rss${x.rssMiB.toFixed(1)}/heap${x.heapUsedMiB.toFixed(1)}/peak${x.maxRSSMiB.toFixed(1)}`).join(' '));

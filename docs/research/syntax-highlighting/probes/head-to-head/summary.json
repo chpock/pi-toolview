@@ -1,0 +1,2766 @@
+{
+  "tree-native": {
+    "init": {
+      "medianMs": 87.116885,
+      "minMs": 82.42869200000001,
+      "maxMs": 104.238257
+    },
+    "full": [
+      {
+        "lang": "typescript",
+        "lines": 25,
+        "units": 1439,
+        "tokens": 500,
+        "spansMs": 2.9739020000000096,
+        "ansiMs": 2.372706000000022,
+        "ansiP95Ms": 2.961291999999986
+      },
+      {
+        "lang": "typescript",
+        "lines": 1000,
+        "units": 58889,
+        "tokens": 20000,
+        "spansMs": 88.07504600000004,
+        "ansiMs": 94.79917,
+        "ansiP95Ms": 138.1579740000002
+      },
+      {
+        "lang": "python",
+        "lines": 25,
+        "units": 1539,
+        "tokens": 549,
+        "spansMs": 2.309983999999986,
+        "ansiMs": 1.9678920000001199,
+        "ansiP95Ms": 5.380853000000116
+      },
+      {
+        "lang": "python",
+        "lines": 1000,
+        "units": 62889,
+        "tokens": 21999,
+        "spansMs": 76.0431010000002,
+        "ansiMs": 82.05676700000004,
+        "ansiP95Ms": 114.46486999999979
+      },
+      {
+        "lang": "bash",
+        "lines": 25,
+        "units": 764,
+        "tokens": 324,
+        "spansMs": 1.1555410000000848,
+        "ansiMs": 0.9559010000002672,
+        "ansiP95Ms": 4.4710070000001
+      },
+      {
+        "lang": "bash",
+        "lines": 1000,
+        "units": 31889,
+        "tokens": 12999,
+        "spansMs": 35.63877599999978,
+        "ansiMs": 36.542781999999534,
+        "ansiP95Ms": 42.399941999999555
+      },
+      {
+        "lang": "rust",
+        "lines": 25,
+        "units": 1603,
+        "tokens": 254,
+        "spansMs": 1.645092000000659,
+        "ansiMs": 1.5988880000004428,
+        "ansiP95Ms": 1.7579869999999573
+      },
+      {
+        "lang": "rust",
+        "lines": 1000,
+        "units": 64903,
+        "tokens": 10004,
+        "spansMs": 75.86893999999938,
+        "ansiMs": 73.57548899999983,
+        "ansiP95Ms": 136.12372700000014
+      }
+    ],
+    "real": {
+      "units": 20001,
+      "lines": 363,
+      "medianMs": 25.879791999999725
+    },
+    "longLine": {
+      "units": 26902,
+      "medianMs": 47.40215999999964
+    },
+    "stream": [
+      {
+        "name": "typescript",
+        "mode": "full",
+        "units": 7111,
+        "updates": 32,
+        "totalMedianMs": 166.5053829999988,
+        "maxMedianMs": 11.284004000000095,
+        "counters": {
+          "parses": 32,
+          "queries": 32,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 32407
+        }
+      },
+      {
+        "name": "typescript",
+        "mode": "range",
+        "units": 7111,
+        "updates": 32,
+        "totalMedianMs": 51.90080500000204,
+        "maxMedianMs": 8.427695999999742,
+        "counters": {
+          "parses": 32,
+          "queries": 32,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 7663
+        }
+      },
+      {
+        "name": "python",
+        "mode": "full",
+        "units": 7585,
+        "updates": 32,
+        "totalMedianMs": 141.23910999999862,
+        "maxMedianMs": 9.284394999999677,
+        "counters": {
+          "parses": 32,
+          "queries": 32,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 30417
+        }
+      },
+      {
+        "name": "python",
+        "mode": "range",
+        "units": 7585,
+        "updates": 32,
+        "totalMedianMs": 42.828819999996995,
+        "maxMedianMs": 7.201923000000534,
+        "counters": {
+          "parses": 32,
+          "queries": 32,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 6764
+        }
+      },
+      {
+        "name": "bash",
+        "mode": "full",
+        "units": 3864,
+        "updates": 32,
+        "totalMedianMs": 71.28605000000243,
+        "maxMedianMs": 5.619780000000901,
+        "counters": {
+          "parses": 32,
+          "queries": 32,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 14041
+        }
+      },
+      {
+        "name": "bash",
+        "mode": "range",
+        "units": 3864,
+        "updates": 32,
+        "totalMedianMs": 32.34150200000113,
+        "maxMedianMs": 5.062139999999999,
+        "counters": {
+          "parses": 32,
+          "queries": 32,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 4300
+        }
+      },
+      {
+        "name": "rust",
+        "mode": "full",
+        "units": 7864,
+        "updates": 32,
+        "totalMedianMs": 148.50822700000208,
+        "maxMedianMs": 11.550107000000935,
+        "counters": {
+          "parses": 32,
+          "queries": 32,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 32511
+        }
+      },
+      {
+        "name": "rust",
+        "mode": "range",
+        "units": 7864,
+        "updates": 32,
+        "totalMedianMs": 124.81560199999876,
+        "maxMedianMs": 10.28241700000035,
+        "counters": {
+          "parses": 32,
+          "queries": 32,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 29079
+        }
+      },
+      {
+        "name": "typescript-function",
+        "mode": "full",
+        "units": 7015,
+        "updates": 32,
+        "totalMedianMs": 162.6489689999962,
+        "maxMedianMs": 10.888993999999002,
+        "counters": {
+          "parses": 32,
+          "queries": 32,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 32102
+        }
+      },
+      {
+        "name": "typescript-function",
+        "mode": "range",
+        "units": 7015,
+        "updates": 32,
+        "totalMedianMs": 166.06081500000073,
+        "maxMedianMs": 10.971510999999737,
+        "counters": {
+          "parses": 32,
+          "queries": 32,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 32102
+        }
+      }
+    ],
+    "middle": [
+      {
+        "lang": "typescript",
+        "mode": "full",
+        "medianMs": 95.30948699999863,
+        "p95Ms": 128.81866700000137,
+        "counters": {
+          "parses": 9,
+          "queries": 9,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 144000
+        }
+      },
+      {
+        "lang": "typescript",
+        "mode": "range",
+        "medianMs": 53.51820199999929,
+        "p95Ms": 113.75615099999959,
+        "counters": {
+          "parses": 9,
+          "queries": 9,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 72000
+        }
+      },
+      {
+        "lang": "python",
+        "mode": "full",
+        "medianMs": 92.2252669999998,
+        "p95Ms": 125.14422699999886,
+        "counters": {
+          "parses": 9,
+          "queries": 9,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 135000
+        }
+      },
+      {
+        "lang": "python",
+        "mode": "range",
+        "medianMs": 45.618695000001026,
+        "p95Ms": 82.23754700000063,
+        "counters": {
+          "parses": 9,
+          "queries": 9,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 67500
+        }
+      },
+      {
+        "lang": "bash",
+        "mode": "full",
+        "medianMs": 41.27227999999923,
+        "p95Ms": 47.743437999999514,
+        "counters": {
+          "parses": 9,
+          "queries": 9,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 63000
+        }
+      },
+      {
+        "lang": "bash",
+        "mode": "range",
+        "medianMs": 22.371569000000818,
+        "p95Ms": 26.093230000000403,
+        "counters": {
+          "parses": 9,
+          "queries": 9,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 31500
+        }
+      },
+      {
+        "lang": "rust",
+        "mode": "full",
+        "medianMs": 85.42147900000055,
+        "p95Ms": 115.79293200000029,
+        "counters": {
+          "parses": 9,
+          "queries": 9,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 144054
+        }
+      },
+      {
+        "lang": "rust",
+        "mode": "range",
+        "medianMs": 82.71000699999968,
+        "p95Ms": 152.74136900000303,
+        "counters": {
+          "parses": 9,
+          "queries": 9,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 144054
+        }
+      }
+    ],
+    "memory": {
+      "initialized": {
+        "rss": {
+          "absoluteMiB": 69.45703125,
+          "deltaMiB": 18.48828125
+        },
+        "heapUsed": {
+          "absoluteMiB": 6.518623352050781,
+          "deltaMiB": 1.9238739013671875
+        },
+        "external": {
+          "absoluteMiB": 2.022303581237793,
+          "deltaMiB": 0.05129528045654297
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.01587963104248047,
+          "deltaMiB": 0.000030517578125
+        },
+        "maxRSS": {
+          "absoluteMiB": 69.84765625,
+          "deltaMiB": 18.94921875
+        }
+      },
+      "afterWarm": {
+        "rss": {
+          "absoluteMiB": 69.64453125,
+          "deltaMiB": 18.67578125
+        },
+        "heapUsed": {
+          "absoluteMiB": 6.585334777832031,
+          "deltaMiB": 1.9905853271484375
+        },
+        "external": {
+          "absoluteMiB": 2.0239744186401367,
+          "deltaMiB": 0.05296611785888672
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.01755046844482422,
+          "deltaMiB": 0.00170135498046875
+        },
+        "maxRSS": {
+          "absoluteMiB": 69.84765625,
+          "deltaMiB": 18.94921875
+        }
+      },
+      "activeBeforeLarge": {
+        "rss": {
+          "absoluteMiB": 345.265625,
+          "deltaMiB": 294.16796875
+        },
+        "heapUsed": {
+          "absoluteMiB": 32.814537048339844,
+          "deltaMiB": 28.21971893310547
+        },
+        "external": {
+          "absoluteMiB": 2.846255302429199,
+          "deltaMiB": 0.8752470016479492
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.8398313522338867,
+          "deltaMiB": 0.8239822387695312
+        },
+        "maxRSS": {
+          "absoluteMiB": 355.70703125,
+          "deltaMiB": 304.609375
+        }
+      },
+      "releasedBeforeLarge": {
+        "rss": {
+          "absoluteMiB": 343.53125,
+          "deltaMiB": 292.43359375
+        },
+        "heapUsed": {
+          "absoluteMiB": 6.767494201660156,
+          "deltaMiB": 2.1726760864257812
+        },
+        "external": {
+          "absoluteMiB": 2.846255302429199,
+          "deltaMiB": 0.8752470016479492
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.8398313522338867,
+          "deltaMiB": 0.8239822387695312
+        },
+        "maxRSS": {
+          "absoluteMiB": 355.70703125,
+          "deltaMiB": 304.609375
+        }
+      },
+      "afterLarge": {
+        "rss": {
+          "absoluteMiB": 632.11328125,
+          "deltaMiB": 581.26171875
+        },
+        "heapUsed": {
+          "absoluteMiB": 6.411994934082031,
+          "deltaMiB": 1.8172454833984375
+        },
+        "external": {
+          "absoluteMiB": 10.258583068847656,
+          "deltaMiB": 8.287574768066406
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 8.255602836608887,
+          "deltaMiB": 8.239753723144531
+        },
+        "maxRSS": {
+          "absoluteMiB": 650.78515625,
+          "deltaMiB": 599.6953125
+        }
+      },
+      "twentyActive": {
+        "rss": {
+          "absoluteMiB": 737.62109375,
+          "deltaMiB": 686.5234375
+        },
+        "heapUsed": {
+          "absoluteMiB": 32.46113586425781,
+          "deltaMiB": 27.86638641357422
+        },
+        "external": {
+          "absoluteMiB": 10.258583068847656,
+          "deltaMiB": 8.287574768066406
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 8.255602836608887,
+          "deltaMiB": 8.239753723144531
+        },
+        "maxRSS": {
+          "absoluteMiB": 744.57421875,
+          "deltaMiB": 693.4765625
+        }
+      },
+      "releasedSessions": {
+        "rss": {
+          "absoluteMiB": 735.82421875,
+          "deltaMiB": 684.7265625
+        },
+        "heapUsed": {
+          "absoluteMiB": 6.413444519042969,
+          "deltaMiB": 1.818695068359375
+        },
+        "external": {
+          "absoluteMiB": 10.258583068847656,
+          "deltaMiB": 8.287574768066406
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 8.255602836608887,
+          "deltaMiB": 8.239753723144531
+        },
+        "maxRSS": {
+          "absoluteMiB": 744.57421875,
+          "deltaMiB": 693.4765625
+        }
+      },
+      "disposed": {
+        "rss": {
+          "absoluteMiB": 735.82421875,
+          "deltaMiB": 684.7265625
+        },
+        "heapUsed": {
+          "absoluteMiB": 6.360923767089844,
+          "deltaMiB": 1.76617431640625
+        },
+        "external": {
+          "absoluteMiB": 10.258583068847656,
+          "deltaMiB": 8.287574768066406
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 8.255602836608887,
+          "deltaMiB": 8.239753723144531
+        },
+        "maxRSS": {
+          "absoluteMiB": 744.57421875,
+          "deltaMiB": 693.4765625
+        }
+      }
+    },
+    "profiles": [
+      {
+        "lang": "typescript",
+        "lines": 1000,
+        "units": 58889,
+        "baselineRSSMiB": 51.015625,
+        "phases": [
+          {
+            "phase": "input",
+            "rssMiB": 69.33203125,
+            "heapUsedMiB": 6.5787353515625,
+            "externalMiB": 2.022303581237793,
+            "heapTotalMiB": 16.09765625,
+            "maxRSSMiB": 70
+          },
+          {
+            "phase": "parse",
+            "rssMiB": 70.08203125,
+            "heapUsedMiB": 6.582633972167969,
+            "externalMiB": 2.022303581237793,
+            "heapTotalMiB": 16.34765625,
+            "maxRSSMiB": 70.08203125
+          },
+          {
+            "phase": "query",
+            "rssMiB": 96.5859375,
+            "heapUsedMiB": 10.5543212890625,
+            "externalMiB": 2.846255302429199,
+            "heapTotalMiB": 28.52734375,
+            "maxRSSMiB": 98.125
+          },
+          {
+            "phase": "project",
+            "rssMiB": 103.57421875,
+            "heapUsedMiB": 12.137947082519531,
+            "externalMiB": 2.846255302429199,
+            "heapTotalMiB": 45.70703125,
+            "maxRSSMiB": 103.57421875
+          },
+          {
+            "phase": "ansi",
+            "rssMiB": 105.68359375,
+            "heapUsedMiB": 14.293449401855469,
+            "externalMiB": 2.846255302429199,
+            "heapTotalMiB": 47.20703125,
+            "maxRSSMiB": 105.68359375
+          },
+          {
+            "phase": "assert",
+            "rssMiB": 109.3046875,
+            "heapUsedMiB": 14.788803100585938,
+            "externalMiB": 2.846255302429199,
+            "heapTotalMiB": 47.9765625,
+            "maxRSSMiB": 109.62109375
+          },
+          {
+            "phase": "released",
+            "rssMiB": 110.984375,
+            "heapUsedMiB": 7.2601165771484375,
+            "externalMiB": 2.846255302429199,
+            "heapTotalMiB": 41.1171875,
+            "maxRSSMiB": 111.2734375
+          }
+        ]
+      },
+      {
+        "lang": "bash",
+        "lines": 1000,
+        "units": 31889,
+        "baselineRSSMiB": 51.171875,
+        "phases": [
+          {
+            "phase": "input",
+            "rssMiB": 69.8203125,
+            "heapUsedMiB": 6.552986145019531,
+            "externalMiB": 2.022303581237793,
+            "heapTotalMiB": 16.09765625,
+            "maxRSSMiB": 70.52734375
+          },
+          {
+            "phase": "parse",
+            "rssMiB": 69.98046875,
+            "heapUsedMiB": 6.556884765625,
+            "externalMiB": 2.022303581237793,
+            "heapTotalMiB": 16.09765625,
+            "maxRSSMiB": 70.52734375
+          },
+          {
+            "phase": "query",
+            "rssMiB": 81.72265625,
+            "heapUsedMiB": 8.338958740234375,
+            "externalMiB": 2.274050712585449,
+            "heapTotalMiB": 17.59765625,
+            "maxRSSMiB": 81.72265625
+          },
+          {
+            "phase": "project",
+            "rssMiB": 88.19140625,
+            "heapUsedMiB": 9.426788330078125,
+            "externalMiB": 2.274050712585449,
+            "heapTotalMiB": 26.84765625,
+            "maxRSSMiB": 88.19140625
+          },
+          {
+            "phase": "ansi",
+            "rssMiB": 89.31640625,
+            "heapUsedMiB": 10.724754333496094,
+            "externalMiB": 2.274050712585449,
+            "heapTotalMiB": 28.09765625,
+            "maxRSSMiB": 89.31640625
+          },
+          {
+            "phase": "assert",
+            "rssMiB": 92.69140625,
+            "heapUsedMiB": 11.067527770996094,
+            "externalMiB": 2.274050712585449,
+            "heapTotalMiB": 28.43359375,
+            "maxRSSMiB": 92.69140625
+          },
+          {
+            "phase": "released",
+            "rssMiB": 93.39453125,
+            "heapUsedMiB": 7.026115417480469,
+            "externalMiB": 2.274050712585449,
+            "heapTotalMiB": 24.93359375,
+            "maxRSSMiB": 93.39453125
+          }
+        ]
+      },
+      {
+        "lang": "typescript",
+        "lines": 10000,
+        "units": 598889,
+        "baselineRSSMiB": 51.0546875,
+        "phases": [
+          {
+            "phase": "input",
+            "rssMiB": 70.859375,
+            "heapUsedMiB": 7.0949554443359375,
+            "externalMiB": 2.022303581237793,
+            "heapTotalMiB": 16.42578125,
+            "maxRSSMiB": 70.859375
+          },
+          {
+            "phase": "parse",
+            "rssMiB": 93.546875,
+            "heapUsedMiB": 7.098976135253906,
+            "externalMiB": 2.022303581237793,
+            "heapTotalMiB": 16.42578125,
+            "maxRSSMiB": 93.546875
+          },
+          {
+            "phase": "query",
+            "rssMiB": 230.4609375,
+            "heapUsedMiB": 45.44329071044922,
+            "externalMiB": 10.2620267868042,
+            "heapTotalMiB": 84.2421875,
+            "maxRSSMiB": 257.296875
+          },
+          {
+            "phase": "project",
+            "rssMiB": 271.76171875,
+            "heapUsedMiB": 61.18323516845703,
+            "externalMiB": 10.2620267868042,
+            "heapTotalMiB": 101.21484375,
+            "maxRSSMiB": 279.0078125
+          },
+          {
+            "phase": "ansi",
+            "rssMiB": 272.04296875,
+            "heapUsedMiB": 82.32023620605469,
+            "externalMiB": 10.2620267868042,
+            "heapTotalMiB": 118.46484375,
+            "maxRSSMiB": 279.0078125
+          },
+          {
+            "phase": "assert",
+            "rssMiB": 287.2578125,
+            "heapUsedMiB": 87.48390197753906,
+            "externalMiB": 10.2620267868042,
+            "heapTotalMiB": 123.62109375,
+            "maxRSSMiB": 288.34375
+          },
+          {
+            "phase": "released",
+            "rssMiB": 303.88671875,
+            "heapUsedMiB": 12.414695739746094,
+            "externalMiB": 10.2620267868042,
+            "heapTotalMiB": 47.33203125,
+            "maxRSSMiB": 318.3359375
+          }
+        ]
+      },
+      {
+        "lang": "bash",
+        "lines": 10000,
+        "units": 328889,
+        "baselineRSSMiB": 50.92578125,
+        "phases": [
+          {
+            "phase": "input",
+            "rssMiB": 70.21484375,
+            "heapUsedMiB": 6.837196350097656,
+            "externalMiB": 2.022303581237793,
+            "heapTotalMiB": 16.41796875,
+            "maxRSSMiB": 70.21484375
+          },
+          {
+            "phase": "parse",
+            "rssMiB": 88.515625,
+            "heapUsedMiB": 6.841178894042969,
+            "externalMiB": 2.022303581237793,
+            "heapTotalMiB": 16.66796875,
+            "maxRSSMiB": 88.515625
+          },
+          {
+            "phase": "query",
+            "rssMiB": 165.75390625,
+            "heapUsedMiB": 24.06616973876953,
+            "externalMiB": 4.539980888366699,
+            "heapTotalMiB": 59.5078125,
+            "maxRSSMiB": 176.97265625
+          },
+          {
+            "phase": "project",
+            "rssMiB": 191.0703125,
+            "heapUsedMiB": 34.33988952636719,
+            "externalMiB": 4.539980888366699,
+            "heapTotalMiB": 70.57421875,
+            "maxRSSMiB": 194.8828125
+          },
+          {
+            "phase": "ansi",
+            "rssMiB": 191.2109375,
+            "heapUsedMiB": 47.39038848876953,
+            "externalMiB": 4.539980888366699,
+            "heapTotalMiB": 85.82421875,
+            "maxRSSMiB": 194.8828125
+          },
+          {
+            "phase": "assert",
+            "rssMiB": 204.53125,
+            "heapUsedMiB": 50.69429016113281,
+            "externalMiB": 4.539980888366699,
+            "heapTotalMiB": 89.12109375,
+            "maxRSSMiB": 205.015625
+          },
+          {
+            "phase": "released",
+            "rssMiB": 206.03125,
+            "heapUsedMiB": 10.271896362304688,
+            "externalMiB": 4.539980888366699,
+            "heapTotalMiB": 44.46484375,
+            "maxRSSMiB": 217.75
+          }
+        ]
+      }
+    ]
+  },
+  "tree-wasm": {
+    "init": {
+      "medianMs": 106.035769,
+      "minMs": 101.503004,
+      "maxMs": 115.30745300000001
+    },
+    "full": [
+      {
+        "lang": "typescript",
+        "lines": 25,
+        "units": 1439,
+        "tokens": 500,
+        "spansMs": 2.8944649999999967,
+        "ansiMs": 1.9343140000000005,
+        "ansiP95Ms": 2.408036999999979
+      },
+      {
+        "lang": "typescript",
+        "lines": 1000,
+        "units": 58889,
+        "tokens": 20000,
+        "spansMs": 53.32002,
+        "ansiMs": 61.454565,
+        "ansiP95Ms": 75.26752499999998
+      },
+      {
+        "lang": "python",
+        "lines": 25,
+        "units": 1539,
+        "tokens": 549,
+        "spansMs": 1.5270419999999376,
+        "ansiMs": 1.3735920000001443,
+        "ansiP95Ms": 1.5535609999999451
+      },
+      {
+        "lang": "python",
+        "lines": 1000,
+        "units": 62889,
+        "tokens": 21999,
+        "spansMs": 60.64864299999999,
+        "ansiMs": 61.17771099999982,
+        "ansiP95Ms": 69.58296900000005
+      },
+      {
+        "lang": "bash",
+        "lines": 25,
+        "units": 764,
+        "tokens": 324,
+        "spansMs": 0.6566899999997986,
+        "ansiMs": 0.600304000000051,
+        "ansiP95Ms": 0.6990919999998368
+      },
+      {
+        "lang": "bash",
+        "lines": 1000,
+        "units": 31889,
+        "tokens": 12999,
+        "spansMs": 26.0488720000003,
+        "ansiMs": 23.854069999999865,
+        "ansiP95Ms": 27.317869999999857
+      },
+      {
+        "lang": "rust",
+        "lines": 25,
+        "units": 1603,
+        "tokens": 254,
+        "spansMs": 0.9929670000001352,
+        "ansiMs": 0.9999400000001515,
+        "ansiP95Ms": 2.703008000000409
+      },
+      {
+        "lang": "rust",
+        "lines": 1000,
+        "units": 64903,
+        "tokens": 10004,
+        "spansMs": 39.12819900000022,
+        "ansiMs": 41.89510300000029,
+        "ansiP95Ms": 46.4612189999998
+      }
+    ],
+    "real": {
+      "units": 20001,
+      "lines": 363,
+      "medianMs": 14.612787000000026
+    },
+    "longLine": {
+      "units": 26902,
+      "medianMs": 27.081075000000055
+    },
+    "stream": [
+      {
+        "name": "typescript",
+        "mode": "full",
+        "units": 7111,
+        "updates": 32,
+        "totalMedianMs": 79.47823700000117,
+        "maxMedianMs": 5.265785999999935,
+        "counters": {
+          "parses": 32,
+          "queries": 32,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 32407
+        }
+      },
+      {
+        "name": "typescript",
+        "mode": "range",
+        "units": 7111,
+        "updates": 32,
+        "totalMedianMs": 28.29111500000272,
+        "maxMedianMs": 4.656718999999612,
+        "counters": {
+          "parses": 32,
+          "queries": 32,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 7663
+        }
+      },
+      {
+        "name": "python",
+        "mode": "full",
+        "units": 7585,
+        "updates": 32,
+        "totalMedianMs": 80.14837799999987,
+        "maxMedianMs": 5.2333950000002005,
+        "counters": {
+          "parses": 32,
+          "queries": 32,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 30417
+        }
+      },
+      {
+        "name": "python",
+        "mode": "range",
+        "units": 7585,
+        "updates": 32,
+        "totalMedianMs": 27.007458000000952,
+        "maxMedianMs": 4.225695000000087,
+        "counters": {
+          "parses": 32,
+          "queries": 32,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 6764
+        }
+      },
+      {
+        "name": "bash",
+        "mode": "full",
+        "units": 3864,
+        "updates": 32,
+        "totalMedianMs": 34.2284899999986,
+        "maxMedianMs": 2.566103000000112,
+        "counters": {
+          "parses": 32,
+          "queries": 32,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 14041
+        }
+      },
+      {
+        "name": "bash",
+        "mode": "range",
+        "units": 3864,
+        "updates": 32,
+        "totalMedianMs": 18.98661500000071,
+        "maxMedianMs": 2.195878999999877,
+        "counters": {
+          "parses": 32,
+          "queries": 32,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 4300
+        }
+      },
+      {
+        "name": "rust",
+        "mode": "full",
+        "units": 7864,
+        "updates": 32,
+        "totalMedianMs": 50.07117600000129,
+        "maxMedianMs": 3.2792559999998048,
+        "counters": {
+          "parses": 32,
+          "queries": 32,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 32511
+        }
+      },
+      {
+        "name": "rust",
+        "mode": "range",
+        "units": 7864,
+        "updates": 32,
+        "totalMedianMs": 48.041392999999516,
+        "maxMedianMs": 3.483780999999908,
+        "counters": {
+          "parses": 32,
+          "queries": 32,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 29079
+        }
+      },
+      {
+        "name": "typescript-function",
+        "mode": "full",
+        "units": 7015,
+        "updates": 32,
+        "totalMedianMs": 79.70531700000083,
+        "maxMedianMs": 5.208749999999782,
+        "counters": {
+          "parses": 32,
+          "queries": 32,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 32102
+        }
+      },
+      {
+        "name": "typescript-function",
+        "mode": "range",
+        "units": 7015,
+        "updates": 32,
+        "totalMedianMs": 81.75848199999837,
+        "maxMedianMs": 5.680325000000266,
+        "counters": {
+          "parses": 32,
+          "queries": 32,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 32102
+        }
+      }
+    ],
+    "middle": [
+      {
+        "lang": "typescript",
+        "mode": "full",
+        "medianMs": 47.30819100000008,
+        "p95Ms": 70.44224300000042,
+        "counters": {
+          "parses": 9,
+          "queries": 9,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 144000
+        }
+      },
+      {
+        "lang": "typescript",
+        "mode": "range",
+        "medianMs": 25.877501999999367,
+        "p95Ms": 28.77126000000044,
+        "counters": {
+          "parses": 9,
+          "queries": 9,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 72000
+        }
+      },
+      {
+        "lang": "python",
+        "mode": "full",
+        "medianMs": 48.41711799999939,
+        "p95Ms": 70.73478299999988,
+        "counters": {
+          "parses": 9,
+          "queries": 9,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 135000
+        }
+      },
+      {
+        "lang": "python",
+        "mode": "range",
+        "medianMs": 30.94571199999973,
+        "p95Ms": 37.53074699999888,
+        "counters": {
+          "parses": 9,
+          "queries": 9,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 67500
+        }
+      },
+      {
+        "lang": "bash",
+        "mode": "full",
+        "medianMs": 21.29219000000012,
+        "p95Ms": 25.380443999999443,
+        "counters": {
+          "parses": 9,
+          "queries": 9,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 63000
+        }
+      },
+      {
+        "lang": "bash",
+        "mode": "range",
+        "medianMs": 13.847286999998687,
+        "p95Ms": 15.859921999999642,
+        "counters": {
+          "parses": 9,
+          "queries": 9,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 31500
+        }
+      },
+      {
+        "lang": "rust",
+        "mode": "full",
+        "medianMs": 31.49561999999969,
+        "p95Ms": 48.08577400000104,
+        "counters": {
+          "parses": 9,
+          "queries": 9,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 144054
+        }
+      },
+      {
+        "lang": "rust",
+        "mode": "range",
+        "medianMs": 33.478940999999395,
+        "p95Ms": 45.546416999999565,
+        "counters": {
+          "parses": 9,
+          "queries": 9,
+          "tokenizedLines": 0,
+          "queryReturnedCaptures": 144054
+        }
+      }
+    ],
+    "memory": {
+      "initialized": {
+        "rss": {
+          "absoluteMiB": 77.296875,
+          "deltaMiB": 27.22265625
+        },
+        "heapUsed": {
+          "absoluteMiB": 5.457603454589844,
+          "deltaMiB": 0.86285400390625
+        },
+        "external": {
+          "absoluteMiB": 33.9718074798584,
+          "deltaMiB": 32.00079917907715
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.016539573669433594,
+          "deltaMiB": 0.000690460205078125
+        },
+        "maxRSS": {
+          "absoluteMiB": 82.93359375,
+          "deltaMiB": 34.15234375
+        }
+      },
+      "afterWarm": {
+        "rss": {
+          "absoluteMiB": 91.61328125,
+          "deltaMiB": 42.83203125
+        },
+        "heapUsed": {
+          "absoluteMiB": 5.533355712890625,
+          "deltaMiB": 0.9386062622070312
+        },
+        "external": {
+          "absoluteMiB": 33.9718074798584,
+          "deltaMiB": 32.00079917907715
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.016539573669433594,
+          "deltaMiB": 0.000690460205078125
+        },
+        "maxRSS": {
+          "absoluteMiB": 91.61328125,
+          "deltaMiB": 42.83203125
+        }
+      },
+      "activeBeforeLarge": {
+        "rss": {
+          "absoluteMiB": 240.08203125,
+          "deltaMiB": 189.078125
+        },
+        "heapUsed": {
+          "absoluteMiB": 31.787750244140625,
+          "deltaMiB": 27.19300079345703
+        },
+        "external": {
+          "absoluteMiB": 57.3468074798584,
+          "deltaMiB": 55.37579917907715
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.016539573669433594,
+          "deltaMiB": 0.000690460205078125
+        },
+        "maxRSS": {
+          "absoluteMiB": 240.5625,
+          "deltaMiB": 189.55859375
+        }
+      },
+      "releasedBeforeLarge": {
+        "rss": {
+          "absoluteMiB": 238.28515625,
+          "deltaMiB": 187.28125
+        },
+        "heapUsed": {
+          "absoluteMiB": 5.735954284667969,
+          "deltaMiB": 1.141204833984375
+        },
+        "external": {
+          "absoluteMiB": 57.3468074798584,
+          "deltaMiB": 55.37579917907715
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.016539573669433594,
+          "deltaMiB": 0.000690460205078125
+        },
+        "maxRSS": {
+          "absoluteMiB": 240.5625,
+          "deltaMiB": 189.55859375
+        }
+      },
+      "afterLarge": {
+        "rss": {
+          "absoluteMiB": 415.6640625,
+          "deltaMiB": 364.66015625
+        },
+        "heapUsed": {
+          "absoluteMiB": 5.483146667480469,
+          "deltaMiB": 0.888397216796875
+        },
+        "external": {
+          "absoluteMiB": 57.343363761901855,
+          "deltaMiB": 55.372355461120605
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.016539573669433594,
+          "deltaMiB": 0.000690460205078125
+        },
+        "maxRSS": {
+          "absoluteMiB": 442.0078125,
+          "deltaMiB": 391.00390625
+        }
+      },
+      "twentyActive": {
+        "rss": {
+          "absoluteMiB": 417.49609375,
+          "deltaMiB": 366.4921875
+        },
+        "heapUsed": {
+          "absoluteMiB": 31.520530700683594,
+          "deltaMiB": 26.92578125
+        },
+        "external": {
+          "absoluteMiB": 57.34329414367676,
+          "deltaMiB": 55.37228584289551
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.016539573669433594,
+          "deltaMiB": 0.000690460205078125
+        },
+        "maxRSS": {
+          "absoluteMiB": 442.0078125,
+          "deltaMiB": 391.00390625
+        }
+      },
+      "releasedSessions": {
+        "rss": {
+          "absoluteMiB": 415.69921875,
+          "deltaMiB": 364.6953125
+        },
+        "heapUsed": {
+          "absoluteMiB": 5.468132019042969,
+          "deltaMiB": 0.873382568359375
+        },
+        "external": {
+          "absoluteMiB": 57.34329414367676,
+          "deltaMiB": 55.37228584289551
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.016539573669433594,
+          "deltaMiB": 0.000690460205078125
+        },
+        "maxRSS": {
+          "absoluteMiB": 442.0078125,
+          "deltaMiB": 391.00390625
+        }
+      },
+      "disposed": {
+        "rss": {
+          "absoluteMiB": 415.69921875,
+          "deltaMiB": 364.6953125
+        },
+        "heapUsed": {
+          "absoluteMiB": 5.305961608886719,
+          "deltaMiB": 0.711212158203125
+        },
+        "external": {
+          "absoluteMiB": 57.34329414367676,
+          "deltaMiB": 55.37228584289551
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.016539573669433594,
+          "deltaMiB": 0.000690460205078125
+        },
+        "maxRSS": {
+          "absoluteMiB": 442.0078125,
+          "deltaMiB": 391.00390625
+        }
+      }
+    },
+    "profiles": [
+      {
+        "lang": "typescript",
+        "lines": 1000,
+        "units": 58889,
+        "baselineRSSMiB": 51.37890625,
+        "phases": [
+          {
+            "phase": "input",
+            "rssMiB": 73.69921875,
+            "heapUsedMiB": 5.523193359375,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 10.50390625,
+            "maxRSSMiB": 79.55078125
+          },
+          {
+            "phase": "parse",
+            "rssMiB": 81.78515625,
+            "heapUsedMiB": 5.539924621582031,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 10.75390625,
+            "maxRSSMiB": 87.84765625
+          },
+          {
+            "phase": "query",
+            "rssMiB": 93.6484375,
+            "heapUsedMiB": 11.163070678710938,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 27.88671875,
+            "maxRSSMiB": 100.75
+          },
+          {
+            "phase": "project",
+            "rssMiB": 98.75390625,
+            "heapUsedMiB": 12.777336120605469,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 45.81640625,
+            "maxRSSMiB": 101.76953125
+          },
+          {
+            "phase": "ansi",
+            "rssMiB": 102.12890625,
+            "heapUsedMiB": 14.870018005371094,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 47.81640625,
+            "maxRSSMiB": 102.12890625
+          },
+          {
+            "phase": "assert",
+            "rssMiB": 106.66796875,
+            "heapUsedMiB": 15.398880004882812,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 48.0859375,
+            "maxRSSMiB": 106.66796875
+          },
+          {
+            "phase": "released",
+            "rssMiB": 106.35546875,
+            "heapUsedMiB": 6.235328674316406,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 39.0234375,
+            "maxRSSMiB": 106.66796875
+          }
+        ]
+      },
+      {
+        "lang": "bash",
+        "lines": 1000,
+        "units": 31889,
+        "baselineRSSMiB": 50.9453125,
+        "phases": [
+          {
+            "phase": "input",
+            "rssMiB": 79.09765625,
+            "heapUsedMiB": 5.497489929199219,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 10.25390625,
+            "maxRSSMiB": 83.796875
+          },
+          {
+            "phase": "parse",
+            "rssMiB": 111.75390625,
+            "heapUsedMiB": 5.518890380859375,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 10.50390625,
+            "maxRSSMiB": 111.75390625
+          },
+          {
+            "phase": "query",
+            "rssMiB": 112.45703125,
+            "heapUsedMiB": 8.01519775390625,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 17.00390625,
+            "maxRSSMiB": 115.26953125
+          },
+          {
+            "phase": "project",
+            "rssMiB": 123.42578125,
+            "heapUsedMiB": 9.068046569824219,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 25.75390625,
+            "maxRSSMiB": 123.42578125
+          },
+          {
+            "phase": "ansi",
+            "rssMiB": 126.66015625,
+            "heapUsedMiB": 10.381904602050781,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 27.00390625,
+            "maxRSSMiB": 126.66015625
+          },
+          {
+            "phase": "assert",
+            "rssMiB": 130.03515625,
+            "heapUsedMiB": 10.724861145019531,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 27.33984375,
+            "maxRSSMiB": 130.03515625
+          },
+          {
+            "phase": "released",
+            "rssMiB": 130.03515625,
+            "heapUsedMiB": 6.000457763671875,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 23.08984375,
+            "maxRSSMiB": 130.03515625
+          }
+        ]
+      },
+      {
+        "lang": "typescript",
+        "lines": 10000,
+        "units": 598889,
+        "baselineRSSMiB": 51.03515625,
+        "phases": [
+          {
+            "phase": "input",
+            "rssMiB": 74.4140625,
+            "heapUsedMiB": 6.0393218994140625,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 10.83203125,
+            "maxRSSMiB": 80.5546875
+          },
+          {
+            "phase": "parse",
+            "rssMiB": 97.88671875,
+            "heapUsedMiB": 6.057197570800781,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 11.08203125,
+            "maxRSSMiB": 97.88671875
+          },
+          {
+            "phase": "query",
+            "rssMiB": 215.09375,
+            "heapUsedMiB": 61.35948944091797,
+            "externalMiB": 64.2843074798584,
+            "heapTotalMiB": 95.05078125,
+            "maxRSSMiB": 217.0625
+          },
+          {
+            "phase": "project",
+            "rssMiB": 256.97265625,
+            "heapUsedMiB": 77.09603881835938,
+            "externalMiB": 64.2843074798584,
+            "heapTotalMiB": 111.5234375,
+            "maxRSSMiB": 264.67578125
+          },
+          {
+            "phase": "ansi",
+            "rssMiB": 257.11328125,
+            "heapUsedMiB": 98.23301696777344,
+            "externalMiB": 64.2843074798584,
+            "heapTotalMiB": 135.2734375,
+            "maxRSSMiB": 264.67578125
+          },
+          {
+            "phase": "assert",
+            "rssMiB": 273.1953125,
+            "heapUsedMiB": 103.39697265625,
+            "externalMiB": 64.2843074798584,
+            "heapTotalMiB": 140.6796875,
+            "maxRSSMiB": 274.1875
+          },
+          {
+            "phase": "released",
+            "rssMiB": 269.8359375,
+            "heapUsedMiB": 11.391319274902344,
+            "externalMiB": 64.2843074798584,
+            "heapTotalMiB": 44.98828125,
+            "maxRSSMiB": 274.1875
+          }
+        ]
+      },
+      {
+        "lang": "bash",
+        "lines": 10000,
+        "units": 328889,
+        "baselineRSSMiB": 51.2578125,
+        "phases": [
+          {
+            "phase": "input",
+            "rssMiB": 74.015625,
+            "heapUsedMiB": 5.781761169433594,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 10.57421875,
+            "maxRSSMiB": 80.47265625
+          },
+          {
+            "phase": "parse",
+            "rssMiB": 122.63671875,
+            "heapUsedMiB": 5.799652099609375,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 10.82421875,
+            "maxRSSMiB": 122.63671875
+          },
+          {
+            "phase": "query",
+            "rssMiB": 185.41796875,
+            "heapUsedMiB": 30.062118530273438,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 63.73046875,
+            "maxRSSMiB": 185.7265625
+          },
+          {
+            "phase": "project",
+            "rssMiB": 217.5546875,
+            "heapUsedMiB": 40.338409423828125,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 74.296875,
+            "maxRSSMiB": 246.19921875
+          },
+          {
+            "phase": "ansi",
+            "rssMiB": 217.6953125,
+            "heapUsedMiB": 53.388954162597656,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 89.296875,
+            "maxRSSMiB": 246.19921875
+          },
+          {
+            "phase": "assert",
+            "rssMiB": 230.45703125,
+            "heapUsedMiB": 56.693145751953125,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 92.84375,
+            "maxRSSMiB": 246.19921875
+          },
+          {
+            "phase": "released",
+            "rssMiB": 228.35546875,
+            "heapUsedMiB": 9.259925842285156,
+            "externalMiB": 33.9718074798584,
+            "heapTotalMiB": 42.37109375,
+            "maxRSSMiB": 246.19921875
+          }
+        ]
+      }
+    ]
+  },
+  "shiki-js": {
+    "init": {
+      "medianMs": 41.697495,
+      "minMs": 38.821898999999995,
+      "maxMs": 49.310903
+    },
+    "full": [
+      {
+        "lang": "typescript",
+        "lines": 25,
+        "units": 1439,
+        "tokens": 525,
+        "spansMs": 6.573239999999998,
+        "ansiMs": 4.764716000000021,
+        "ansiP95Ms": 6.373090999999988
+      },
+      {
+        "lang": "typescript",
+        "lines": 1000,
+        "units": 58889,
+        "tokens": 21000,
+        "spansMs": 152.67960300000004,
+        "ansiMs": 161.30549199999996,
+        "ansiP95Ms": 188.38525100000015
+      },
+      {
+        "lang": "python",
+        "lines": 25,
+        "units": 1539,
+        "tokens": 151,
+        "spansMs": 1.5887260000004062,
+        "ansiMs": 1.2063050000001567,
+        "ansiP95Ms": 1.5732590000002347
+      },
+      {
+        "lang": "python",
+        "lines": 1000,
+        "units": 62889,
+        "tokens": 6001,
+        "spansMs": 41.3957019999998,
+        "ansiMs": 44.71169199999986,
+        "ansiP95Ms": 49.33431399999972
+      },
+      {
+        "lang": "bash",
+        "lines": 25,
+        "units": 764,
+        "tokens": 299,
+        "spansMs": 3.1395510000002105,
+        "ansiMs": 1.5820629999998346,
+        "ansiP95Ms": 2.8261970000003203
+      },
+      {
+        "lang": "bash",
+        "lines": 1000,
+        "units": 31889,
+        "tokens": 11999,
+        "spansMs": 44.98334100000011,
+        "ansiMs": 45.02841499999977,
+        "ansiP95Ms": 55.298217999999906
+      },
+      {
+        "lang": "rust",
+        "lines": 25,
+        "units": 1603,
+        "tokens": 529,
+        "spansMs": 1.053476000000046,
+        "ansiMs": 1.23613800000021,
+        "ansiP95Ms": 2.9576609999994616
+      },
+      {
+        "lang": "rust",
+        "lines": 1000,
+        "units": 64903,
+        "tokens": 21004,
+        "spansMs": 41.341159999999945,
+        "ansiMs": 46.17561000000023,
+        "ansiP95Ms": 52.58728400000018
+      }
+    ],
+    "real": {
+      "units": 20001,
+      "lines": 363,
+      "medianMs": 257.9475769999999
+    },
+    "longLine": {
+      "units": 26902,
+      "medianMs": 77.11195500000031
+    },
+    "stream": [
+      {
+        "name": "typescript",
+        "mode": "line-state",
+        "units": 7111,
+        "updates": 32,
+        "totalMedianMs": 90.06137699999636,
+        "maxMedianMs": 4.6947500000005675,
+        "counters": {
+          "parses": 0,
+          "queries": 0,
+          "tokenizedLines": 154,
+          "queryReturnedCaptures": 0
+        }
+      },
+      {
+        "name": "python",
+        "mode": "line-state",
+        "units": 7585,
+        "updates": 32,
+        "totalMedianMs": 49.061979999996765,
+        "maxMedianMs": 2.2060309999997116,
+        "counters": {
+          "parses": 0,
+          "queries": 0,
+          "tokenizedLines": 155,
+          "queryReturnedCaptures": 0
+        }
+      },
+      {
+        "name": "bash",
+        "mode": "line-state",
+        "units": 3864,
+        "updates": 32,
+        "totalMedianMs": 26.316249999998035,
+        "maxMedianMs": 1.5926970000000438,
+        "counters": {
+          "parses": 0,
+          "queries": 0,
+          "tokenizedLines": 158,
+          "queryReturnedCaptures": 0
+        }
+      },
+      {
+        "name": "rust",
+        "mode": "line-state",
+        "units": 7864,
+        "updates": 32,
+        "totalMedianMs": 18.256532000001243,
+        "maxMedianMs": 1.174722000001566,
+        "counters": {
+          "parses": 0,
+          "queries": 0,
+          "tokenizedLines": 156,
+          "queryReturnedCaptures": 0
+        }
+      },
+      {
+        "name": "typescript-function",
+        "mode": "line-state",
+        "units": 7015,
+        "updates": 32,
+        "totalMedianMs": 30.732927999999447,
+        "maxMedianMs": 1.8586210000012215,
+        "counters": {
+          "parses": 0,
+          "queries": 0,
+          "tokenizedLines": 154,
+          "queryReturnedCaptures": 0
+        }
+      }
+    ],
+    "middle": [
+      {
+        "lang": "typescript",
+        "mode": "line-state",
+        "medianMs": 98.89257800000087,
+        "p95Ms": 112.80648399999882,
+        "counters": {
+          "parses": 0,
+          "queries": 0,
+          "tokenizedLines": 4500,
+          "queryReturnedCaptures": 0
+        }
+      },
+      {
+        "lang": "python",
+        "mode": "line-state",
+        "medianMs": 24.62683300000026,
+        "p95Ms": 30.492613000000347,
+        "counters": {
+          "parses": 0,
+          "queries": 0,
+          "tokenizedLines": 4500,
+          "queryReturnedCaptures": 0
+        }
+      },
+      {
+        "lang": "bash",
+        "mode": "line-state",
+        "medianMs": 25.59325500000159,
+        "p95Ms": 29.248727000000144,
+        "counters": {
+          "parses": 0,
+          "queries": 0,
+          "tokenizedLines": 4500,
+          "queryReturnedCaptures": 0
+        }
+      },
+      {
+        "lang": "rust",
+        "mode": "line-state",
+        "medianMs": 27.10131899999942,
+        "p95Ms": 31.98724399999992,
+        "counters": {
+          "parses": 0,
+          "queries": 0,
+          "tokenizedLines": 4509,
+          "queryReturnedCaptures": 0
+        }
+      }
+    ],
+    "memory": {
+      "initialized": {
+        "rss": {
+          "absoluteMiB": 65.21875,
+          "deltaMiB": 14.5859375
+        },
+        "heapUsed": {
+          "absoluteMiB": 7.928611755371094,
+          "deltaMiB": 3.3338699340820312
+        },
+        "external": {
+          "absoluteMiB": 1.9788589477539062,
+          "deltaMiB": 0.00785064697265625
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.02366161346435547,
+          "deltaMiB": 0.0078125
+        },
+        "maxRSS": {
+          "absoluteMiB": 65.21875,
+          "deltaMiB": 14.5859375
+        }
+      },
+      "afterWarm": {
+        "rss": {
+          "absoluteMiB": 117,
+          "deltaMiB": 65.98046875
+        },
+        "heapUsed": {
+          "absoluteMiB": 18.409690856933594,
+          "deltaMiB": 13.814949035644531
+        },
+        "external": {
+          "absoluteMiB": 1.9788589477539062,
+          "deltaMiB": 0.00785064697265625
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.02366161346435547,
+          "deltaMiB": 0.0078125
+        },
+        "maxRSS": {
+          "absoluteMiB": 118.140625,
+          "deltaMiB": 67.35546875
+        }
+      },
+      "activeBeforeLarge": {
+        "rss": {
+          "absoluteMiB": 168.421875,
+          "deltaMiB": 117.40234375
+        },
+        "heapUsed": {
+          "absoluteMiB": 73.93319702148438,
+          "deltaMiB": 69.33845520019531
+        },
+        "external": {
+          "absoluteMiB": 1.9788589477539062,
+          "deltaMiB": 0.00785064697265625
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.02366161346435547,
+          "deltaMiB": 0.0078125
+        },
+        "maxRSS": {
+          "absoluteMiB": 168.421875,
+          "deltaMiB": 117.40234375
+        }
+      },
+      "releasedBeforeLarge": {
+        "rss": {
+          "absoluteMiB": 166.6640625,
+          "deltaMiB": 115.6796875
+        },
+        "heapUsed": {
+          "absoluteMiB": 21.025413513183594,
+          "deltaMiB": 16.43067169189453
+        },
+        "external": {
+          "absoluteMiB": 1.9788589477539062,
+          "deltaMiB": 0.00785064697265625
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.02366161346435547,
+          "deltaMiB": 0.0078125
+        },
+        "maxRSS": {
+          "absoluteMiB": 168.421875,
+          "deltaMiB": 117.40234375
+        }
+      },
+      "afterLarge": {
+        "rss": {
+          "absoluteMiB": 182.53125,
+          "deltaMiB": 131.33203125
+        },
+        "heapUsed": {
+          "absoluteMiB": 21.66192626953125,
+          "deltaMiB": 17.067184448242188
+        },
+        "external": {
+          "absoluteMiB": 1.9788589477539062,
+          "deltaMiB": 0.00785064697265625
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.02366161346435547,
+          "deltaMiB": 0.0078125
+        },
+        "maxRSS": {
+          "absoluteMiB": 187.80859375,
+          "deltaMiB": 136.609375
+        }
+      },
+      "twentyActive": {
+        "rss": {
+          "absoluteMiB": 185.4609375,
+          "deltaMiB": 134.26171875
+        },
+        "heapUsed": {
+          "absoluteMiB": 74.5769271850586,
+          "deltaMiB": 69.98218536376953
+        },
+        "external": {
+          "absoluteMiB": 1.9788589477539062,
+          "deltaMiB": 0.00785064697265625
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.02366161346435547,
+          "deltaMiB": 0.0078125
+        },
+        "maxRSS": {
+          "absoluteMiB": 187.80859375,
+          "deltaMiB": 136.609375
+        }
+      },
+      "releasedSessions": {
+        "rss": {
+          "absoluteMiB": 183.70703125,
+          "deltaMiB": 132.5078125
+        },
+        "heapUsed": {
+          "absoluteMiB": 21.705764770507812,
+          "deltaMiB": 17.11102294921875
+        },
+        "external": {
+          "absoluteMiB": 1.9788589477539062,
+          "deltaMiB": 0.00785064697265625
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.02366161346435547,
+          "deltaMiB": 0.0078125
+        },
+        "maxRSS": {
+          "absoluteMiB": 187.80859375,
+          "deltaMiB": 136.609375
+        }
+      },
+      "disposed": {
+        "rss": {
+          "absoluteMiB": 183.70703125,
+          "deltaMiB": 132.5078125
+        },
+        "heapUsed": {
+          "absoluteMiB": 21.461669921875,
+          "deltaMiB": 16.866928100585938
+        },
+        "external": {
+          "absoluteMiB": 1.9788589477539062,
+          "deltaMiB": 0.00785064697265625
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.02366161346435547,
+          "deltaMiB": 0.0078125
+        },
+        "maxRSS": {
+          "absoluteMiB": 187.80859375,
+          "deltaMiB": 136.609375
+        }
+      }
+    },
+    "profiles": [
+      {
+        "lang": "typescript",
+        "lines": 1000,
+        "units": 58889,
+        "baselineRSSMiB": 50.93359375,
+        "phases": [
+          {
+            "phase": "input",
+            "rssMiB": 65.38671875,
+            "heapUsedMiB": 7.997398376464844,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 17.19921875,
+            "maxRSSMiB": 66.00390625
+          },
+          {
+            "phase": "tokenize",
+            "rssMiB": 88.31640625,
+            "heapUsedMiB": 12.992599487304688,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 30.796875,
+            "maxRSSMiB": 88.31640625
+          },
+          {
+            "phase": "project",
+            "rssMiB": 89.44140625,
+            "heapUsedMiB": 14.61669921875,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 47.9765625,
+            "maxRSSMiB": 89.58203125
+          },
+          {
+            "phase": "ansi",
+            "rssMiB": 91.55078125,
+            "heapUsedMiB": 16.8021240234375,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 49.9765625,
+            "maxRSSMiB": 91.55078125
+          },
+          {
+            "phase": "assert",
+            "rssMiB": 96.48828125,
+            "heapUsedMiB": 17.35399627685547,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 50.76953125,
+            "maxRSSMiB": 96.75390625
+          },
+          {
+            "phase": "released",
+            "rssMiB": 96.30859375,
+            "heapUsedMiB": 11.815956115722656,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 46.58984375,
+            "maxRSSMiB": 96.75390625
+          }
+        ]
+      },
+      {
+        "lang": "bash",
+        "lines": 1000,
+        "units": 31889,
+        "baselineRSSMiB": 51.1953125,
+        "phases": [
+          {
+            "phase": "input",
+            "rssMiB": 66.44921875,
+            "heapUsedMiB": 7.963508605957031,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 17.44921875,
+            "maxRSSMiB": 66.44921875
+          },
+          {
+            "phase": "tokenize",
+            "rssMiB": 73.69921875,
+            "heapUsedMiB": 10.173095703125,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 19.69921875,
+            "maxRSSMiB": 74.265625
+          },
+          {
+            "phase": "project",
+            "rssMiB": 74.54296875,
+            "heapUsedMiB": 11.120956420898438,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 28.19921875,
+            "maxRSSMiB": 74.54296875
+          },
+          {
+            "phase": "ansi",
+            "rssMiB": 75.38671875,
+            "heapUsedMiB": 12.346588134765625,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 29.44921875,
+            "maxRSSMiB": 75.38671875
+          },
+          {
+            "phase": "assert",
+            "rssMiB": 78.48046875,
+            "heapUsedMiB": 12.657989501953125,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 29.76171875,
+            "maxRSSMiB": 78.48046875
+          },
+          {
+            "phase": "released",
+            "rssMiB": 78.48046875,
+            "heapUsedMiB": 9.617477416992188,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 27.01171875,
+            "maxRSSMiB": 78.48046875
+          }
+        ]
+      },
+      {
+        "lang": "typescript",
+        "lines": 10000,
+        "units": 598889,
+        "baselineRSSMiB": 51.62109375,
+        "phases": [
+          {
+            "phase": "input",
+            "rssMiB": 66.69140625,
+            "heapUsedMiB": 8.513481140136719,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 17.27734375,
+            "maxRSSMiB": 66.69140625
+          },
+          {
+            "phase": "tokenize",
+            "rssMiB": 121.01171875,
+            "heapUsedMiB": 29.149185180664062,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 63.125,
+            "maxRSSMiB": 121.01171875
+          },
+          {
+            "phase": "project",
+            "rssMiB": 125.90234375,
+            "heapUsedMiB": 45.540733337402344,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 79.34765625,
+            "maxRSSMiB": 127.08203125
+          },
+          {
+            "phase": "ansi",
+            "rssMiB": 150.08984375,
+            "heapUsedMiB": 67.36421966552734,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 101.59765625,
+            "maxRSSMiB": 150.08984375
+          },
+          {
+            "phase": "assert",
+            "rssMiB": 176.7265625,
+            "heapUsedMiB": 72.75654602050781,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 106.98046875,
+            "maxRSSMiB": 177.7890625
+          },
+          {
+            "phase": "released",
+            "rssMiB": 174.78125,
+            "heapUsedMiB": 17.156288146972656,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 51.5078125,
+            "maxRSSMiB": 177.7890625
+          }
+        ]
+      },
+      {
+        "lang": "bash",
+        "lines": 10000,
+        "units": 328889,
+        "baselineRSSMiB": 50.99609375,
+        "phases": [
+          {
+            "phase": "input",
+            "rssMiB": 64.91796875,
+            "heapUsedMiB": 8.2767333984375,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 17.26953125,
+            "maxRSSMiB": 67.296875
+          },
+          {
+            "phase": "tokenize",
+            "rssMiB": 104.7265625,
+            "heapUsedMiB": 18.464385986328125,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 52.01953125,
+            "maxRSSMiB": 104.7265625
+          },
+          {
+            "phase": "project",
+            "rssMiB": 108.6796875,
+            "heapUsedMiB": 28.023460388183594,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 63.3359375,
+            "maxRSSMiB": 110.9140625
+          },
+          {
+            "phase": "ansi",
+            "rssMiB": 117.5390625,
+            "heapUsedMiB": 40.15830993652344,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 77.0859375,
+            "maxRSSMiB": 117.5390625
+          },
+          {
+            "phase": "assert",
+            "rssMiB": 133.75,
+            "heapUsedMiB": 43.23320007324219,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 80.15234375,
+            "maxRSSMiB": 134.2734375
+          },
+          {
+            "phase": "released",
+            "rssMiB": 132.46484375,
+            "heapUsedMiB": 12.700798034667969,
+            "externalMiB": 1.9788589477539062,
+            "heapTotalMiB": 46.0859375,
+            "maxRSSMiB": 134.2734375
+          }
+        ]
+      }
+    ]
+  },
+  "shiki-onig": {
+    "init": {
+      "medianMs": 77.38979699999999,
+      "minMs": 74.23503600000001,
+      "maxMs": 86.075547
+    },
+    "full": [
+      {
+        "lang": "typescript",
+        "lines": 25,
+        "units": 1439,
+        "tokens": 525,
+        "spansMs": 6.766710000000046,
+        "ansiMs": 3.7701150000000325,
+        "ansiP95Ms": 4.2295010000000275
+      },
+      {
+        "lang": "typescript",
+        "lines": 1000,
+        "units": 58889,
+        "tokens": 21000,
+        "spansMs": 129.17821500000014,
+        "ansiMs": 146.00298399999974,
+        "ansiP95Ms": 181.72714499999984
+      },
+      {
+        "lang": "python",
+        "lines": 25,
+        "units": 1539,
+        "tokens": 151,
+        "spansMs": 3.9175430000000233,
+        "ansiMs": 3.5602630000003046,
+        "ansiP95Ms": 4.1447729999999865
+      },
+      {
+        "lang": "python",
+        "lines": 1000,
+        "units": 62889,
+        "tokens": 6001,
+        "spansMs": 133.19477600000027,
+        "ansiMs": 139.16137200000048,
+        "ansiP95Ms": 145.83181700000023
+      },
+      {
+        "lang": "bash",
+        "lines": 25,
+        "units": 764,
+        "tokens": 299,
+        "spansMs": 2.049377999999706,
+        "ansiMs": 1.5606910000005882,
+        "ansiP95Ms": 1.827857999999651
+      },
+      {
+        "lang": "bash",
+        "lines": 1000,
+        "units": 31889,
+        "tokens": 11999,
+        "spansMs": 56.19891499999994,
+        "ansiMs": 59.58032900000035,
+        "ansiP95Ms": 66.93190200000026
+      },
+      {
+        "lang": "rust",
+        "lines": 25,
+        "units": 1603,
+        "tokens": 529,
+        "spansMs": 3.1999269999996613,
+        "ansiMs": 3.51629899999989,
+        "ansiP95Ms": 4.049344000000019
+      },
+      {
+        "lang": "rust",
+        "lines": 1000,
+        "units": 64903,
+        "tokens": 21004,
+        "spansMs": 137.30537800000002,
+        "ansiMs": 135.03653200000008,
+        "ansiP95Ms": 158.62384699999893
+      }
+    ],
+    "real": {
+      "units": 20001,
+      "lines": 363,
+      "medianMs": 68.31574099999852
+    },
+    "longLine": {
+      "units": 26902,
+      "medianMs": 125.69696599999952
+    },
+    "stream": [
+      {
+        "name": "typescript",
+        "mode": "line-state",
+        "units": 7111,
+        "updates": 32,
+        "totalMedianMs": 30.363303999996788,
+        "maxMedianMs": 1.8738890000004176,
+        "counters": {
+          "parses": 0,
+          "queries": 0,
+          "tokenizedLines": 154,
+          "queryReturnedCaptures": 0
+        }
+      },
+      {
+        "name": "python",
+        "mode": "line-state",
+        "units": 7585,
+        "updates": 32,
+        "totalMedianMs": 23.733815000003233,
+        "maxMedianMs": 1.0531539999992674,
+        "counters": {
+          "parses": 0,
+          "queries": 0,
+          "tokenizedLines": 155,
+          "queryReturnedCaptures": 0
+        }
+      },
+      {
+        "name": "bash",
+        "mode": "line-state",
+        "units": 3864,
+        "updates": 32,
+        "totalMedianMs": 11.930468999997174,
+        "maxMedianMs": 0.729338999999527,
+        "counters": {
+          "parses": 0,
+          "queries": 0,
+          "tokenizedLines": 158,
+          "queryReturnedCaptures": 0
+        }
+      },
+      {
+        "name": "rust",
+        "mode": "line-state",
+        "units": 7864,
+        "updates": 32,
+        "totalMedianMs": 25.706989000002068,
+        "maxMedianMs": 1.5846010000004753,
+        "counters": {
+          "parses": 0,
+          "queries": 0,
+          "tokenizedLines": 156,
+          "queryReturnedCaptures": 0
+        }
+      },
+      {
+        "name": "typescript-function",
+        "mode": "line-state",
+        "units": 7015,
+        "updates": 32,
+        "totalMedianMs": 24.836610999996992,
+        "maxMedianMs": 1.83769299999949,
+        "counters": {
+          "parses": 0,
+          "queries": 0,
+          "tokenizedLines": 154,
+          "queryReturnedCaptures": 0
+        }
+      }
+    ],
+    "middle": [
+      {
+        "lang": "typescript",
+        "mode": "line-state",
+        "medianMs": 79.4888060000012,
+        "p95Ms": 92.96983200000068,
+        "counters": {
+          "parses": 0,
+          "queries": 0,
+          "tokenizedLines": 4500,
+          "queryReturnedCaptures": 0
+        }
+      },
+      {
+        "lang": "python",
+        "mode": "line-state",
+        "medianMs": 72.34685000000172,
+        "p95Ms": 92.79855399999906,
+        "counters": {
+          "parses": 0,
+          "queries": 0,
+          "tokenizedLines": 4500,
+          "queryReturnedCaptures": 0
+        }
+      },
+      {
+        "lang": "bash",
+        "mode": "line-state",
+        "medianMs": 32.53715100000045,
+        "p95Ms": 39.38866000000053,
+        "counters": {
+          "parses": 0,
+          "queries": 0,
+          "tokenizedLines": 4500,
+          "queryReturnedCaptures": 0
+        }
+      },
+      {
+        "lang": "rust",
+        "mode": "line-state",
+        "medianMs": 74.86096100000032,
+        "p95Ms": 80.83136100000047,
+        "counters": {
+          "parses": 0,
+          "queries": 0,
+          "tokenizedLines": 4509,
+          "queryReturnedCaptures": 0
+        }
+      }
+    ],
+    "memory": {
+      "initialized": {
+        "rss": {
+          "absoluteMiB": 72.48828125,
+          "deltaMiB": 21.42578125
+        },
+        "heapUsed": {
+          "absoluteMiB": 8.789924621582031,
+          "deltaMiB": 4.1951751708984375
+        },
+        "external": {
+          "absoluteMiB": 18.423860549926758,
+          "deltaMiB": 16.452852249145508
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.46866321563720703,
+          "deltaMiB": 0.45281410217285156
+        },
+        "maxRSS": {
+          "absoluteMiB": 86.37109375,
+          "deltaMiB": 35.30859375
+        }
+      },
+      "afterWarm": {
+        "rss": {
+          "absoluteMiB": 101.17578125,
+          "deltaMiB": 50.08203125
+        },
+        "heapUsed": {
+          "absoluteMiB": 9.793006896972656,
+          "deltaMiB": 5.198188781738281
+        },
+        "external": {
+          "absoluteMiB": 25.548860549926758,
+          "deltaMiB": 23.577852249145508
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.46866321563720703,
+          "deltaMiB": 0.45281410217285156
+        },
+        "maxRSS": {
+          "absoluteMiB": 101.17578125,
+          "deltaMiB": 50.08203125
+        }
+      },
+      "activeBeforeLarge": {
+        "rss": {
+          "absoluteMiB": 179.22265625,
+          "deltaMiB": 128.5859375
+        },
+        "heapUsed": {
+          "absoluteMiB": 63.12610626220703,
+          "deltaMiB": 58.531288146972656
+        },
+        "external": {
+          "absoluteMiB": 25.548860549926758,
+          "deltaMiB": 23.577852249145508
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.46866321563720703,
+          "deltaMiB": 0.45281410217285156
+        },
+        "maxRSS": {
+          "absoluteMiB": 179.22265625,
+          "deltaMiB": 128.5859375
+        }
+      },
+      "releasedBeforeLarge": {
+        "rss": {
+          "absoluteMiB": 177.5078125,
+          "deltaMiB": 126.87109375
+        },
+        "heapUsed": {
+          "absoluteMiB": 10.221794128417969,
+          "deltaMiB": 5.626976013183594
+        },
+        "external": {
+          "absoluteMiB": 25.548860549926758,
+          "deltaMiB": 23.577852249145508
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.46866321563720703,
+          "deltaMiB": 0.45281410217285156
+        },
+        "maxRSS": {
+          "absoluteMiB": 179.22265625,
+          "deltaMiB": 128.5859375
+        }
+      },
+      "afterLarge": {
+        "rss": {
+          "absoluteMiB": 200.7578125,
+          "deltaMiB": 149.6640625
+        },
+        "heapUsed": {
+          "absoluteMiB": 10.828269958496094,
+          "deltaMiB": 6.2335205078125
+        },
+        "external": {
+          "absoluteMiB": 25.548860549926758,
+          "deltaMiB": 23.577852249145508
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.46866321563720703,
+          "deltaMiB": 0.45281410217285156
+        },
+        "maxRSS": {
+          "absoluteMiB": 206.4921875,
+          "deltaMiB": 155.3984375
+        }
+      },
+      "twentyActive": {
+        "rss": {
+          "absoluteMiB": 201.625,
+          "deltaMiB": 150.53125
+        },
+        "heapUsed": {
+          "absoluteMiB": 62.88795471191406,
+          "deltaMiB": 58.29320526123047
+        },
+        "external": {
+          "absoluteMiB": 25.545416831970215,
+          "deltaMiB": 23.574408531188965
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.46866321563720703,
+          "deltaMiB": 0.45281410217285156
+        },
+        "maxRSS": {
+          "absoluteMiB": 206.4921875,
+          "deltaMiB": 155.3984375
+        }
+      },
+      "releasedSessions": {
+        "rss": {
+          "absoluteMiB": 199.91015625,
+          "deltaMiB": 148.81640625
+        },
+        "heapUsed": {
+          "absoluteMiB": 10.001136779785156,
+          "deltaMiB": 5.4063873291015625
+        },
+        "external": {
+          "absoluteMiB": 25.545416831970215,
+          "deltaMiB": 23.574408531188965
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.46866321563720703,
+          "deltaMiB": 0.45281410217285156
+        },
+        "maxRSS": {
+          "absoluteMiB": 206.4921875,
+          "deltaMiB": 155.3984375
+        }
+      },
+      "disposed": {
+        "rss": {
+          "absoluteMiB": 199.91015625,
+          "deltaMiB": 148.81640625
+        },
+        "heapUsed": {
+          "absoluteMiB": 9.942306518554688,
+          "deltaMiB": 5.347557067871094
+        },
+        "external": {
+          "absoluteMiB": 25.545416831970215,
+          "deltaMiB": 23.574408531188965
+        },
+        "arrayBuffers": {
+          "absoluteMiB": 0.46866321563720703,
+          "deltaMiB": 0.45281410217285156
+        },
+        "maxRSS": {
+          "absoluteMiB": 206.4921875,
+          "deltaMiB": 155.3984375
+        }
+      }
+    },
+    "profiles": [
+      {
+        "lang": "typescript",
+        "lines": 1000,
+        "units": 58889,
+        "baselineRSSMiB": 51.4375,
+        "phases": [
+          {
+            "phase": "input",
+            "rssMiB": 74.95703125,
+            "heapUsedMiB": 8.858657836914062,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 26.1484375,
+            "maxRSSMiB": 86.8203125
+          },
+          {
+            "phase": "tokenize",
+            "rssMiB": 104.93359375,
+            "heapUsedMiB": 11.386482238769531,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 44.3984375,
+            "maxRSSMiB": 104.93359375
+          },
+          {
+            "phase": "project",
+            "rssMiB": 106.19921875,
+            "heapUsedMiB": 13.011093139648438,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 46.078125,
+            "maxRSSMiB": 106.19921875
+          },
+          {
+            "phase": "ansi",
+            "rssMiB": 108.44921875,
+            "heapUsedMiB": 15.196723937988281,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 48.328125,
+            "maxRSSMiB": 108.44921875
+          },
+          {
+            "phase": "assert",
+            "rssMiB": 113.41796875,
+            "heapUsedMiB": 15.748489379882812,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 48.62109375,
+            "maxRSSMiB": 113.51171875
+          },
+          {
+            "phase": "released",
+            "rssMiB": 113.2734375,
+            "heapUsedMiB": 10.210357666015625,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 43.69140625,
+            "maxRSSMiB": 113.51171875
+          }
+        ]
+      },
+      {
+        "lang": "bash",
+        "lines": 1000,
+        "units": 31889,
+        "baselineRSSMiB": 51.11328125,
+        "phases": [
+          {
+            "phase": "input",
+            "rssMiB": 77.51171875,
+            "heapUsedMiB": 8.832908630371094,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 26.1484375,
+            "maxRSSMiB": 89.3828125
+          },
+          {
+            "phase": "tokenize",
+            "rssMiB": 92.66796875,
+            "heapUsedMiB": 10.326820373535156,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 27.1484375,
+            "maxRSSMiB": 99.36328125
+          },
+          {
+            "phase": "project",
+            "rssMiB": 93.37109375,
+            "heapUsedMiB": 11.275856018066406,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 27.8984375,
+            "maxRSSMiB": 99.36328125
+          },
+          {
+            "phase": "ansi",
+            "rssMiB": 94.91796875,
+            "heapUsedMiB": 12.4930419921875,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 45.1484375,
+            "maxRSSMiB": 99.36328125
+          },
+          {
+            "phase": "assert",
+            "rssMiB": 95.19921875,
+            "heapUsedMiB": 12.813331604003906,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 45.4609375,
+            "maxRSSMiB": 99.36328125
+          },
+          {
+            "phase": "released",
+            "rssMiB": 95.33984375,
+            "heapUsedMiB": 9.772735595703125,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 42.4609375,
+            "maxRSSMiB": 99.36328125
+          }
+        ]
+      },
+      {
+        "lang": "typescript",
+        "lines": 10000,
+        "units": 598889,
+        "baselineRSSMiB": 50.83203125,
+        "phases": [
+          {
+            "phase": "input",
+            "rssMiB": 74.73828125,
+            "heapUsedMiB": 9.395530700683594,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 26.7265625,
+            "maxRSSMiB": 85.87890625
+          },
+          {
+            "phase": "tokenize",
+            "rssMiB": 130.67578125,
+            "heapUsedMiB": 27.554733276367188,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 61.7265625,
+            "maxRSSMiB": 130.67578125
+          },
+          {
+            "phase": "project",
+            "rssMiB": 136.546875,
+            "heapUsedMiB": 43.950836181640625,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 77.44921875,
+            "maxRSSMiB": 137.73828125
+          },
+          {
+            "phase": "ansi",
+            "rssMiB": 160.453125,
+            "heapUsedMiB": 65.77432250976562,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 99.69921875,
+            "maxRSSMiB": 160.453125
+          },
+          {
+            "phase": "assert",
+            "rssMiB": 186.76171875,
+            "heapUsedMiB": 71.16691589355469,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 105.08203125,
+            "maxRSSMiB": 187.73046875
+          },
+          {
+            "phase": "released",
+            "rssMiB": 184.890625,
+            "heapUsedMiB": 15.566566467285156,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 49.859375,
+            "maxRSSMiB": 187.73046875
+          }
+        ]
+      },
+      {
+        "lang": "bash",
+        "lines": 10000,
+        "units": 328889,
+        "baselineRSSMiB": 51.16796875,
+        "phases": [
+          {
+            "phase": "input",
+            "rssMiB": 76.4609375,
+            "heapUsedMiB": 9.137214660644531,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 26.46875,
+            "maxRSSMiB": 86.64453125
+          },
+          {
+            "phase": "tokenize",
+            "rssMiB": 118.0625,
+            "heapUsedMiB": 18.5897216796875,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 52.21875,
+            "maxRSSMiB": 118.0625
+          },
+          {
+            "phase": "project",
+            "rssMiB": 121.34765625,
+            "heapUsedMiB": 28.15001678466797,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 63.53515625,
+            "maxRSSMiB": 123.546875
+          },
+          {
+            "phase": "ansi",
+            "rssMiB": 130.20703125,
+            "heapUsedMiB": 40.28486633300781,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 76.78515625,
+            "maxRSSMiB": 130.20703125
+          },
+          {
+            "phase": "assert",
+            "rssMiB": 146.28125,
+            "heapUsedMiB": 43.36000061035156,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 80.1015625,
+            "maxRSSMiB": 146.921875
+          },
+          {
+            "phase": "released",
+            "rssMiB": 145.03125,
+            "heapUsedMiB": 12.827621459960938,
+            "externalMiB": 18.423860549926758,
+            "heapTotalMiB": 46.28515625,
+            "maxRSSMiB": 146.921875
+          }
+        ]
+      }
+    ]
+  }
+}
