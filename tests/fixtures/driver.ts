@@ -582,15 +582,15 @@ export default function terminalDriver(pi: ExtensionAPI) {
       }
       visit(tui);
       const tools = nodes.filter((node) => typeof node.toolCallId === "string" && typeof node.updateResult === "function");
-      const width = process.stdout.columns || 100;
+      const width = process.stdout.columns || 100, outputPad = pi.getSettings().outputPad === 0 ? 0 : 1;
       if (spinnerDiagnostics) for (const node of tools) {
         if (observedSpinnerNodes.has(node)) continue;
         observedSpinnerNodes.add(node); node.render = observedToolRender; node.invalidate = observedToolInvalidate;
       }
       writeFileSync(join(output, `${name}.json`), JSON.stringify({
-        session: ctx.sessionManager.getSessionFile(), width, cwd: ctx.cwd, bashShape, writeShape,
+        session: ctx.sessionManager.getSessionFile(), width, cwd: ctx.cwd, bashShape, writeShape, outputPad,
         editor: nodes.filter(node => Object.getPrototypeOf(node) === CustomEditor.prototype).map(node =>
-          ({ width, text: node.getText(), lines: node.render(width) }))[0],
+          ({ width, text: node.getText(), padding: node.getPaddingX(), lines: node.render(width) }))[0],
         ...(spinnerDiagnostics ? { spinnerStats, spinnerWork } : {}),
         ...(editDiagnostics ? { nativeRenderCalls } : {}),
         selectionActive: typeof tui.hasActiveSelection === "function" ? tui.hasActiveSelection() : false,
@@ -620,7 +620,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
         users: nodes.filter((node) => node.constructor.name === "UserMessageComponent").map((node) => ({
           text: node.text, outputPad: node.outputPad, lines: node.render(width),
           ...(userDiagnostics && name.startsWith("native-user") ? {
-            contentControl: node.render(Math.max(1, width - 5) + 2 * node.outputPad),
+            contentControl: node.render(Math.max(1, width - 2 * outputPad - 3) + 2 * node.outputPad),
           } : {}),
         })),
         tools: tools.map((node) => ({ name: node.toolName, id: node.toolCallId,

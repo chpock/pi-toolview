@@ -8,8 +8,8 @@ const ZONE_END = "\x1b]133;B\x07\x1b]133;C\x07";
 
 /** Reframe native Markdown, not its source: preserve transforms, syntax colors and links. */
 export function renderUserCard(width: number, padding: number, theme: CardTheme,
-  renderNative: (width: number) => string[]): { rows: string[] } {
-  const geometry = cardGeometry(width);
+  renderNative: (width: number) => string[], outputPad = padding): { rows: string[] } {
+  const geometry = cardGeometry(width, outputPad);
   if (!geometry.width) return { rows: [] };
   // The native Markdown removes its own horizontal padding before wrapping/transforming.
   const native = renderNative(geometry.contentWidth + 2 * padding);

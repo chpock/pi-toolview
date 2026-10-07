@@ -46,8 +46,8 @@ function exitCode(node: BashPresentation): number | undefined {
 }
 
 /** Content policy is independent of both the host's tool class and the shared shell. */
-export function renderBashCard(node: BashPresentation, directory: string | undefined, width: number, theme: CardTheme) {
-  const geometry = cardGeometry(width), available = geometry.contentWidth;
+export function renderBashCard(node: BashPresentation, directory: string | undefined, width: number, theme: CardTheme, outputPad = 1) {
+  const geometry = cardGeometry(width, outputPad), available = geometry.contentWidth;
   if (!available) return { rows: [] as string[], geometry, expandable: false };
   const body: string[] = [];
   const styled = (text: string, role: ThemeColor) => terminalRows(text, available).map((row) => theme.fg(role, row));

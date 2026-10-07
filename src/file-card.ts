@@ -147,7 +147,7 @@ function heading(path: string, cwd: string | undefined, label: FileView["label"]
 }
 
 /** Class/height needed for spacing or rejected clicks, not a rendered layout or a second cache. */
-export function measureFileCard(node: FilePresentation, cwd: string | undefined, width: number) {
+export function measureFileCard(node: FilePresentation, cwd: string | undefined, width: number, outputPad = 1) {
   const path = filePath(node.args);
   if (!path) return undefined;
   if (!width) return { framed: false, height: 0 };
@@ -155,8 +155,9 @@ export function measureFileCard(node: FilePresentation, cwd: string | undefined,
   if (!view) return undefined;
   // A frame always has padding plus a title: only height > 1 matters to transcript spacing.
   if (view.mode !== "inline") return { framed: true, height: 3 };
-  const inset = Math.min(cardGeometry(width).contentX, Math.max(0, width - 1));
-  return { framed: false, height: chunks(heading(path, cwd, view.label), width - inset).length };
+  const geometry = cardGeometry(width, outputPad);
+  const inset = Math.min(geometry.contentX, Math.max(0, width - geometry.marginRight - 1));
+  return { framed: false, height: chunks(heading(path, cwd, view.label), width - inset - geometry.marginRight).length };
 }
 
 /** Project available context without changing source positions or joining separate hunks. */
@@ -319,8 +320,8 @@ function* codeRows(lines: DiffLine[], width: number, split: boolean, theme: Card
 }
 
 /** Shared edit/write source presentation inside the accepted frame. Undefined means native fallback. */
-export function renderFileCard(node: FilePresentation, cwd: string | undefined, width: number, theme: CardTheme, highlighter?: CodeHighlight) {
-  const geometry = cardGeometry(width), available = geometry.contentWidth;
+export function renderFileCard(node: FilePresentation, cwd: string | undefined, width: number, theme: CardTheme, highlighter?: CodeHighlight, outputPad = 1) {
+  const geometry = cardGeometry(width, outputPad), available = geometry.contentWidth;
   const path = filePath(node.args);
   if (!path) return undefined;
   if (!width) return { rows: [] as string[], framed: false, native: false };
@@ -330,8 +331,8 @@ export function renderFileCard(node: FilePresentation, cwd: string | undefined, 
   const error = !node.isPartial && node.result?.isError === true;
   const details = node.result?.details as { diff?: unknown; patch?: unknown; diagnostics?: unknown } | undefined;
   if (view.mode === "inline") {
-    const inset = Math.min(geometry.contentX, Math.max(0, width - 1));
-    return { rows: chunks(title, width - inset).map((row) => " ".repeat(inset) + theme.fg(error ? "error" : "muted", row.text)),
+    const inset = Math.min(geometry.contentX, Math.max(0, width - geometry.marginRight - 1));
+    return { rows: chunks(title, width - inset - geometry.marginRight).map((row) => " ".repeat(inset) + theme.fg(error ? "error" : "muted", row.text)),
       framed: false, native: false };
   }
   const diff = view.lines;

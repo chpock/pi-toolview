@@ -704,7 +704,7 @@ test('real CLI: complete multiline summaries, adaptive separation, continuation 
       await t.test('live component render at widths 1–5 preserves a tool glyph without completion badges', async () => {
         for (const tool of compactTools) {
           for (const width of [1, 2, 3, 4, 5]) {
-            assert.deepEqual(tool.tinyLines[width].map(plain).filter((row) => row.trim()), [tool.name === 'read' ? '→' : ['edit', 'write'].includes(tool.name) ? '←' : '⚙'], `width ${width} retains the tool glyph`);
+            assert.deepEqual(tool.tinyLines[width].map(plain).filter((row) => row.trim()), [(width >= 3 ? ' ' : '') + (tool.name === 'read' ? '→' : ['edit', 'write'].includes(tool.name) ? '←' : '⚙')], `width ${width} retains the tool glyph with the margins that fit`);
             await assertFits(tool.tinyLines[width], Math.max(1, width - 1));
           }
         }
@@ -1387,17 +1387,16 @@ function hardRows(text, width) {
   });
 }
 // Contract arithmetic only: never import the production frame/layout/paint helpers.
-function bashGeometry(width) {
-  if (width >= 6) return { left: 1, border: 1, inside: 1, insideRight: 1, right: 1, origin: 3, content: width - 5 };
+function bashGeometry(width, outputPad = 1) {
   let spare = Math.max(0, width - 1);
   const border = Math.min(1, spare); spare -= border;
   const padding = Math.min(2, spare); spare -= padding;
   const inside = Math.ceil(padding / 2), insideRight = Math.floor(padding / 2);
-  const left = Math.floor(spare / 2), right = spare - left;
-  return { left, border, inside, insideRight, right, origin: left + border + inside, content: width ? 1 : 0 };
+  const left = Math.min(outputPad, Math.floor(spare / 2)), right = Math.min(outputPad, spare - left);
+  return { left, border, inside, insideRight, right, origin: left + border + inside, content: width - left - right - border - padding };
 }
 function bashExpected(tool, args, dump, { partial = false } = {}) {
-  const width = bashGeometry(dump.width).content;
+  const width = bashGeometry(dump.width, dump.outputPad).content;
   const comments = [];
   if (args.description?.trim()) comments.push('# ' + args.description.trim());
   if (args.workdir && resolve(dump.cwd, args.workdir) !== resolve(dump.cwd)) comments.push('# Running in ' + resolve(dump.cwd, args.workdir));
@@ -1435,7 +1434,7 @@ function bashCard(tool, args, dump, options) {
   assert.equal(typeof args.command, 'string');
   const actual = tool.lines.map((row) => stripVTControlCharacters(row));
   if (dump.width === 0) { assert.deepEqual(actual, []); return; }
-  const geometry = bashGeometry(dump.width);
+  const geometry = bashGeometry(dump.width, dump.outputPad);
   const top = geometry.border ? actual.findIndex((row) => row.includes('┃')) : actual[0] === '' ? 1 : 0;
   assert.ok(top === 0 || top === 1, 'at most one unpainted transcript separator before panel');
   if (top) assert.equal(actual[0], '', 'outside separator is genuinely empty, not a painted panel row');
@@ -1444,7 +1443,7 @@ function bashCard(tool, args, dump, options) {
   assert.equal(actual[top], frame(), 'exact full-panel top padding row, including left marker and exterior margins');
   assert.equal(actual.at(-1), frame(), 'exact full-panel bottom padding row');
   const expected = bashExpected(tool, args, dump, options);
-  assert.deepEqual(actual.slice(top + 1, -1), expected.map(frame), 'independent W-5 oracle: complete body, left marker, one inside cell per side, exact exterior margins');
+  assert.deepEqual(actual.slice(top + 1, -1), expected.map(frame), 'independent Output-padding oracle: complete body, left marker, one inside cell per side, exact exterior margins');
   assert.doesNotMatch(actual.join('\n'), /Took \d|✓| [→⚙] bash/, 'custom bash card has no native title/runtime/success marker');
 }
 function allBashCards(dump, options) {
@@ -4312,4 +4311,154 @@ test('footer animated Working and short-height clipping do not rescan session or
       assert.ok(done.rows.map(plain).join('\n').includes('CH86.4%')); assert.ok(done.counters.aggregations > baseline.counters.aggregations);
     }
   } finally { for (const terminal of terminals) { await terminal.close(); terminal.dispose(); } }
+});
+
+
+test('Output padding settings update summaries and all transcript cards live with native and replay controls', { skip: stockOnly, timeout: 180000 }, async () => {
+  const terminals = [], extraEnv = { TOOLVIEW_TEST_USER_CARDS: '1' };
+  const start = async (name, options) => {
+    const terminal = new PiTerminal(name, { extraEnv, agentSettings: { outputPad: 0, editorPaddingX: 2 }, ...options });
+    terminals.push(terminal); await terminal.ready(); await terminal.resize(100, 220); return terminal;
+  };
+  const setPadding = async (terminal, value) => {
+    await terminal.command('/settings'); terminal.send('Output padding'); await terminal.settle();
+    terminal.send('\r'); await terminal.settle();
+    assert.ok(terminal.screen().some(row => new RegExp(`^\\s*→ Output padding\\s+${value}\\s*$`, 'u').test(row)));
+    terminal.send('\x1b'); await terminal.settle();
+    assert.equal(JSON.parse(readFileSync(join(terminal.agent, 'settings.json'), 'utf8')).outputPad, value);
+  };
+  const check = async (terminal, padding, width, label) => {
+    await terminal.resize(width, 220);
+    const dump = await terminal.capture(`pointer-output-${label}`);
+    assert.equal(dump.outputPad, padding); assert.equal(dump.width, width); assert.equal(dump.users.length, 1);
+    assert.equal(dump.users[0].outputPad, padding);
+    const cards = [dump.users[0], byName(dump, 'bash')[0], byName(dump, 'write')[0], byName(dump, 'edit')[0]];
+    for (const [index, card] of cards.entries()) {
+      const rows = card.lines.filter(row => row !== ''), expected = rows.map(plain);
+      const y = dump.screen.findIndex((_, start) => expected.every((row, offset) => dump.screen[start + offset] !== undefined && plain(dump.screen[start + offset]) === row));
+      assert.ok(y >= 0, `entire ${index} card physically visible: ${label}`);
+      const background = await referenceCell(dump.backgroundStyles[index === 0 ? 'userMessageBg' : 'toolPendingBg']);
+      const stripe = await referenceCell(dump.frameStyles[index === 0 ? 'userBorder' : 'border']);
+      for (let offset = 0; offset < rows.length; offset++) {
+        const cells = dump.cells[y + offset];
+        assert.equal(cells[padding].text, '┃'); assert.equal(cells[padding].fg, stripe.fg); assert.equal(cells[padding].bgMode, 0);
+        for (const x of [padding + 1, width - padding - 1]) {
+          assert.equal(cells[x].text, ' '); assert.equal(cells[x].bg, background.bg); assert.equal(cells[x].bgMode, background.bgMode);
+        }
+        if (padding) for (const x of [0, width - 1]) { assert.equal(cells[x].text, ' '); assert.equal(cells[x].bgMode, 0); }
+      }
+      await assertFits(rows, width);
+    }
+    for (const summary of [...byName(dump, 'read'), ...byName(dump, 'tv_unknown')]) {
+      const rows = summary.lines.filter(row => row !== '').map(plain);
+      assert.ok(rows[0][padding] === (summary.name === 'read' ? '→' : '⚙'));
+      assert.ok(rows.slice(1).every(row => row.startsWith(' '.repeat(padding + 2))));
+      await assertFits(rows, width - padding);
+      const y = dump.screen.findIndex((_, start) => rows.every((row, offset) => (dump.screen[start + offset] || '').slice(0, row.length) === row));
+      assert.ok(y >= 0, 'complete wrapped summary block physically visible');
+      if (padding) assert.ok(rows.every((_, offset) => dump.cells[y + offset][width - 1].text === ''));
+    }
+    allBashCards(dump);
+    assert.equal(dump.editor.padding, 2); assert.ok(dump.editor.lines.every(row => plain(row)[2] === '┃'), 'Editor padding remains independent');
+    assert.equal(dump.extensionIssues.length, 0);
+    return dump;
+  };
+  const identity = dump => dump.tools.map(({ args, content, details, isError }) => ({ args, content, details, isError }));
+  try {
+    for (const mode of ['fullscreen', 'regular']) {
+      const live = await start(`output-padding-${mode}`, { toolview: true, mode });
+      await live.run('suite'); const activity = traffic(live, 7), first = await check(live, 0, 100, `${mode}-initial`);
+      const bytes = readFileSync(first.session), saved = new Map();
+      for (const [cycle, padding] of [0, 1, 0].entries()) {
+        if (cycle) await setPadding(live, padding);
+        for (const width of [24, 100]) {
+          const dump = await check(live, padding, width, `${mode}-${cycle}-${width}`);
+          saved.set(`${padding}-${width}`, dump); assert.deepEqual(identity(dump), identity(first));
+          const rows = dump.users[0].lines.filter(row => row !== '');
+          await live.command('/toolview off');
+          const native = await live.capture(`native-user-output-${mode}-${cycle}-${width}`);
+          const contentWidth = width - 2 * padding - 3;
+          assert.deepEqual(rows.slice(1, -1).map(row => stripVTControlCharacters(sliceByColumn(row, padding + 2, contentWidth))),
+            native.users[0].contentControl.slice(1, -1).map(row => stripVTControlCharacters(sliceByColumn(row, padding, contentWidth))), 'native Markdown body at equal content width');
+          assert.deepEqual(identity(native), identity(first));
+          await live.command('/toolview on');
+          const restored = await check(live, padding, width, `${mode}-${cycle}-${width}-on`);
+          assert.deepEqual(restored.tools.map(tool => tool.lines), dump.tools.map(tool => tool.lines));
+        }
+      }
+      await live.resize(100, 220);
+      const current = saved.get('0-100');
+      await live.command('/reload'); await live.event('start', 2);
+      const reloaded = await check(live, 0, 100, `${mode}-reload`);
+      assert.deepEqual(reloaded.tools.map(tool => tool.lines), current.tools.map(tool => tool.lines));
+      if (mode === 'fullscreen') {
+        const edit = byName(reloaded, 'edit')[0], expected = edit.lines.filter(row => row !== '').map(plain);
+        const y = reloaded.screen.findIndex((_, start) => expected.every((row, offset) => reloaded.screen[start + offset] !== undefined && plain(reloaded.screen[start + offset]) === row));
+        assert.ok(y >= 0, 'complete zero-margin edit panel is on the physical screen');
+        await sgrAt(live, 0, y);
+        const expanded = await live.capture(`pointer-output-${mode}-click-zero`);
+        assert.equal(byName(expanded, 'edit')[0].expanded, true, 'zero-margin stripe is a real panel click target');
+        live.send('\x0f'); await live.settle(); // native global toggle from false to true
+        live.send('\x0f'); await live.settle(); // restore every tool to collapsed
+      }
+      assert.deepEqual(traffic(live, 7), activity); assert.deepEqual(readFileSync(first.session), bytes);
+      await live.close();
+      const replay = await start(`output-padding-replay-${mode}`, { toolview: true, mode, session: first.session, workspace: live.work });
+      const native = await start(`output-padding-native-${mode}`, { toolview: false, mode, session: first.session, workspace: live.work });
+      for (const padding of [0, 1]) {
+        if (padding) { await setPadding(replay, padding); await setPadding(native, padding); }
+        for (const width of [24, 100]) {
+          const custom = await check(replay, padding, width, `replay-${mode}-${padding}-${width}`), expected = saved.get(`${padding}-${width}`);
+          assert.deepEqual(custom.tools.map(tool => tool.lines), expected.tools.map(tool => tool.lines));
+          assert.deepEqual(custom.users.map(user => user.lines), expected.users.map(user => user.lines));
+          await replay.command('/toolview off');
+          const off = await replay.capture(`pointer-output-native-${mode}-${padding}-${width}`);
+          await native.resize(width, 220);
+          const control = await native.capture(`pointer-output-control-${mode}-${padding}-${width}`);
+          assert.deepEqual(off.tools.map(tool => tool.lines), control.tools.map(tool => tool.lines), 'complete native same-session tool rows restored without padding changes');
+          assert.deepEqual(off.users.map(user => user.lines), control.users.map(user => user.lines));
+          await replay.command('/toolview on');
+        }
+      }
+      for (const terminal of [native, replay]) for (const type of ['call', 'result', 'model_context', 'provider_error'])
+        assert.equal(terminal.events().filter(event => event.type === type).length, 0);
+      assert.deepEqual(readFileSync(first.session), bytes);
+    }
+  } finally { for (const terminal of terminals.reverse()) { await terminal.close(); terminal.dispose(); } }
+});
+
+
+test('Output padding project override stays consistent after native user padding changes', { skip: stockOnly, timeout: 60000 }, async () => {
+  for (const mode of ['fullscreen', 'regular']) {
+    const live = new PiTerminal(`output-padding-project-${mode}`, {
+      toolview: true, mode, extraEnv: { TOOLVIEW_TEST_USER_CARDS: '1' },
+      // Override the harness's -na only for this isolated, test-owned project config.
+      flags: ['--approve'], agentSettings: { outputPad: 1 },
+      profileFactory: ({ workDir }) => {
+        mkdirSync(join(workDir, '.pi'), { recursive: true });
+        writeFileSync(join(workDir, '.pi', 'settings.json'), JSON.stringify({ outputPad: 0 }));
+      },
+    });
+    try {
+      await live.ready(); await live.resize(100, 220); await live.run('suite');
+      const before = await live.capture(`pointer-project-before-${mode}`), activity = traffic(live, 7), bytes = readFileSync(before.session);
+      assert.equal(before.outputPad, 0); assert.equal(before.users[0].outputPad, 0);
+      await live.command('/settings'); live.send('Output padding'); await live.settle(); live.send('\r'); await live.settle();
+      assert.ok(live.screen().some(row => /^\s*→ Output padding\s+1\s*$/u.test(row)));
+      live.send('\x1b'); await live.settle();
+      const after = await live.capture(`pointer-project-after-${mode}`);
+      assert.equal(after.outputPad, 0, 'public effective settings keep the project override');
+      assert.equal(after.users[0].outputPad, 1, 'actual Pi callback changes native user-component geometry separately');
+      assert.deepEqual(after.tools.map(tool => tool.lines), before.tools.map(tool => tool.lines));
+      assert.deepEqual(after.users.map(user => user.lines), before.users.map(user => user.lines), 'all Toolview margins continue using effective padding with identical Markdown');
+      const body = after.users[0].lines.filter(row => row !== '').slice(1, -1);
+      await live.command('/toolview off');
+      const native = await live.capture(`native-user-project-${mode}`);
+      assert.equal(native.users[0].outputPad, 1, 'never mutate Pi component geometry to reconcile settings');
+      assert.deepEqual(body.map(row => stripVTControlCharacters(sliceByColumn(row, 2, 97))),
+        native.users[0].contentControl.slice(1, -1).map(row => stripVTControlCharacters(sliceByColumn(row, 1, 97))));
+      assert.deepEqual(traffic(live, 7), activity); assert.deepEqual(readFileSync(before.session), bytes);
+      assert.equal(after.extensionIssues.length, 0);
+    } finally { await live.close(); live.dispose(); }
+  }
 });

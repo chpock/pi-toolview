@@ -19,14 +19,15 @@ export interface CardPaint {
   border(text: string): string;
 }
 
-export function cardGeometry(width: number): CardGeometry {
+export function cardGeometry(width: number, outputPad = 1): CardGeometry {
   width = Math.max(0, Math.floor(width));
+  const margin = outputPad === 0 ? 0 : 1;
   let spare = Math.max(0, width - 1);
   const borderWidth = Math.min(1, spare); spare -= borderWidth;
   const padding = Math.min(2, spare); spare -= padding;
   const paddingLeft = Math.ceil(padding / 2), paddingRight = Math.floor(padding / 2);
-  const marginLeft = Math.min(1, Math.floor(spare / 2));
-  const marginRight = Math.min(1, spare - marginLeft);
+  const marginLeft = Math.min(margin, Math.floor(spare / 2));
+  const marginRight = Math.min(margin, spare - marginLeft);
   return {
     width, marginLeft, marginRight, borderWidth, paddingLeft, paddingRight,
     panelX: marginLeft, panelWidth: width - marginLeft - marginRight,

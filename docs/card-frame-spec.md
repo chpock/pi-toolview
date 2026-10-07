@@ -8,20 +8,20 @@ One Toolview adapter owns live-host hooks, runtime lifecycle and mouse routing. 
 
 ## Reference and geometry
 
-Source reference: OpenCode `907b3bc518fa48e90e8ec24dd327d13eee71c36c`, `packages/tui/src/routes/session/index.tsx`: transcript horizontal padding at 1178 and `BlockTool` at 1994–2044; `packages/tui/src/ui/border.ts` supplies `┃`. This is inspected source, not a claimed screenshot comparison. The user's later refinement deliberately reduces exterior and interior horizontal spacing to one column per side; it is not a claim of literal OpenCode spacing.
+Source reference: OpenCode `907b3bc518fa48e90e8ec24dd327d13eee71c36c`, `packages/tui/src/routes/session/index.tsx`: transcript horizontal padding at 1178 and `BlockTool` at 1994–2044; `packages/tui/src/ui/border.ts` supplies `┃`. This is inspected source, not a claimed screenshot comparison. Toolview keeps one internal column per side and follows Pi's Output padding for exterior transcript margins; this is not a claim of literal OpenCode spacing.
 
-The following default geometry applies to transcript cards. Main input uses the same paint and fixed inner gaps, with configurable exterior margins as specified below.
+Transcript cards use Pi's **Output padding** (`outputPad`), whose native values are 0 and 1 (default 1), for both exterior margins P. Changing the setting applies on ordinary renders without reload. All transcript presenters read effective settings through the public API. User cards additionally retain the native component's live padding to request and strip its Markdown geometry, without changing that component. This preserves Markdown wrapping/update behavior even if Pi's `/settings` assigns user messages a selected value while a project override leaves the effective setting different. Tool layout keys and file height measurement include P; a padding change cannot reuse old-width rows or stale panel hit bounds. No settings writes, polling or settings-input interception are added. Main input and its widget still use the independent **Editor padding** setting; the session footer and native renderers are not reframed by Output padding.
 
-For a component width W >= 6:
+For component width W >= 2P + 4:
 
-- Leave one exterior column on each side, outside panel painting and click targets.
-- The panel occupies W - 2 columns. Only its left border exists: a one-cell `┃`, including on its top/bottom padding rows. No top/right/bottom border is drawn.
-- Inside the panel leave one column after the left border and one column on the right. Content starts at column 3, counting from zero in the component, and has width W - 5. Both internal columns belong to the painted, clickable panel; neither belongs to the content width.
+- Leave P exterior columns on each side, outside panel painting and click targets. At P=0 the stripe is at the left edge and the last internal padding cell reaches the right edge.
+- The panel occupies W - 2P columns. Only its left border exists: a one-cell `┃`, including on its top/bottom padding rows. No top/right/bottom border is drawn.
+- Inside the panel leave one column after the left border and one column on the right. Content starts at zero-based column P + 2 and has width W - 2P - 3. Both internal columns belong to the painted, clickable panel; neither belongs to the content width. At default P=1 these are column 3 and W - 5; P=0 uses column 2 and W - 3.
 - Add one panel padding row above and below the content. Paint the panel body, including internal padding, top/bottom content rows and the space after short content. The stripe cell and exterior columns keep terminal-default background. The stripe remains part of the logical panel/click bounds despite its separate paint.
 - Transcript separation is owned by the adapter: one outside empty row when a visible preceding sibling exists; no duplicated separator, and no separator at width zero.
 - Comments, command, output, hint and footer share the content origin. Do not copy OpenCode's additional title indentation, spinner, command/output truncation or content policy.
 
-At width zero return no rows. At widths 1–5 keep at least one content column: allocate the remaining columns first to the border (up to one), then balanced internal padding (up to one per side, extra odd column on the left), then balanced exterior margins (up to one per side, extra odd column on the right). Never truncate commands to preserve decoration. Recompute geometry for every width. Callers wrap body text at the resulting content width; framing itself does not rewrap or silently clip body rows.
+At width zero return no rows. When the normal frame cannot fit, keep at least one content column: allocate the remaining columns first to the border (up to one), then balanced internal padding (up to one per side, extra odd column on the left), then balanced exterior margins (up to P per side, extra odd column on the right). P=0 never reserves exterior columns. Never truncate commands to preserve decoration. Recompute geometry for every width and current Output padding. Callers wrap body text at the resulting content width; framing itself does not rewrap or silently clip body rows.
 
 ## Paint
 

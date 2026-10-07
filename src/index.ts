@@ -69,6 +69,8 @@ export interface ToolviewOptions {
   warn?: (reason: string) => void;
   cacheMiB?: number;
   cardCacheMiB?: number;
+  /** Current effective Pi Output padding (0 or 1); no settings mutation. */
+  outputPad?: () => number;
   /** Do not compete with a public editor factory owned by another extension. */
   nativeEditor?: () => boolean;
   /** The runtime has a public belowEditor metadata widget. */
@@ -219,7 +221,10 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
   const cache = new RenderCache((options.cacheMiB ?? 8) * 1024 * 1024);
   const cardCache = new RenderCache((options.cardCacheMiB ?? 128) * 1024 * 1024, 2048, 128 * 1024 * 1024);
   type Layout = { rows: string[]; framed?: boolean; native?: boolean };
-  type SummaryLayout = Layout & { prefixLength: number };
+  type SummaryLayout = Layout & { prefixLength: number; prefixLeft: number; prefixSpace: boolean };
+  // One plain snapshot per normal transcript pass; direct component visits read live settings.
+  let passOutputPad: number | undefined;
+  const outputPadding = () => passOutputPad ?? (options.outputPad?.() === 0 ? 0 : 1);
   const animated = new Set<WeakRef<ToolNode>>();
   let animationRefs = new WeakMap<ToolNode, WeakRef<ToolNode>>();
   let spinnerTimer: ReturnType<typeof setInterval> | undefined;
@@ -294,16 +299,16 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     updates: { name: string; original?: PropertyDescriptor; wrapper: (...args: unknown[]) => unknown }[];
   }>();
   const refresh = () => { tui.invalidate(); tui.requestRender(); };
-  function layoutSignature(node: ToolNode, kind: string, width: number, theme: Palette, directory: string | undefined): unknown[] {
-    return [kind, width, theme, theme.fg, kind === "bash" ? undefined : node.args, node.result, node.expanded, node.isPartial,
+  function layoutSignature(node: ToolNode, kind: string, width: number, theme: Palette, directory: string | undefined, padding: number): unknown[] {
+    return [kind, width, padding, theme, theme.fg, kind === "bash" ? undefined : node.args, node.result, node.expanded, node.isPartial,
       node.toolName, node.result?.isError, kind === "bash" ? (node.result?.details as { exit_code?: unknown } | undefined)?.exit_code : undefined,
       kind === "bash" ? node.args.command : undefined, kind === "bash" ? node.args.description : undefined,
       kind === "bash" ? node.args.workdir : undefined, directory,
       kind === "edit" || kind === "write" ? theme.colors : undefined,
       kind === "edit" || kind === "write" ? theme.style : undefined, kind === "edit" || kind === "write" ? theme.bg : undefined];
   }
-  function memo<T extends Layout>(node: ToolNode, kind: string, width: number, theme: Palette, directory: string | undefined, build: () => T): T {
-    const signature = layoutSignature(node, kind, width, theme, directory);
+  function memo<T extends Layout>(node: ToolNode, kind: string, width: number, theme: Palette, directory: string | undefined, padding: number, build: () => T): T {
+    const signature = layoutSignature(node, kind, width, theme, directory, padding);
     const state = states.get(node);
     const matches = state && signature.every((value, index) => value === state.signature[index]);
     if (matches) {
@@ -317,32 +322,34 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     return value;
   }
   const bashLayout = (node: ToolNode, width: number) => {
-    const theme = getTheme(), directory = bashDirectory(node) ?? undefined;
-    return memo(node, "bash", width, theme, directory, () => renderBashCard(node, directory, width, theme));
+    const theme = getTheme(), directory = bashDirectory(node) ?? undefined, padding = outputPadding();
+    return memo(node, "bash", width, theme, directory, padding, () => renderBashCard(node, directory, width, theme, padding));
   };
   const fileLayout = (node: ToolNode, width: number) => {
     const theme = getTheme();
     const context = node.getRenderContext() as { cwd?: unknown } | undefined;
     const cwd = typeof context?.cwd === "string" ? context.cwd : undefined;
-    return memo(node, node.toolName, width, theme, cwd, () => renderFileCard(node, cwd, width, theme,
-      theme.colors && theme.style ? (code, path) => highlightCode(code, getLanguageFromPath(path)) : undefined) ??
+    const padding = outputPadding();
+    return memo(node, node.toolName, width, theme, cwd, padding, () => renderFileCard(node, cwd, width, theme,
+      theme.colors && theme.style ? (code, path) => highlightCode(code, getLanguageFromPath(path)) : undefined, padding) ??
       { rows: nativeRows(node, width), framed: false, native: true });
   };
   function fileMeasure(node: ToolNode, width: number) {
     const theme = getTheme();
     const context = node.getRenderContext() as { cwd?: unknown } | undefined;
     const cwd = typeof context?.cwd === "string" ? context.cwd : undefined;
-    const state = states.get(node), signature = layoutSignature(node, node.toolName, width, theme, cwd);
+    const padding = outputPadding();
+    const state = states.get(node), signature = layoutSignature(node, node.toolName, width, theme, cwd, padding);
     // Read only the existing exact layout. Never admit another cache entry or retain measurement data.
     if (state && signature.every((value, index) => value === state.signature[index])) {
       const layout = state.pool.get(state.entry) as ReturnType<typeof renderFileCard>;
       if (layout) return layout.native ? undefined : { framed: layout.framed, height: layout.rows.length };
     }
-    return measureFileCard(node, cwd, width);
+    return measureFileCard(node, cwd, width, padding);
   }
   const summaryLayout = (node: ToolNode, width: number) => {
-    const theme = getTheme();
-    return memo(node, "summary", width, theme, undefined, () => summaryRows(node, width, theme));
+    const theme = getTheme(), padding = outputPadding();
+    return memo(node, "summary", width, theme, undefined, padding, () => summaryRows(node, width, theme, padding));
   };
   const controller: ToolviewController = {
     get active() { return active; },
@@ -474,19 +481,20 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     return nativeVisible(node, width);
   }
 
-  function summaryRows(node: ToolNode, width: number, theme: Palette): SummaryLayout {
-    if (width < 1) return { rows: [], prefixLength: 0 };
-    const available = width - 1; // Reserve the right margin before laying out any text.
+  function summaryRows(node: ToolNode, width: number, theme: Palette, padding: number): SummaryLayout {
+    if (width < 1) return { rows: [], prefixLength: 0, prefixLeft: 0, prefixSpace: false };
+    const available = width - padding, indent = padding + 2;
     const failed = !node.isPartial && node.result?.isError;
     const pending = node.isPartial || !node.result;
     const marker = SHOW_COMPLETION_MARKERS ? pending ? "…" : failed ? "✗" : "✓" : "";
     const statusColor = failed ? "error" : pending ? "muted" : "success";
     const glyph = node.toolName === "read" ? "→" : fileTool(node) ? "←" : "⚙";
-    if (available < 5) {
-      const prefix = theme.fg(marker ? statusColor : failed ? "error" : "dim", marker || glyph);
-      return { rows: [prefix], prefixLength: prefix.length };
+    if (available < indent + 2) {
+      const left = Math.min(padding, Math.max(0, width - 1 - padding));
+      const prefix = theme.fg(marker ? statusColor : failed ? "error" : "dim", " ".repeat(left) + (marker || glyph));
+      return { rows: [prefix], prefixLength: prefix.length, prefixLeft: left, prefixSpace: false };
     }
-    const prefix = theme.fg(failed ? "error" : "dim", ` ${glyph} `);
+    const prefix = theme.fg(failed ? "error" : "dim", `${" ".repeat(padding)}${glyph} `);
     const parts: { color?: ThemeColor; text: string }[] = [{ color: "toolTitle", text: summaryName(node.toolName) }];
     const { pattern, object, params } = argumentParts(node.toolName, node.args);
     if (pattern) {
@@ -502,7 +510,7 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     let end = 0;
     const spans = parts.map((part) => { const start = end; end += part.text.length; return { ...part, start, end }; });
     let cursor = 0;
-    const rows = wrapSummary(plain, available - 3, parameterStart, params.length).map((line, index) => {
+    const rows = wrapSummary(plain, available - indent, parameterStart, params.length).map((line, index) => {
       const start = plain.indexOf(line, cursor);
       if (start < 0) throw new Error("Wrapped text is not a source substring");
       cursor = start + line.length;
@@ -512,16 +520,16 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
         const text = plain.slice(from, to);
         return failed ? theme.fg("error", text) : span.color ? theme.fg(span.color, text) : text;
       }).join("");
-      return (index === 0 ? prefix : "   ") + styled;
+      return (index === 0 ? prefix : " ".repeat(indent)) + styled;
     });
-    return { rows, prefixLength: prefix.length };
+    return { rows, prefixLength: prefix.length, prefixLeft: padding, prefixSpace: true };
   }
   function paintSummary(node: ToolNode, width: number): string[] {
     const layout = summaryLayout(node, width);
     animate(node);
     if (!executing(node) || !layout.rows.length) return layout.rows;
     const frame = SPINNER_FRAMES[spinnerFrame]!;
-    const prefix = getTheme().fg("dim", width < 6 ? frame : ` ${frame} `);
+    const prefix = getTheme().fg("dim", " ".repeat(layout.prefixLeft) + frame + (layout.prefixSpace ? " " : ""));
     return [prefix + layout.rows[0]!.slice(layout.prefixLength), ...layout.rows.slice(1)];
   }
   function nativeRows(node: Component, width: number): string[] {
@@ -617,7 +625,7 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
           const layout = fileLayout(this, event.width);
           if (!layout.native) {
             const offset = layout.framed ? (previousLayout(this, event.width) ? 1 : 0) : gap(this, event.width);
-            const hit = layout.framed ? insidePanel(cardGeometry(event.width), layout.rows.length, event.x, event.y - offset) :
+            const hit = layout.framed ? insidePanel(cardGeometry(event.width, outputPadding()), layout.rows.length, event.x, event.y - offset) :
               this.result?.isError && event.y >= offset && event.y < offset + layout.rows.length;
             if (!hit) return undefined;
             this.setExpanded(true); tui.requestRender(); return { handled: true };
@@ -658,13 +666,13 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
       { configurable: true, writable: true, ...update.original, value: update.wrapper });
   }
   function userLayout(node: UserNode, width: number, originalRender: UserRender): Layout {
-    const theme = getTheme();
-    const signature = [width, theme, theme.fg, theme.bg, node.text, node.outputPad, node.children[0], node.markdownTheme, node.markdownTransformers];
+    const theme = getTheme(), padding = options.outputPad ? outputPadding() : node.outputPad;
+    const signature = [width, theme, theme.fg, theme.bg, padding, node.text, node.outputPad, node.children[0], node.markdownTheme, node.markdownTransformers];
     const state = userStates.get(node);
     if (state && signature.every((value, index) => value === state.signature[index])) {
       const value = cache.get(state.entry); if (value) return value;
     } else { cache.drop(state?.entry); cache.get(undefined); }
-    const value = renderUserCard(width, node.outputPad, theme, (size) => originalRender.call(node, size));
+    const value = renderUserCard(width, node.outputPad, theme, (size) => originalRender.call(node, size), padding);
     userStates.set(node, { signature, entry: cache.put(value, value.rows) });
     return value;
   }
@@ -815,6 +823,14 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
   // Observe the already-required native group render, not each widget and not a
   // second render for spacing. This closure owns no installer/group/editor node.
   function observeWidgetRows(this: Container, width: number): string[] {
+    const document = tui instanceof Container && (this === tui || (this === tui.children[0] && Object.getPrototypeOf(this) === Container.prototype));
+    if (!active || !document || passOutputPad !== undefined) return observeContainerRows.call(this, width);
+    try { passOutputPad = outputPadding(); }
+    catch { fail("Pi Output padding could not be read; native rendering restored"); return containerRender.value.call(this, width) as string[]; }
+    try { return observeContainerRows.call(this, width); }
+    finally { passOutputPad = undefined; }
+  }
+  function observeContainerRows(this: Container, width: number): string[] {
     const position = active && parents.get(this);
     const input = tui instanceof Container && position && position.parent.children === tui.children &&
       (position.parent.children[3] === this || position.parent.children[2] === this) && position.parent.children[4];
@@ -1043,6 +1059,7 @@ export default function toolview(pi: ExtensionAPI) {
         pendingFooter = { slot: new WeakRef(slot), owner: new WeakRef(slot.children[0]!) };
       controller = installToolview(tui, () => ctx.ui.theme, {
         cards: names("toolview-card"), compact: names("toolview-compact"), cacheMiB, cardCacheMiB,
+        outputPad: () => pi.getSettings().outputPad ?? 1,
         nativeEditor: () => liveContext?.ui.getEditorComponent() === undefined,
         editorStatus: true,
         rerouteEditorStatus: () => liveContext?.ui.setEditorComponent(undefined),

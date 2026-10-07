@@ -208,11 +208,11 @@ test("completion marker constant can restore success and failure symbols without
     tool.updateResult({ isError: true, content: [{ type: "text", text: "ERROR_BODY_SENTINEL" }] });
     assert.equal(plain(tool.render(80).at(-1)!), " → read a.txt ✗");
     assert.doesNotMatch(tool.render(80).join(""), /ERROR_BODY_SENTINEL/u);
-    assert.deepEqual(tool.render(5), ["✗"]);
-    tool.updateResult({ content: [] }); assert.deepEqual(tool.render(5), ["✓"]);
+    assert.deepEqual(tool.render(5), [" ✗"]);
+    tool.updateResult({ content: [] }); assert.deepEqual(tool.render(5), [" ✓"]);
     tool.updateResult(undefined); assert.match(plain(tool.render(80).at(-1)!), /…$/u);
-    assert.deepEqual(tool.render(5), ["⠋"]);
-    tool.executionStarted = false; assert.deepEqual(tool.render(5), ["…"]);
+    assert.deepEqual(tool.render(5), [" ⠋"]);
+    tool.executionStarted = false; assert.deepEqual(tool.render(5), [" …"]);
   } finally { controller?.restore(); rmSync(temporary, { recursive: true, force: true }); }
 });
 
@@ -539,6 +539,7 @@ function extensionHarness(mode: "tui" | "print" | "json" | "rpc" = "tui", flagVa
     registerCommand: (name: string, command: { handler(args: string, ctx: ExtensionContext): Promise<void> }) => commands.set(name, command),
     registerFlag: (name: string, options: unknown) => flags.set(name, options),
     getFlag: (name: string) => flagValues[name],
+    getSettings: () => ({}),
     getThinkingLevel: () => "off",
   } as unknown as ExtensionAPI;
   const ctx = { mode, isIdle: () => true, ui: {
@@ -649,7 +650,7 @@ test("exact read/edit/write summaries use directional arrows; other compact tool
         assert.ok(rows.every((row) => visibleWidth(row) <= 29));
         assert.deepEqual(tool.args, args);
         for (let width = 1; width <= 5; width++)
-          assert.deepEqual(tool.render(width).map(plain).filter((row) => row.trim()), [leading], "tiny viewports retain pending state or tool glyph");
+          assert.deepEqual(tool.render(width).map(plain).filter((row) => row.trim()), [(width >= 3 ? " " : "") + leading], "tiny viewports retain pending state or tool glyph and the margins that fit");
       }
       terminal.reset();
       const row = tool.render(80).find((line) => plain(line).trim())!;
@@ -1118,7 +1119,7 @@ test("compact summaries reserve one right column before wrapping at every usable
         if (!width) { assert.deepEqual(rows, []); continue; }
         assert.ok(rows.every((row) => visibleWidth(row) <= Math.max(1, width - 1)), `right margin: ${state}, width ${width}`);
         assert.doesNotMatch(rows.join(""), /…|✓|✗/u);
-        if (width <= 5) assert.deepEqual(rows, [glyph], "tiny viewports preserve pending state or tool glyph without overflowing prefix");
+        if (width <= 5) assert.deepEqual(rows, [(width >= 3 ? " " : "") + glyph], "tiny viewports preserve pending state or tool glyph and the margins that fit");
         else {
           assert.equal(rows[0]!.slice(0, 3), ` ${glyph} `);
           assert.ok(rows.slice(1).every((row) => /^ {3}\S/u.test(row)));
@@ -4813,4 +4814,125 @@ test("footer deferred startup handles native reload box without stealing a later
       else assert.notEqual(f.footer.children[0], f.native, "default input returning after session_start finishes initial installation");
     } finally { f.close(); }
   }
+});
+
+
+test("Output padding sets transcript frame margins at both native values and keeps tiny bodies", () => {
+  for (const padding of [0, 1]) for (const width of [0, 1, 2, 3, 4, 5, 6, 24, 80]) {
+    const geometry = cardGeometry(width, padding);
+    if (width >= 6) {
+      assert.equal(geometry.marginLeft, padding); assert.equal(geometry.marginRight, padding);
+      assert.equal(geometry.contentX, padding + 2); assert.equal(geometry.contentWidth, width - 2 * padding - 3);
+      assert.equal(geometry.paddingLeft, 1); assert.equal(geometry.paddingRight, 1);
+    }
+    const rows = frameRows(geometry, width ? ["x"] : [], { panel: text => text, border: text => text });
+    assert.ok(rows.every(row => visibleWidth(row) === width));
+    if (width) assert.ok(geometry.contentWidth >= 1);
+  }
+});
+
+test("Output padding updates every tool layout cache, inline measurement and panel clicks live", () => {
+  let padding = 1, settingsReads = 0;
+  const compact = new Tool("tv_padding", { query: "PAD_" + "x".repeat(100) });
+  const bash = bashTool(); bash.result = { content: [{ type: "text", text: Array(11).fill("BASH_PAD").join("\n") }] };
+  const edit = new Tool("edit", { path: "padding.ts" }); edit.result = { content: [], details: { diff: "-1 const before = 1;\n+1 const after = 2;" } };
+  const write = new Tool("write", { path: "padding.ts", content: "const written = 3;\n" });
+  const inline = new Tool("edit", { path: "inline-" + "x".repeat(90) + ".ts" }); inline.result = { content: [] };
+  const { root, controller } = setup([compact, bash, edit, write, inline], { outputPad: () => { settingsReads++; return padding; } });
+  try {
+    for (const value of [1, 0, 1]) {
+      padding = value; settingsReads = 0; root.render(24);
+      assert.equal(settingsReads, 1, "one effective-settings snapshot per document pass, not per tool/neighbor");
+      const cold = controller.cacheStats().builds;
+      for (const node of [compact, bash, edit, write, inline]) {
+        const rows = node.render(24).filter(row => row !== "").map(plain);
+        assert.ok(rows.every(row => visibleWidth(row) <= 24 - (node === compact ? padding : 0)));
+        assert.equal(rows[0]!.search(/\S/u), padding + (node === inline ? 2 : 0));
+        if ([bash, edit, write].includes(node)) {
+          assert.ok(rows.every(row => row[padding] === "┃"));
+          assert.ok(rows.every(row => row[padding + 1] === " " && row[23 - padding] === " "));
+        }
+      }
+      root.render(24); assert.equal(controller.cacheStats().builds, cold, "unchanged padding is a hot cache hit");
+      assert.equal(controller.cacheStats().entries, 5, "one latest layout per tool, no padding-history cache");
+      assert.equal(measureFileCard(inline, "/project", 24, padding)!.height, inline.render(24).filter(row => row !== "").length);
+      for (const node of [bash, edit, write]) {
+        if (padding) for (const x of [0, 23]) assert.equal(node.handleMouse({ ...mouse(1, 24), x }), undefined);
+        assert.equal(node.handleMouse({ ...mouse(1, 24), x: padding })?.handled, true, "current stripe is clickable");
+        node.setExpanded(false);
+      }
+    }
+    assert.equal(controller.active, true);
+  } finally { controller.restore(); }
+});
+
+test("Output padding user cards use live native padding without altering Markdown or editor geometry", () => {
+  initTheme("dark", false);
+  const user = new UserMessageComponent("USER_PADDING **bold** 文字\n\n" + "x".repeat(70));
+  const root = new Root(); root.addChild(user);
+  const render = UserMessageComponent.prototype.render;
+  const controller = installToolview(root, () => nativeTheme);
+  try {
+    for (const padding of [1, 0, 1]) {
+      user.setOutputPad(padding);
+      const geometry = cardGeometry(24, padding), rows = user.render(24);
+      assert.ok(rows.every(row => stripVTControlCharacters(row)[padding] === "┃"));
+      const native = render.call(user, geometry.contentWidth + 2 * padding).slice(1, -1);
+      assert.deepEqual(rows.slice(1, -1).map(row => stripVTControlCharacters(sliceByColumn(row, padding + 2, geometry.contentWidth))),
+        native.map(row => stripVTControlCharacters(sliceByColumn(row, padding, visibleWidth(row) - 2 * padding))));
+      const builds = controller.cacheStats().builds; user.render(24); assert.equal(controller.cacheStats().builds, builds);
+      assert.equal(controller.cacheStats().entries, 1);
+      assert.equal(editorGeometry(24, 3)!.panelX, 3, "Editor padding is separate");
+    }
+  } finally { controller.restore(); }
+});
+
+test("Output padding summary glyphs, animation and wrapped text share the new origin at narrow widths", () => {
+  for (const padding of [0, 1]) {
+    const node = new Tool("read", { path: "a/" + "x".repeat(90) });
+    const { controller } = setup([node], { outputPad: () => padding });
+    try {
+      for (const width of [1, 2, 3, 4, 5, 6, 24, 80]) {
+        const rows = node.render(width).map(plain);
+        assert.ok(rows.every(row => visibleWidth(row) <= Math.max(1, width - padding)));
+        if (width >= 6) {
+          assert.equal(rows[0]![padding], "→");
+          assert.ok(rows[0]!.slice(padding + 2).startsWith("read".slice(0, width - 2 * padding - 2)));
+          assert.ok(rows.slice(1).every(row => row.startsWith(" ".repeat(padding + 2))));
+        }
+        node.updateResult(undefined);
+        const running = node.render(width).map(plain);
+        assert.ok(running.every(row => visibleWidth(row) <= Math.max(1, width - padding)));
+        const x = Math.min(padding, Math.max(0, width - 1 - padding));
+        assert.ok(spinnerFrames.includes(running[0]![x]!));
+        node.updateResult({ content: [] });
+      }
+    } finally { controller.restore(); }
+  }
+});
+
+
+test("Output padding effective settings remain authoritative when native user padding diverges", () => {
+  initTheme("dark", false);
+  let padding = 0;
+  const user = new UserMessageComponent("PROJECT_PADDING **bold** " + "x".repeat(70));
+  const compact = new Tool("read", { path: "project.txt" }), root = new Root(); root.addChild(user); root.addChild(compact);
+  const render = UserMessageComponent.prototype.render;
+  const controller = installToolview(root, () => nativeTheme, { outputPad: () => padding });
+  try {
+    // Pi's onOutputPadChange assigns the selected value to user messages even when
+    // a project override leaves public effective settings at zero.
+    user.setOutputPad(1);
+    for (const value of [0, 1, 0]) {
+      padding = value; root.render(24);
+      const rows = user.render(24).filter(row => row !== ""), geometry = cardGeometry(24, padding);
+      assert.ok(rows.every(row => stripVTControlCharacters(row)[padding] === "┃"));
+      const native = render.call(user, geometry.contentWidth + 2).slice(1, -1);
+      assert.deepEqual(rows.slice(1, -1).map(row => stripVTControlCharacters(sliceByColumn(row, geometry.contentX, geometry.contentWidth))),
+        native.map(row => stripVTControlCharacters(sliceByColumn(row, 1, visibleWidth(row) - 2))));
+      assert.equal(plain(compact.render(24).find(row => row !== "")!)[padding], "→");
+      const builds = controller.cacheStats().builds; root.render(24); assert.equal(controller.cacheStats().builds, builds);
+      assert.equal((user as unknown as { outputPad: number }).outputPad, 1, "do not mutate native padding to reconcile settings");
+    }
+  } finally { controller.restore(); }
 });
