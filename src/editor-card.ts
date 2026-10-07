@@ -1,6 +1,6 @@
 import { CURSOR_MARKER, sliceByColumn, visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
-import { cardGeometry, frameRows } from "./card-frame.ts";
+import { cardGeometry, frameRows, type CardGeometry } from "./card-frame.ts";
 import type { CardTheme } from "./card-theme.ts";
 
 // Internal row sentinels returned only during native projection, never painted.
@@ -8,12 +8,21 @@ import type { CardTheme } from "./card-theme.ts";
 export const EDITOR_TOP = "\0";
 export const EDITOR_BOTTOM = "\0\0";
 export interface EditorProjection { rows: string[]; top: string; bottom: string }
-export interface EditorLayout { rows: string[]; framed: boolean; nativeWidth: number; offsetX: number }
+export interface EditorLayout { rows: string[]; framed: boolean; nativeWidth: number; offsetX: number; geometry?: CardGeometry }
+
+/** Editor padding controls exterior margins only; keep one inner cell per side. */
+export function editorGeometry(width: number, padding: number): CardGeometry {
+  const base = cardGeometry(width);
+  const margin = Number.isSafeInteger(padding) && padding >= 0 ? padding : base.width;
+  return { ...base, marginLeft: margin, marginRight: margin, borderWidth: 1, paddingLeft: 1, paddingRight: 1,
+    panelX: margin, panelWidth: Math.max(0, base.width - 2 * margin), contentX: margin + 2,
+    contentWidth: Math.max(0, base.width - 2 * margin - 3) };
+}
 
 /** Reframe native editing output, not draft source or private editing state. */
 export function renderEditorCard(width: number, padding: number, theme: CardTheme,
   renderNative: (width: number, borderWidth?: number) => EditorProjection): EditorLayout {
-  const geometry = cardGeometry(width);
+  const geometry = editorGeometry(width, padding);
   const fallback = (): EditorLayout => ({ rows: renderNative(width).rows, framed: false, nativeWidth: width, offsetX: 0 });
   if (!geometry.width) return { rows: [], framed: false, nativeWidth: 0, offsetX: 0 };
   if (geometry.contentWidth < 2 || !Number.isSafeInteger(padding) || padding < 0 || padding > geometry.width) return fallback();
@@ -49,5 +58,5 @@ export function renderEditorCard(width: number, padding: number, theme: CardThem
     const text = sliceByColumn(row, padding, budget) + "\x1b[0m";
     return " ".repeat(geometry.contentX) + text;
   });
-  return { rows: [...rows, ...menu], framed: true, nativeWidth, offsetX: geometry.contentX - padding };
+  return { rows: [...rows, ...menu], framed: true, nativeWidth, offsetX: geometry.contentX - padding, geometry };
 }

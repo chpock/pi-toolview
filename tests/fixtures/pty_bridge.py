@@ -38,6 +38,9 @@ def main():
     resize(cols, rows)
     emit({"ready": pid})
     deadline = time.monotonic() + 180
+    # Isolated regression opt-in: delay ioctl itself, not Pi's text or geometry.
+    resize_delay = int(os.environ.get("TOOLVIEW_TEST_RESIZE_DELAY_MS", "0")) / 1000
+    host_hold = int(os.environ.get("TOOLVIEW_TEST_RESIZE_HOLD_MS", "0")) / 1000
     try:
         while time.monotonic() < deadline:
             readers, _, _ = select.select([master, sys.stdin.fileno()], [], [], 0.1)
@@ -68,8 +71,20 @@ def main():
                             count = os.write(master, data)
                             data = data[count:]
                     if "resize" in message:
-                        resize(*message["resize"])
-                        emit({"resized": message["resize"]})
+                        if resize_delay:
+                            time.sleep(resize_delay)
+                        # A second opt-in proves ioctl acknowledgement alone is insufficient.
+                        if host_hold:
+                            os.kill(pid, signal.SIGSTOP)
+                            os.waitpid(pid, os.WUNTRACED)
+                        try:
+                            resize(*message["resize"])
+                            emit({"resized": message["resize"], "id": message["id"]})
+                            if host_hold:
+                                time.sleep(host_hold)
+                        finally:
+                            if host_hold:
+                                os.kill(pid, signal.SIGCONT)
             exited, status = os.waitpid(pid, os.WNOHANG)
             if exited:
                 alive = False

@@ -1,6 +1,6 @@
 // Real bundled CLI tests. Every capture is produced during this test run.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -101,6 +101,7 @@ export class PiTerminal {
     this.pointerInputs = [];
     this.queue = Promise.resolve();
     this.lastOutput = Date.now();
+    this.resizeSequence = 0;
     const args = ['-ns', '-np', '-nc', '-na', '--offline', '-e', join(fixtures, 'driver.ts')];
     if (!this.profile) args.unshift('-ne', '--no-themes');
     for (const path of extensions) args.push('-e', resolve(path));
@@ -127,6 +128,7 @@ export class PiTerminal {
       try {
         const frame = JSON.parse(line);
         if (frame.error) this.error = new Error(frame.error);
+        if (frame.resized) this.ptySize = { id: frame.id, width: frame.resized[0], height: frame.resized[1] };
         if (frame.data) {
           const data = Buffer.from(frame.data, 'base64');
           this.raw.push(data);
@@ -214,9 +216,20 @@ export class PiTerminal {
     assert.ok(this.screen().some((line) => line.includes(`TERMINAL_DONE_${scenario}`)));
   }
   async resize(cols, rows = 80, animated = false) {
+    const id = ++this.resizeSequence;
     this.term.resize(cols, rows);
-    this.child.stdin.write(JSON.stringify({ resize: [cols, rows] }) + '\n');
-    await sleep(80);
+    this.child.stdin.write(JSON.stringify({ resize: [cols, rows], id }) + '\n');
+    await until(() => {
+      this.health();
+      return this.ptySize?.id === id && this.ptySize.width === cols && this.ptySize.height === rows;
+    }, `PTY resize ${id}: ${cols}x${rows}`);
+    // ioctl completion precedes Node's SIGWINCH/TTY refresh. Read the driver's
+    // actual host observation, never infer dimensions from quiet output.
+    // Identical sizes need no new resize event, but still require the fresh receipt above.
+    await until(() => {
+      const size = this.events().findLast(event => event.type === 'terminal_size');
+      return size?.width === cols && size.height === rows;
+    }, `Pi geometry ${id}: ${cols}x${rows}`);
     await this.settle(animated);
   }
   async close() {
@@ -465,6 +478,31 @@ test('real CLI: isolated offline stock control and terminal transport', { timeou
     copyFileSync(dump.session, join(stock.output, 'session.jsonl'));
   } finally { await stock.close(); stock.dispose(); }
 });
+
+test('real CLI: delayed PTY resize confirms Pi geometry before width height and identical-size captures',
+  { timeout: 60000 }, async () => {
+    for (const mode of ['fullscreen', 'regular']) {
+      const terminal = new PiTerminal(`delayed-resize-${mode}`, { mode, toolview: true,
+        extraEnv: { TOOLVIEW_TEST_RESIZE_DELAY_MS: '750', TOOLVIEW_TEST_RESIZE_HOLD_MS: '500' } });
+      try {
+        await terminal.ready();
+        assert.deepEqual(terminal.events().findLast(e => e.type === 'terminal_size'),
+          { type: 'terminal_size', width: 100, height: 80 });
+        const sizes = [[24, 80], [24, 24], [24, 24], [100, 80], [24, 80]];
+        for (const [index, [width, height]] of sizes.entries()) {
+          await terminal.resize(width, height);
+          assert.deepEqual(terminal.ptySize, { id: index + 1, width, height }, 'each resize has a fresh matching PTY receipt');
+          assert.deepEqual(terminal.events().findLast(e => e.type === 'terminal_size'),
+            { type: 'terminal_size', width, height }, 'resize cannot finish before Pi observes the requested geometry');
+          const dump = await terminal.capture(`geometry-${index}`);
+          assert.equal(dump.width, width); assert.equal(terminal.term.cols, width); assert.equal(terminal.term.rows, height);
+          await assertFits(dump.editor.lines, width);
+        }
+        assert.equal(terminal.events().filter(e => ['call', 'model_context'].includes(e.type)).length, 0,
+          'geometry synchronization does not submit model/tool input');
+      } finally { await terminal.close(); terminal.dispose(); }
+    }
+  });
 
 test('real CLI: Toolview policy, input, lifecycle and same-session stock replay',
   { skip: stockOnly, timeout: 180000 }, async () => {
@@ -2193,7 +2231,9 @@ async function actualCommandCells(dump, commands, { mode, scrollbar }) {
   const reserved = mode === 'fullscreen' && scrollbar === 'always' ? 1 : 0;
   const hasCardBorder = (row) => row.slice(0, row.length - reserved).some((cell) => cell?.text === '┃');
   for (let y = 0; y < dump.cells.length; y++) {
-    if ((y >= editor.top && y <= editor.bottom) || !hasCardBorder(dump.cells[y])) continue;
+    const statusEdge = dump.cells[y + 1]?.some(cell => cell?.text === '╹') &&
+      dump.cells[y + 1]?.some(cell => cell?.text === '▀');
+    if ((y >= editor.top && y <= editor.bottom) || statusEdge || !hasCardBorder(dump.cells[y])) continue;
     const top = y;
     while (y + 1 < dump.cells.length && y + 1 !== editor.top && hasCardBorder(dump.cells[y + 1])) y++;
     panels.push({ top, bottom: y });
@@ -3355,7 +3395,7 @@ test('main editor user-card styling preserves real draft input, cursor, menus an
   };
   try {
     for (const mode of ['fullscreen', 'regular']) {
-      const terminal = new PiTerminal(`editor-${mode}`, { mode, extensions: [join(fixtures, 'editor-driver.ts')] });
+      const terminal = new PiTerminal(`editor-${mode}`, { mode, agentSettings: { editorPaddingX: 1 }, extensions: [join(fixtures, 'editor-driver.ts')] });
       terminals.push(terminal); await terminal.ready();
       const draft = 'EDITOR_FIRST\n  EDITOR_SECOND 界é\n> literal';
       terminal.send('\x1b[200~' + draft + '\x1b[201~'); await terminal.settle();
@@ -3415,6 +3455,861 @@ test('main editor user-card styling preserves real draft input, cursor, menus an
       assert.equal(final.tools.length, 2); assert.equal(final.tools[0].name, 'bash');
       const user = final.branch.filter(entry => entry.type === 'message' && entry.message.role === 'user').at(-1);
       assert.deepEqual(user.message.content, [{ type: 'text', text: 'run user-card' }]);
+    }
+  } finally { for (const terminal of terminals) { await terminal.close(); terminal.dispose(); } }
+});
+
+
+test('belowEditor metadata and separate native status preserve physical half-block paint, menus and active lifecycle', { skip: stockOnly }, async () => {
+  const terminals = [];
+  const observe = async (terminal, name, action = 'snapshot') => {
+    writeFileSync(join(terminal.output, 'editor-request.json'), JSON.stringify({ name, action }));
+    terminal.send('\x1b\x04');
+    const dump = await until(() => {
+      terminal.health();
+      try { return JSON.parse(readFileSync(join(terminal.output, `${name}.json`), 'utf8')); }
+      catch (error) { if (error.code === 'ENOENT' || error instanceof SyntaxError) return false; throw error; }
+    }, `belowEditor ${name}`);
+    await terminal.settle(!dump.idle); terminal.session = dump.session;
+    assert.deepEqual(dump.after, dump.before, 'status actions never rewrite drafts');
+    return terminal.captureScreen(name, dump);
+  };
+  const nativeActivity = (dump, inputY) => {
+    assert.equal(dump.embedWorkingStatus, false, 'Pi selects its native separate status container');
+    assert.equal(dump.embeddedStatusPresent, false);
+    assert.match(dump.nativeStatusRows.map(plain).join('\n'), /Working A─B ───/u, 'native component owns literal message output');
+    assert.ok(!dump.rows.map(plain).join('\n').includes('Working'));
+    assert.ok(!dump.statusRows.map(plain).join('\n').includes('Working'));
+    const matches = dump.screen.map((row, index) => row.includes('Working A─B ───') ? index : -1).filter(index => index >= 0);
+    assert.equal(matches.length, 1, 'one physical native status, no duplicate in input or metadata');
+    assert.ok(matches[0] < inputY, 'native status physically precedes the input');
+    return matches[0];
+  };
+  const hidden = (dump) => {
+    assert.equal(dump.menu, true, 'native public getter confirms an open autocomplete menu');
+    assert.deepEqual(dump.statusRows, [], 'both belowEditor rows disappear during autocomplete');
+    assert.ok(!dump.screen.some(row => row.includes('╹▀')), 'half-block edge is physically absent');
+    const inputY = dump.screen.findIndex(row => row.includes('/tv-d'));
+    assert.ok(inputY >= 1);
+    if (dump.statusPresent) nativeActivity(dump, inputY - 1);
+    else assert.ok(!dump.screen.some(row => row.includes('Working A─B ───')));
+    const nativeRows = dump.rows.map(row => plain(row.replaceAll('\x1b_pi:c\x07', '')));
+    assert.deepEqual(dump.screen.slice(inputY - 1, inputY - 1 + nativeRows.length).map(row => row.trimEnd()), nativeRows,
+      'native editor and menu occupy their unchanged contiguous rows');
+    assert.deepEqual(dump.screen.slice(inputY - 1 + nativeRows.length, inputY - 1 + nativeRows.length + dump.footerRows.length).map(row => row.trimEnd()),
+      dump.footerRows.map(plain), 'footer directly follows native menu with no reserved widget rows');
+  };
+  const check = async (dump, active = false) => {
+    assert.equal(dump.menu, false, 'two widget rows return only after the menu closes');
+    assert.equal(dump.statusRows.length, 2); await assertFits(dump.statusRows, dump.width);
+    const edgeY = dump.screen.findIndex(row => row.includes('╹▀'));
+    assert.ok(edgeY > 0, 'both widget rows physically precede the existing footer');
+    const y = edgeY - 1, cells = dump.cells[y], edge = dump.cells[edgeY];
+    assert.equal(cells[1].text, '┃'); assert.equal(edge[1].text, '╹');
+    const panel = await referenceCell(dump.styles.background), bottom = await referenceCell(dump.styles.bottom);
+    for (let x = 2; x < dump.width - 1; x++) {
+      assert.equal(cells[x].bgMode, panel.bgMode); assert.equal(cells[x].bg, panel.bg);
+      assert.equal(edge[x].text, '▀'); assert.equal(edge[x].fgMode, bottom.fgMode); assert.equal(edge[x].fg, bottom.fg);
+      assert.equal(edge[x].bgMode, 0, 'bottom half remains terminal-default, not userMessageBg');
+    }
+    for (const line of [cells, edge]) for (const x of [0, 1, dump.width - 1]) assert.equal(line[x].bgMode, 0);
+    if (dump.width === 100) {
+      assert.ok(dump.screen[y].includes(dump.modelName), 'model.name, not its id');
+       const shown = /\(([^)]+)\)/u.exec(dump.screen[y]);
+       assert.ok(shown && dump.provider.startsWith(shown[1].replace(/…$/u, '')), 'literal provider ID prefix with balanced parentheses');
+      assert.ok(dump.screen[y].includes(` • ${dump.thinking}`));
+    }
+    assert.equal(dump.screen[y].includes('Idle'), !active && dump.idle);
+    const foreground = async (start, length, style, label) => {
+      const reference = await referenceCell(style);
+      for (let x = start; x < start + length; x++) {
+        assert.equal(cells[x].fgMode, reference.fgMode, `${label}: physical foreground mode`);
+        assert.equal(cells[x].fg, reference.fg, `${label}: physical foreground color`);
+      }
+    };
+    const text = dump.screen[y];
+    if (dump.width === 100) {
+      await foreground(text.indexOf(dump.modelName), dump.modelName.length, dump.styles.model, 'model mdHeading');
+      const shown = /\(([^)]+)\)/u.exec(text), providerX = shown.index;
+      await foreground(providerX, 1, dump.styles.separator, 'opening parenthesis dim');
+      await foreground(providerX + 1, shown[1].length, dump.styles.provider, 'provider muted including ellipsis');
+      await foreground(providerX + 1 + shown[1].length, 1, dump.styles.separator, 'closing parenthesis dim');
+      await foreground(text.indexOf(` • ${dump.thinking}`) + 3, dump.thinking.length, dump.styles.thinking, 'native thinking role');
+    }
+    for (let x = 0; x < text.length; x++) if (text[x] === '•') await foreground(x, 1, dump.styles.separator, 'bullet dim');
+    assert.ok(!text.includes('Working'), 'working activity never enters belowEditor metadata');
+    if (text.includes('Idle')) await foreground(text.indexOf('Idle'), 4, dump.styles.idle, 'Idle muted');
+    assert.equal(dump.footerOwner, 'FooterView', 'recognized stock editor keeps its Toolview footer through metadata/autocomplete and reload');
+    assert.ok(dump.footerRows.length > 0);
+    assert.deepEqual(dump.screen.slice(edgeY + 1, edgeY + 1 + dump.footerRows.length).map(row => row.trimEnd()), dump.footerRows.map(plain),
+      'actual managed footer rows physically follow the widget at every width');
+    return active && dump.statusPresent ? nativeActivity(dump, y - dump.rows.length) : y;
+  };
+  try {
+    for (const mode of ['fullscreen', 'regular']) {
+      const terminal = new PiTerminal(`editor-status-${mode}`, { mode, agentSettings: { editorPaddingX: 1 }, extensions: [join(fixtures, 'editor-driver.ts')] });
+      terminals.push(terminal); await terminal.ready();
+      let dump = await observe(terminal, 'idle'); await check(dump);
+      assert.equal(dump.modelName, 'Offline terminal fixture'); assert.equal(dump.provider, 'toolview-offline');
+      terminal.send('/tv-d'); await terminal.settle(); dump = await observe(terminal, 'menu');
+      hidden(dump);
+      const menu = dump.screen.findIndex(row => row.includes('tv-dump') && !row.includes('/tv-d'));
+      assert.ok(menu >= 0, 'native autocomplete remains physically visible without widget rows');
+      if (mode === 'fullscreen') {
+        await sgrAt(terminal, 5, menu); dump = await observe(terminal, 'menu-click');
+        assert.match(dump.after.text, /^\/tv-dump/u);
+      } else { terminal.send('\t'); await terminal.settle(); }
+      terminal.send('\x03'); await terminal.settle(); dump = await observe(terminal, 'menu-closed'); await check(dump);
+      for (const action of ['light', 'dark']) { dump = await observe(terminal, action, action); await check(dump); }
+      for (const width of [24, 60, 100]) { await terminal.resize(width); dump = await observe(terminal, `width-${width}`); await check(dump); }
+      dump = await observe(terminal, 'thinking', 'thinking-off'); assert.equal(dump.thinking, 'off'); await check(dump);
+      terminal.send('run pending\r'); await terminal.event('provider_gate');
+      dump = await observe(terminal, 'working-message', 'working-message'); let workY = await check(dump, true);
+      assert.ok(dump.screen[workY].includes('Working A─B ───'), 'literal frame-like message glyphs survive');
+      assert.ok(!dump.rows.map(plain).join('\n').includes('Working'), 'status is absent from input rows');
+      const identity = dump.statusIdentity; assert.ok(identity);
+      terminal.send('/tv-d'); await terminal.settle(true); dump = await observe(terminal, 'busy-menu'); hidden(dump);
+      assert.equal(dump.statusIdentity, identity, 'autocomplete hiding retains the same native indicator');
+      dump = await observe(terminal, 'busy-menu-off', 'off'); assert.equal(dump.statusIdentity, identity);
+      dump = await observe(terminal, 'busy-menu-on', 'on'); hidden(dump); assert.equal(dump.statusIdentity, identity);
+      terminal.send('\x1b'); await terminal.settle(true); dump = await observe(terminal, 'busy-menu-escape');
+      await check(dump, true); assert.equal(dump.after.text, '/tv-d', 'Escape closes the menu without rewriting the draft');
+      assert.equal(dump.statusIdentity, identity, 'same Working reappears after Escape');
+      terminal.send('\x15'); await terminal.settle(true); dump = await observe(terminal, 'busy-draft-cleared'); await check(dump, true);
+      assert.equal(dump.after.text, '', 'native line deletion clears only the draft, not the running request');
+      const phases = new Set();
+      for (let i = 0; i < 3; i++) {
+        dump = await observe(terminal, `phase-${i}`); workY = await check(dump, true);
+        phases.add(dump.screen[workY].trim().slice(0, 1));
+        assert.equal(dump.statusIdentity, identity, 'the existing host-owned object is preserved');
+      }
+      assert.ok(phases.size >= 2, 'native animation moves on the physical screen');
+      dump = await observe(terminal, 'active-off', 'off'); assert.deepEqual(dump.statusRows, []);
+      assert.equal(dump.statusIdentity, identity); assert.ok(dump.rows.map(plain).join('\n').includes('Working A─B ───'));
+      dump = await observe(terminal, 'active-on', 'on'); await check(dump, true); assert.equal(dump.statusIdentity, identity);
+      dump = await observe(terminal, 'busy-hidden', 'working-hide');
+      workY = await check(dump, true); assert.equal(dump.idle, false);
+      assert.ok(!dump.screen[workY].includes('Working')); assert.ok(!dump.screen[workY].includes('Idle'));
+      dump = await observe(terminal, 'busy-shown', 'working-show'); await check(dump, true);
+      writeFileSync(join(terminal.output, 'provider-go'), 'go'); await terminal.event('tool_gate');
+      writeFileSync(join(terminal.output, 'tool-go'), 'go'); await terminal.event('agent_end');
+      dump = await observe(terminal, 'complete'); await check(dump); assert.equal(dump.statusIdentity, undefined);
+      const complete = await terminal.capture('status-traffic'); assert.equal(complete.tools.length, 2);
+      await terminal.command('/reload'); await terminal.event('start', 2);
+      dump = await observe(terminal, 'reload'); await check(dump);
+      const native = new PiTerminal(`editor-status-native-${mode}`, { mode, workspace: terminal.work });
+      terminals.push(native); await native.ready(); native.send('run pending\r'); await native.event('provider_gate');
+      writeFileSync(join(native.output, 'provider-go'), 'go'); await native.event('tool_gate');
+      writeFileSync(join(native.output, 'tool-go'), 'go'); await native.event('agent_end');
+      await native.capture('native-complete'); assert.deepEqual(traffic(terminal, 2), traffic(native, 2), 'native model calls/results unchanged');
+      const heightControls = [];
+      for (const height of [16, 6]) {
+        await terminal.resize(100, height); await native.resize(100, height);
+        const projected = await observe(terminal, `height-${height}`), stock = await native.capture(`height-${height}`);
+        assert.equal(projected.rows.length, stock.editor.lines.length, 'height pressure does not add editor-local rows');
+        assert.equal(projected.rows.filter(row => row.includes('\x1b_pi:c')).length, 1, 'native cursor marker retained under height pressure');
+        assert.equal(projected.after.text, '', 'height pressure never changes the native draft');
+        if (height === 16) await check(projected);
+        heightControls.push({ height, nativeEditorRows: stock.editor.lines.length, projectedEditorRows: projected.rows.length,
+          physicalStatusVisible: projected.screen.some(row => row.includes('Idle')), physicalHalfBlockVisible: projected.screen.some(row => row.includes('╹▀')) });
+      }
+      writeFileSync(join(terminal.output, 'height-controls.json'), JSON.stringify(heightControls, null, 2));
+      await terminal.resize(100); dump = await observe(terminal, 'height-restored'); await check(dump);
+      assert.deepEqual(traffic(terminal, 2), traffic(native, 2), 'height controls add no calls/results/model contexts');
+      const replay = new PiTerminal(`editor-status-replay-${mode}`, { mode, session: terminal.session, workspace: terminal.work, agentSettings: { editorPaddingX: 1 },
+        extensions: [join(fixtures, 'editor-driver.ts')] });
+      terminals.push(replay); await replay.ready(); const replayDump = await observe(replay, 'replay'); await check(replayDump);
+      const replayTraffic = await replay.capture('replay-traffic');
+      assert.deepEqual(replayTraffic.branch, complete.branch, 'presentation adds no persisted/model content');
+    }
+  } finally { for (const terminal of terminals) { await terminal.close(); terminal.dispose(); } }
+});
+
+
+test('belowEditor clipping leaves activity in Pi separate container without changing native Working ownership', { skip: stockOnly }, async () => {
+  const terminal = new PiTerminal('editor-status-height-four', { mode: 'fullscreen', agentSettings: { editorPaddingX: 1 }, extensions: [join(fixtures, 'editor-driver.ts')] });
+  const observe = async (name, action) => {
+    writeFileSync(join(terminal.output, 'editor-request.json'), JSON.stringify({ name, action })); terminal.send('\x1b\x04');
+    const dump = await until(() => {
+      terminal.health();
+      try { return JSON.parse(readFileSync(join(terminal.output, `${name}.json`), 'utf8')); }
+      catch (error) { if (error.code === 'ENOENT' || error instanceof SyntaxError) return false; throw error; }
+    }, `four-row ${name}`);
+    await terminal.settle(true); terminal.session = dump.session;
+    assert.deepEqual(dump.after, dump.before);
+    return terminal.captureScreen(name, dump);
+  };
+  try {
+    await terminal.ready(); terminal.send('run pending\r'); await terminal.event('provider_gate');
+    await terminal.resize(100, 4, true);
+    const native = await observe('native-four', 'off');
+    assert.ok(native.screen.some(row => row.includes('Working')), 'same active host indicator is visible in native editor at four rows');
+    const projected = await observe('toolview-four', 'on');
+    assert.equal(projected.statusIdentity, native.statusIdentity, 'no status replacement or restart');
+    writeFileSync(join(terminal.output, 'height-counter.json'), JSON.stringify({ height: 4,
+      nativeStatusVisible: native.screen.some(row => row.includes('Working')),
+      toolviewStatusVisible: projected.screen.some(row => row.includes('Working')),
+      sameNativeIndicator: projected.statusIdentity === native.statusIdentity }, null, 2));
+    assert.equal(projected.embedWorkingStatus, false);
+    assert.equal(projected.embeddedStatusPresent, false);
+    assert.ok(projected.nativeStatusRows.some(row => plain(row).includes('Working')), 'native activity remains in its own container');
+    assert.ok(!projected.statusRows.some(row => plain(row).includes('Working')), 'widget clipping is not activity projection');
+    assert.equal(projected.statusRows.length, 2, 'component still supplies both rows; native parent allocation clips them');
+    assert.equal(projected.toolviewRenderOverride, true, 'height pressure does not disable Toolview or introduce a height heuristic');
+    assert.equal(projected.statusPresent, true, 'clipping never clears the native indicator');
+    await terminal.resize(100, 80, true);
+    const restored = await observe('height-restored');
+    assert.equal(restored.statusIdentity, native.statusIdentity, 'resize recovery keeps the original native object');
+    assert.ok(restored.screen.some(row => row.includes('Working')), 'status returns through normal native rendering when space returns');
+  } finally { await terminal.close(); terminal.dispose(); }
+});
+
+
+test('editor padding settings move the complete input panel live in both terminal modes', { skip: stockOnly }, async () => {
+  const terminals = [];
+  const observe = async (terminal, name) => {
+    writeFileSync(join(terminal.output, 'editor-request.json'), JSON.stringify({ name }));
+    terminal.send('\x1b\x04');
+    const dump = await until(() => {
+      terminal.health();
+      try { return JSON.parse(readFileSync(join(terminal.output, `${name}.json`), 'utf8')); }
+      catch (error) { if (error.code === 'ENOENT' || error instanceof SyntaxError) return false; throw error; }
+    }, `padding ${name}`);
+    await terminal.settle(); terminal.session = dump.session;
+    assert.deepEqual(dump.after, dump.before, 'padding observation preserves native draft/cursor');
+    return terminal.captureScreen(name, dump);
+  };
+  try {
+    for (const mode of ['fullscreen', 'regular']) {
+      const terminal = new PiTerminal(`editor-padding-${mode}`, { mode, extensions: [join(fixtures, 'editor-driver.ts')] });
+      terminals.push(terminal); await terminal.ready();
+      const initial = await observe(terminal, 'initial'); assert.equal(initial.padding, 0, 'native default tested without overrides');
+      const identity = initial.identity;
+      for (const [cycle, padding] of [0, 1, 2, 3, 0].entries()) {
+        if (cycle > 0) {
+          await terminal.command('/settings'); terminal.send('Editor padding'); await terminal.settle();
+          terminal.send('\r'); await terminal.settle();
+          assert.ok(terminal.screen().some(row => new RegExp(`^\\s*→ Editor padding\\s+${padding}\\s*$`, 'u').test(row)), 'native settings cycles selected value');
+          terminal.send('\x1b'); await terminal.settle();
+          const persisted = JSON.parse(readFileSync(join(terminal.agent, 'settings.json'), 'utf8'));
+          assert.equal(persisted.editorPaddingX, padding, 'native setting persisted without Toolview writing settings');
+        }
+        for (const width of [24, 100]) {
+          await terminal.resize(width);
+          const content = 'PAD_TEXT_' + 'x'.repeat(width - 2 * padding - 3 - 'PAD_TEXT_'.length);
+          terminal.send(content); await terminal.settle();
+          const dump = await observe(terminal, `padding-${padding}-${width}-${terminals.length}-${cycle}`);
+          assert.equal(dump.padding, padding); assert.equal(dump.identity, identity);
+          assert.equal(dump.after.text, content); assert.equal(dump.statusRows.length, 2);
+          const y = dump.screen.findIndex(row => row.includes('PAD_TEXT_'));
+          const edgeY = dump.screen.findIndex(row => row.includes('╹▀'));
+          assert.ok(y > 0 && edgeY > y);
+          const background = await referenceCell(dump.styles.background), stripe = await referenceCell(dump.styles.border), bottom = await referenceCell(dump.styles.bottom);
+          for (const line of [dump.cells[y], dump.cells[edgeY - 1]]) {
+            assert.equal(line[padding].text, '┃'); assert.equal(line[padding].fg, stripe.fg);
+            assert.equal(line[padding].bgMode, 0); assert.equal(line[padding + 1].text, ' ');
+            for (let x = padding + 1; x < width - padding; x++) {
+              assert.equal(line[x].bgMode, background.bgMode); assert.equal(line[x].bg, background.bg);
+            }
+          }
+          assert.equal(dump.cells[y][width - padding - 1].inverse, true, 'end cursor occupies fixed internal right gap');
+          for (const line of [dump.cells[y], dump.cells[edgeY - 1], dump.cells[edgeY]]) {
+            for (let x = 0; x < width; x++) if (x < padding || x >= width - padding) {
+              assert.equal(line[x].text, ' '); assert.equal(line[x].bgMode, 0); assert.equal(line[x].inverse, false);
+            }
+          }
+          assert.equal(dump.cells[edgeY][padding].text, '╹');
+          for (let x = padding + 1; x < width - padding; x++) {
+            const cell = dump.cells[edgeY][x]; assert.equal(cell.text, '▀'); assert.equal(cell.bgMode, 0);
+            assert.equal(cell.fgMode, bottom.fgMode); assert.equal(cell.fg, bottom.fg);
+          }
+          await assertFits([...dump.rows, ...dump.statusRows], width);
+          if (mode === 'fullscreen') {
+            await sgrAt(terminal, padding + 2, y);
+            const click = await observe(terminal, `click-${padding}-${width}-${cycle}`);
+            assert.deepEqual(click.after.cursor, { line: 0, col: 0 }); assert.equal(click.after.text, content);
+          }
+          terminal.send('\x03'); await terminal.settle();
+        }
+        terminal.send('/tv-d'); await terminal.settle();
+        const menu = await observe(terminal, `menu-${padding}-${cycle}`);
+        assert.equal(menu.menu, true); assert.deepEqual(menu.statusRows, []);
+        const menuRow = menu.rows.find(row => plain(row).includes('tv-dump'));
+        assert.ok(menuRow); assert.equal(plain(menuRow).search(/\S/u), padding + 2, 'native menu follows input text origin');
+        assert.ok(!menu.screen.some(row => row.includes('╹▀')), 'edge remains hidden during autocomplete');
+        terminal.send('\x1b'); await terminal.settle(); terminal.send('\x03'); await terminal.settle();
+      }
+      assert.equal(terminal.events().filter(event => event.type === 'start').length, 1, 'all geometry changes happen without reload');
+      assert.equal(terminal.events().filter(event => event.type === 'tool_call' || event.type === 'context').length, 0, 'settings/drafts never become model traffic');
+    }
+  } finally { for (const terminal of terminals) { await terminal.close(); terminal.dispose(); } }
+});
+
+
+test('aboveEditor widget separator stays immediately before input and follows zero height in real native layouts', { skip: stockOnly }, async () => {
+  const terminals = [];
+  const observe = async (terminal, name, action = 'snapshot') => {
+    writeFileSync(join(terminal.output, 'editor-request.json'), JSON.stringify({ name, action }));
+    terminal.send('\x1b\x04');
+    const dump = await until(() => {
+      terminal.health();
+      try { return JSON.parse(readFileSync(join(terminal.output, `${name}.json`), 'utf8')); }
+      catch (error) { if (error.code === 'ENOENT' || error instanceof SyntaxError) return false; throw error; }
+    }, `widget gap ${name}`);
+    await terminal.settle(); terminal.session = dump.session;
+    assert.deepEqual(dump.after, dump.before, 'widget controls preserve the actual draft and native cursor');
+    assert.equal(dump.exactStockPrototype, true); assert.equal(dump.inputMethodUnchanged, true);
+    assert.equal(dump.widgetCallsAfterEditor, dump.widgetCallsBeforeEditor, 'editor spacing never rerenders the foreign widget');
+    return terminal.captureScreen(name, dump);
+  };
+  const change = async (terminal, name, action) => {
+    // The action requests an ordinary native frame; inspect after that frame, not
+    // an action-time manual editor render before its upper sibling has rendered.
+    await observe(terminal, `${name}-action`, action);
+    return observe(terminal, name);
+  };
+  const gap = async (dump, lastWidget, needle = 'WIDGET_INPUT_') => {
+    assert.equal(dump.rows[0], '', 'SDK layout guard must activate: silently dropping the feature is a failing compatibility test');
+    assert.ok(plain(dump.rows[1]).includes('┃'));
+    const widgetY = dump.screen.findIndex(row => row.includes(lastWidget));
+    const textY = dump.screen.findIndex(row => row.includes(needle));
+    assert.ok(widgetY >= 0 && textY >= 0);
+    assert.equal(textY, widgetY + 3, 'last widget, exterior empty row, existing panel padding, then input text');
+    assert.equal(dump.cells[widgetY + 2][dump.padding].text, '┃', 'inside panel padding remains intact');
+    for (const cell of dump.cells[widgetY + 1]) {
+      assert.equal(cell.text.trim(), ''); assert.equal(cell.fgMode, 0); assert.equal(cell.bgMode, 0);
+      assert.equal(cell.inverse, false); assert.equal(!!cell.bold, false);
+    }
+    const marker = dump.rows.find(row => row.includes('\x1b_pi:c\x07'));
+    assert.ok(marker); assert.equal(dump.rows.filter(row => row.includes('\x1b_pi:c\x07')).length, 1);
+    await assertFits([...dump.rows, ...dump.statusRows], dump.width);
+  };
+  const noGap = dump => {
+    assert.notEqual(dump.rows[0], '', 'no additional editor-local empty row');
+    assert.ok(plain(dump.rows[0]).includes('┃'));
+    assert.ok(!dump.screen.some(row => /UPPER_WIDGET_A|LAST_UPPER_WIDGET_B/u.test(row)));
+  };
+  try {
+    for (const mode of ['fullscreen', 'regular']) {
+      const terminal = new PiTerminal(`editor-widget-gap-${mode}`, { mode, agentSettings: { editorPaddingX: 1 }, extensions: [join(fixtures, 'editor-driver.ts')] });
+      terminals.push(terminal); await terminal.ready();
+      const draft = 'WIDGET_INPUT_界é\n  SECOND_WIDGET_LINE';
+      terminal.send('\x1b[200~' + draft + '\x1b[201~'); await terminal.settle();
+      const baseline = await observe(terminal, 'absent'); noGap(baseline);
+      const identity = baseline.identity;
+      let dump = await change(terminal, 'lower-only', 'widget-lower'); noGap(dump);
+      assert.equal(dump.rows.length, baseline.rows.length); assert.equal(dump.statusRows.length, 2);
+      assert.ok(dump.screen.some(row => row.includes('LOWER_ONLY_WIDGET')));
+      dump = await change(terminal, 'lower-removed', 'widget-lower-remove'); noGap(dump);
+      dump = await change(terminal, 'registered-zero', 'widget-zero'); noGap(dump);
+      assert.equal(dump.upperRegistered, true); assert.deepEqual(dump.upperRows, []);
+      dump = await change(terminal, 'visible', 'widget-visible'); await gap(dump, 'UPPER_WIDGET_A');
+      assert.equal(dump.rows.length, baseline.rows.length + 1); assert.equal(dump.identity, identity);
+      assert.equal(dump.after.expanded, draft); assert.ok(dump.widgetCallsBeforeEditor > 0);
+      dump = await change(terminal, 'later-widget', 'widget-extra'); await gap(dump, 'LAST_UPPER_WIDGET_B');
+      assert.equal(dump.rows.length, baseline.rows.length + 1, 'one gap for the whole group, not one per widget');
+      dump = await change(terminal, 'one-zero', 'widget-zero'); await gap(dump, 'LAST_UPPER_WIDGET_B');
+      dump = await change(terminal, 'all-zero', 'widget-extra-remove'); noGap(dump);
+      assert.equal(dump.rows.length, baseline.rows.length);
+      dump = await change(terminal, 'removed', 'widget-remove'); noGap(dump);
+      dump = await change(terminal, 'visible-again', 'widget-visible'); await gap(dump, 'UPPER_WIDGET_A');
+      for (const action of ['light', 'dark']) { dump = await observe(terminal, action, action); await gap(dump, 'UPPER_WIDGET_A'); }
+      for (const width of [24, 60, 100]) { await terminal.resize(width); dump = await observe(terminal, `width-${width}`); await gap(dump, 'UPPER_WIDGET_A'); }
+      if (mode === 'fullscreen') {
+        const widgetY = dump.screen.findIndex(row => row.includes('UPPER_WIDGET_A'));
+        const cursor = dump.after.cursor;
+        await sgrAt(terminal, 3, widgetY + 1); dump = await observe(terminal, 'gap-click');
+        assert.deepEqual(dump.after.cursor, cursor, 'blank separator is not an input target');
+        const textY = dump.screen.findIndex(row => row.includes('WIDGET_INPUT_'));
+        await sgrAt(terminal, 3, textY); dump = await observe(terminal, 'input-click');
+        assert.deepEqual(dump.after.cursor, { line: 0, col: 0 }, 'native y mapping compensates for the external prefix');
+      }
+      dump = await observe(terminal, 'off', 'off'); assert.notEqual(dump.rows[0], '');
+      assert.ok(dump.rows.some(row => plain(row).includes('─')));
+      dump = await observe(terminal, 'on', 'on'); await gap(dump, 'UPPER_WIDGET_A'); assert.equal(dump.identity, identity);
+      terminal.send('\x03'); await terminal.settle(); terminal.send('/tv-d'); await terminal.settle();
+      dump = await observe(terminal, 'menu'); assert.equal(dump.rows[0], ''); assert.deepEqual(dump.statusRows, []);
+      const menuY = dump.screen.findIndex(row => row.includes('tv-dump') && !row.includes('/tv-d'));
+      assert.ok(menuY >= 0);
+      if (mode === 'fullscreen') { await sgrAt(terminal, 3, menuY); dump = await observe(terminal, 'menu-click'); assert.match(dump.after.text, /^\/tv-dump/u); }
+      else { terminal.send('\t'); await terminal.settle(); }
+      terminal.send('\x03'); await terminal.settle();
+      assert.equal(terminal.events().filter(event => ['call', 'result', 'model_context'].includes(event.type)).length, 0, 'draft and widgets produce no model/tool traffic');
+      await terminal.run('user-card'); const live = await terminal.capture('live-traffic');
+      assert.equal(live.tools.length, 2); const bytes = readFileSync(live.session);
+      const native = new PiTerminal(`editor-widget-gap-native-${mode}`, { mode, workspace: terminal.work, agentSettings: { editorPaddingX: 1 } });
+      terminals.push(native); await native.ready(); await native.run('user-card'); await native.capture('native-traffic');
+      assert.deepEqual(traffic(terminal, 2), traffic(native, 2), 'same two real calls/results and three provider contexts remain exact');
+      const opposite = mode === 'fullscreen' ? 'regular' : 'fullscreen';
+      await terminal.command('/settings'); terminal.send('TUI mode'); await terminal.settle();
+      assert.ok(terminal.screen().some(row => new RegExp(`^\\s*→ TUI mode\\s+${mode}\\s*$`, 'u').test(row)));
+      terminal.send('\r'); await terminal.settle(); terminal.send('\x1b'); await terminal.settle();
+      assert.equal(terminal.term.buffer.active.type, opposite === 'fullscreen' ? 'alternate' : 'normal');
+      terminal.send('WIDGET_INPUT_MODE'); await terminal.settle(); dump = await observe(terminal, 'mode-replaced');
+      await gap(dump, 'UPPER_WIDGET_A'); assert.equal(dump.identity, identity);
+      terminal.send('\x03'); await terminal.settle();
+      await terminal.command('/reload'); await terminal.event('start', 2);
+      terminal.send('WIDGET_INPUT_RELOAD'); await terminal.settle(); dump = await observe(terminal, 'reload-absent'); noGap(dump);
+      dump = await change(terminal, 'reload-visible', 'widget-visible'); await gap(dump, 'UPPER_WIDGET_A');
+      terminal.send('\x03'); await terminal.settle();
+      assert.deepEqual(readFileSync(live.session), bytes, 'widgets and renderer/reload controls never rewrite stored traffic');
+      assert.deepEqual(traffic(terminal, 2), traffic(native, 2));
+      const replay = new PiTerminal(`editor-widget-gap-replay-${mode}`, { mode, session: live.session, workspace: terminal.work,
+        agentSettings: { editorPaddingX: 1 }, extensions: [join(fixtures, 'editor-driver.ts')] });
+      terminals.push(replay); await replay.ready();
+      dump = await observe(replay, 'replay-absent'); noGap(dump);
+      replay.send('WIDGET_INPUT_REPLAY'); await replay.settle(); dump = await change(replay, 'replay-visible', 'widget-visible'); await gap(dump, 'UPPER_WIDGET_A');
+      replay.send('\x03'); await replay.settle();
+      const replayDump = await replay.capture('replay-traffic');
+      assert.deepEqual(replayDump.branch, live.branch); assert.deepEqual(readFileSync(live.session), bytes);
+      assert.equal(replay.events().filter(event => ['call', 'result', 'model_context'].includes(event.type)).length, 0, 'replay executes no new tools or model requests');
+      writeFileSync(join(terminal.output, 'widget-gap-controls.json'), JSON.stringify({ mode, toolCalls: 2, toolResults: 2, providerContexts: 3,
+        absent: baseline.rows.length, withUpperWidget: baseline.rows.length + 1, sameDraftEditor: identity, replayExecuted: 0 }, null, 2));
+    }
+  } finally { for (const terminal of terminals) { await terminal.close(); terminal.dispose(); } }
+});
+
+
+// A real separately loaded extension owns this editor through setEditorComponent.
+// Compare its complete input region with a process that never loads Toolview.
+test('foreign editor extension retains native input, widgets, mouse and replay in both load orders', { skip: stockOnly, timeout: 240000 }, async () => {
+  const terminals = [], coverage = [], workspace = mkdtempSync(join(tmpdir(), 'toolview-foreign-work-'));
+  const ownerExtension = join(fixtures, 'foreign-editor.ts');
+  const observe = async (terminal, name, action = 'snapshot') => {
+    writeFileSync(join(terminal.output, 'foreign-request.json'), JSON.stringify({ name, action }));
+    terminal.send('\x1b\x04');
+    const dump = await until(() => {
+      terminal.health();
+      try { return JSON.parse(readFileSync(join(terminal.output, `${name}.json`), 'utf8')); }
+      catch (error) { if (error.code === 'ENOENT' || error instanceof SyntaxError) return false; throw error; }
+    }, `foreign editor ${name}`);
+    await terminal.settle(!dump.idle); terminal.session = dump.session;
+    assert.deepEqual(dump.after, dump.before, 'observation, themes and empty-draft takeover do not exchange draft data');
+    const buffer = terminal.term.buffer.active;
+    return terminal.captureScreen(name, { ...dump, hardware: { x: buffer.cursorX, y: buffer.baseY + buffer.cursorY - buffer.viewportY } });
+  };
+  const region = dump => {
+    assert.equal(dump.factoryOwned, true, 'actual public editor factory, not a mocked nativeEditor option');
+    assert.deepEqual(dump.aboveRows, ['', 'FOREIGN_UPPER_ROW']);
+    assert.deepEqual(dump.belowRows, ['FOREIGN_LOWER_ROW'], 'no Toolview metadata/edge rows, even with its widget registered');
+    assert.equal(dump.padding, 2, 'foreign geometry is not converted to Toolview exterior margins');
+    assert.equal(dump.git.watchers, 0, 'foreign editor releases Toolview Git watches');
+    assert.equal(dump.git.activeJobs, 0, 'foreign editor starts no Toolview Git work');
+    if (dump.custom) assert.equal(dump.ownerMethods, true, 'foreign render, input and mouse methods retain ownership');
+    assert.doesNotMatch(dump.rows.map(plain).join('\n'), /┃|╹|▀/u, 'no panel, half-block edge or injected decoration');
+    assert.notEqual(dump.rows[0], '', 'no Toolview upper-widget separator');
+    const top = dump.screen.findIndex(row => row === 'FOREIGN_UPPER_ROW');
+    assert.ok(top >= 0, 'real upper widget is painted');
+    const rows = dump.rows.map(row => plain(row.replaceAll('\x1b_pi:c\x07', '')));
+    const physical = dump.screen.slice(top + 1, top + 1 + rows.length).map(plain);
+    if (!dump.idle && dump.embedWorkingStatus) {
+      // Native clock ticks between the packet and the physical-screen sample.
+      // Only its single top-border frame glyph is explicitly variable.
+      const frame = row => row.replace(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/u, '<native-frame>');
+      rows[0] = frame(rows[0]); physical[0] = frame(physical[0]);
+    }
+    assert.deepEqual(physical, rows, 'foreign editor begins immediately after upper widget; no invisible inserted row');
+    assert.equal(dump.screen[top + 1 + rows.length], 'FOREIGN_LOWER_ROW', 'own lower widget immediately follows editor/menu');
+    return { top, cells: dump.cells.slice(top, top + rows.length + 2), rows };
+  };
+  const framePattern = /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/u;
+  const phaseRows = rows => rows.map(row => plain(row).includes('Working') ? row.replace(framePattern, '<native-frame>') : row);
+  const phaseCells = (cells, rowIndex) => {
+    const indexes = cells[rowIndex].flatMap((cell, x) => framePattern.test(cell.text) ? [x] : []);
+    assert.equal(indexes.length, 1, 'exactly one identified native spinner cell');
+    return cells.map((row, y) => row.map((cell, x) => y === rowIndex && x === indexes[0] ? { ...cell, text: '<native-frame>' } : cell));
+  };
+  const same = (native, live) => {
+    const control = region(native), actual = region(live);
+    assert.equal(live.idle, native.idle);
+    const busy = !native.idle;
+    assert.deepEqual(busy ? phaseRows(live.rows) : live.rows, busy ? phaseRows(native.rows) : native.rows,
+      'complete ANSI render matches native; only its identified animation glyph may vary');
+    assert.deepEqual(busy ? phaseRows(live.nativeStatusRows) : live.nativeStatusRows,
+      busy ? phaseRows(native.nativeStatusRows) : native.nativeStatusRows, 'separate native status rows remain untouched');
+    assert.deepEqual(busy && live.embedWorkingStatus ? phaseCells(actual.cells, 1) : actual.cells,
+      busy && native.embedWorkingStatus ? phaseCells(control.cells, 1) : control.cells,
+      'all physical input/widget colors and attributes match native, including the spinner cell');
+    if (busy) {
+      const indicatorCells = dump => {
+        const row = dump.screen.findIndex(text => text.includes('Working'));
+        assert.ok(row >= 0, 'native Working is physically visible');
+        return phaseCells([dump.cells[row]], 0);
+      };
+      assert.deepEqual(indicatorCells(live), indicatorCells(native), 'physical native indicator glyph attributes remain unchanged in either placement');
+    }
+    assert.deepEqual({ x: live.hardware.x, y: live.hardware.y - actual.top },
+      { x: native.hardware.x, y: native.hardware.y - control.top }, 'hardware cursor geometry remains native');
+    assert.deepEqual(live.after, native.after, 'text, expanded paste and cursor match native');
+    assert.equal(live.menu, native.menu); assert.equal(live.mode, native.mode);
+    assert.equal(live.footerOwner, 'FooterComponent');
+    assert.deepEqual(live.footerRows, native.footerRows, 'disabled input restores the complete native footer data/ANSI at every lifecycle phase');
+    assert.deepEqual(live.mouseEvents, native.mouseEvents, 'complete foreign mouse events including absolute screen coordinates stay native with the native footer');
+  };
+  try {
+    for (const mode of ['fullscreen', 'regular']) for (const order of ['foreign-first', 'toolview-first']) {
+      const prefix = `${mode}-${order}`, deferred = order === 'toolview-first';
+      const embedded = !deferred;
+      const extraEnv = { TOOLVIEW_TEST_DEFER_EDITOR: deferred ? '1' : '0', TOOLVIEW_TEST_FOREIGN_EMBED: embedded ? '1' : '0' };
+      const sharedWork = join(workspace, prefix); mkdirSync(sharedWork, { recursive: true });
+      const native = new PiTerminal(`foreign-native-${prefix}`, { mode, workspace: sharedWork, agentSettings: { editorPaddingX: 2 }, extensions: [ownerExtension], extraEnv });
+      terminals.push(native); await native.ready();
+      const live = new PiTerminal(`foreign-live-${prefix}`, { mode, agentSettings: { editorPaddingX: 2 }, workspace: native.work, extraEnv,
+        extensions: order === 'foreign-first' ? [ownerExtension, extension] : [extension, ownerExtension] });
+      terminals.push(live); await live.ready();
+      if (deferred) {
+        const warm = await observe(live, 'stock-warm');
+        assert.ok(warm.rows.some(row => plain(row).includes('┃')), 'production Toolview was active before late takeover');
+        assert.equal(warm.rows[0], '', 'warm upper-widget measurement exists before ownership changes');
+        assert.equal(warm.footerOwner, 'FooterView', 'footer starts enabled beside the recognized stock editor');
+        assert.equal(warm.belowRows.length, 3, 'both Toolview rows existed before takeover beside the owner widget');
+        await observe(native, 'install', 'install'); await observe(live, 'install', 'install');
+      }
+      let stock = await observe(native, 'initial'), styled = await observe(live, 'initial'); same(stock, styled);
+      assert.equal(styled.custom, true); assert.equal(styled.mode, false);
+      assert.equal(styled.footerOwner, 'FooterComponent', 'foreign editor disables Toolview footer as well as input styling');
+      assert.equal(stock.footerOwner, 'FooterComponent');
+      const identity = styled.identity, ownerQueries = styled.git.queries;
+      const pair = async (name, action = 'snapshot') => {
+        stock = await observe(native, name, action); styled = await observe(live, name, action); same(stock, styled);
+        assert.equal(styled.identity, identity, 'ordinary Toolview/UI actions never replace the foreign editor');
+        assert.equal(styled.git.queries, ownerQueries, 'foreign editor frames/operations do not query Git');
+      };
+      const send = async data => { native.send(data); live.send(data); await native.settle(); await live.settle(); };
+      await send('\x1b\x18'); await pair('own-key'); assert.equal(styled.mode, true, 'extension-specific key remains effective');
+      const draft = 'FOREIGN_INPUT_界é\n  FOREIGN_SECOND';
+      await send('\x1b[200~' + draft + '\x1b[201~'); await pair('draft'); assert.equal(styled.after.expanded, draft);
+      if (mode === 'fullscreen') {
+        const clicked = new Map();
+        for (const terminal of [native, live]) {
+          const dump = terminal === native ? stock : styled;
+          const y = dump.screen.findIndex(row => row.includes('FOREIGN_INPUT_')); clicked.set(terminal, y);
+          assert.ok(y >= 0); await sgrAt(terminal, 2, y);
+        }
+        await pair('mouse'); assert.deepEqual(styled.after.cursor, { line: 0, col: 0 });
+        assert.ok(styled.mouseEvents.length > 0, 'actual fullscreen mouse dispatch reaches the foreign override');
+        for (const [terminal, dump] of [[native, stock], [live, styled]]) for (const event of dump.mouseEvents.slice(-3))
+          assert.equal(event.screenY, clicked.get(terminal), 'absolute screen coordinate equals its actual physical click, not a fixed footer assumption');
+        await send('Z'); await pair('insert'); assert.equal(styled.after.expanded, 'Z' + draft);
+        await send('\x1f'); await pair('undo-insert'); assert.equal(styled.after.expanded, draft);
+      }
+      for (const width of [24, 60, 100]) {
+        await native.resize(width); await live.resize(width); await pair(`width-${width}`); await assertFits(styled.rows, width);
+      }
+      for (const theme of ['light', 'dark']) await pair(theme, theme);
+      await send('\x1f'); await pair('undo-paste'); assert.equal(styled.after.expanded, '');
+      const paste = 'FOREIGN_PASTE_界é_'.repeat(100);
+      await send('\x1b[200~' + paste + '\x1b[201~'); await pair('large-paste');
+      assert.match(styled.after.text, /\[paste #/u); assert.equal(styled.after.expanded, paste);
+      await send('\x1f'); await pair('large-undo'); assert.equal(styled.after.expanded, '');
+      await send('/tv-d'); await pair('menu'); assert.equal(styled.menu, true);
+      const menuClicked = new Map();
+      if (mode === 'fullscreen') {
+        for (const terminal of [native, live]) {
+          const dump = terminal === native ? stock : styled;
+          const y = dump.screen.findIndex(row => row.includes('tv-dump') && !row.includes('/tv-d')); menuClicked.set(terminal, y);
+          assert.ok(y >= 0); await sgrAt(terminal, 5, y);
+        }
+      } else await send('\t');
+      await pair('completion'); assert.match(styled.after.text, /^\/tv-dump/u);
+      if (mode === 'fullscreen') for (const [terminal, dump] of [[native, stock], [live, styled]]) for (const event of dump.mouseEvents.slice(-3))
+        assert.equal(event.screenY, menuClicked.get(terminal), 'autocomplete handler retains the independently measured physical click row');
+      await send('\x03'); await pair('cleared');
+      for (const action of ['off', 'on']) {
+        await live.command(`/toolview ${action}`); await pair(action);
+      }
+      // A factory returning the exact stock class must also remain untouched.
+      await observe(native, 'factory-stock', 'factory-stock'); await observe(live, 'factory-stock', 'factory-stock');
+      stock = await observe(native, 'factory-stock-rows'); styled = await observe(live, 'factory-stock-rows'); same(stock, styled);
+      assert.equal(styled.custom, false);
+      assert.equal(styled.footerOwner, 'FooterComponent', 'even an exact stock class returned by a foreign factory keeps footer native');
+      // Restore our subclass before testing native active status and history.
+      await observe(native, 'owner-return', 'install'); await observe(live, 'owner-return', 'install');
+      native.send('run pending\r'); live.send('run pending\r');
+      await native.event('provider_gate'); await live.event('provider_gate');
+      stock = await observe(native, 'working'); styled = await observe(live, 'working');
+      for (const dump of [stock, styled]) {
+        region(dump); assert.equal(dump.idle, false);
+        const editorWorking = dump.rows.map(plain).join('\n').includes('Working');
+        const separateWorking = dump.nativeStatusRows.map(plain).join('\n').includes('Working');
+        assert.equal(editorWorking, embedded, 'native embedding follows the foreign factory option');
+        assert.equal(separateWorking, !embedded, 'non-embedded native status retains its own container');
+        assert.equal(dump.screen.filter(row => row.includes('Working')).length, 1, 'one physical native indicator, never a belowEditor duplicate');
+      }
+      same(stock, styled); // Includes active physical colors, spinner attributes and hardware cursor.
+      for (const terminal of [native, live]) {
+        writeFileSync(join(terminal.output, 'provider-go'), 'go'); await terminal.event('tool_gate');
+        writeFileSync(join(terminal.output, 'tool-go'), 'go'); await terminal.event('agent_end'); await terminal.settle();
+      }
+      stock = await observe(native, 'completed'); styled = await observe(live, 'completed'); same(stock, styled);
+      const nativeTraffic = await native.capture('foreign-native-traffic'), liveTraffic = await live.capture('foreign-live-traffic');
+      assert.deepEqual(traffic(live, 2), traffic(native, 2), 'two calls/results and three model contexts remain exact');
+      assert.deepEqual(persisted(liveTraffic), persisted(nativeTraffic));
+      const activeTools = (dump, control) => {
+        assert.equal(dump.tools.length, 2);
+        const read = byName(dump, 'read')[0]; compactContent(read);
+        assert.equal(summaryText(read), summaryExpected('read a.txt'), 'known Toolview compact read presentation stays active');
+        assert.doesNotMatch(lines(read).join('\n'), /READ_A_CONTENT/u, 'Toolview read summary does not show native result body');
+        assert.notDeepEqual(toolLines(dump), toolLines(control), 'only editor integration is skipped, not Toolview tool presentation');
+        assert.deepEqual(toolLines(dump), toolLines(liveTraffic), 'Toolview layouts survive ownership/lifecycle boundaries');
+      };
+      activeTools(liveTraffic, nativeTraffic);
+      const bytes = readFileSync(liveTraffic.session);
+      for (const terminal of [native, live]) {
+        await terminal.command('/reload'); await terminal.event('start', 2);
+      }
+      stock = await observe(native, 'reload'); styled = await observe(live, 'reload'); same(stock, styled);
+      assert.equal(styled.footerOwner, 'FooterComponent');
+      const nativeReload = await native.capture('foreign-native-reload-tools'), liveReload = await live.capture('foreign-live-reload-tools');
+      activeTools(liveReload, nativeReload);
+      assert.deepEqual(traffic(live, 2), traffic(native, 2), 'reload adds no model/tool traffic');
+      assert.deepEqual(readFileSync(liveTraffic.session), bytes, 'UI reload does not change saved session bytes');
+      const replayNative = new PiTerminal(`foreign-native-replay-${prefix}`, { mode, agentSettings: { editorPaddingX: 2 }, extraEnv: { TOOLVIEW_TEST_FOREIGN_EMBED: embedded ? '1' : '0' }, session: liveTraffic.session, workspace: native.work, extensions: [ownerExtension] });
+      const replayLive = new PiTerminal(`foreign-live-replay-${prefix}`, { mode, agentSettings: { editorPaddingX: 2 }, extraEnv: { TOOLVIEW_TEST_FOREIGN_EMBED: embedded ? '1' : '0' }, session: liveTraffic.session, workspace: native.work,
+        extensions: order === 'foreign-first' ? [ownerExtension, extension] : [extension, ownerExtension] });
+      terminals.push(replayNative, replayLive); await replayNative.ready(); await replayLive.ready();
+      const unstyled = await observe(replayNative, 'replay'), resumed = await observe(replayLive, 'replay'); same(unstyled, resumed);
+      assert.equal(resumed.footerOwner, 'FooterComponent', 'saved replay keeps footer native with the foreign editor');
+      const nativeReplay = await replayNative.capture('foreign-native-replay-traffic'), liveReplay = await replayLive.capture('foreign-live-replay-traffic');
+      activeTools(liveReplay, nativeReplay);
+      for (const [terminal, dump] of [[replayNative, nativeReplay], [replayLive, liveReplay]]) {
+        assert.deepEqual(persisted(dump), persisted(liveTraffic));
+        assert.equal(terminal.events().filter(event => ['call', 'result', 'model_context'].includes(event.type)).length, 0);
+      }
+      assert.deepEqual(readFileSync(liveTraffic.session), bytes);
+      coverage.push({ mode, order, runtimeTakeover: deferred, embeddedWorking: embedded, calls: 2, results: 2, modelContexts: 3, replayNewTraffic: 0 });
+    }
+    writeFileSync(join(artifacts, 'foreign-editor-coverage.json'), JSON.stringify({ installedPowerlineExecuted: false, coverage }, null, 2));
+  } finally { for (const terminal of terminals.reverse()) { await terminal.close(); terminal.dispose(); } rmSync(workspace, { recursive: true, force: true }); }
+});
+
+
+test('right-aligned cwd and live Git branch preserve colors padding and zero hot-frame queries', { skip: stockOnly }, async () => {
+  const terminals = [], base = mkdtempSync(join(tmpdir(), 'toolview-cwd-cli-'));
+  const observe = async (terminal, name, action = 'snapshot') => {
+    writeFileSync(join(terminal.output, 'editor-request.json'), JSON.stringify({ name, action })); terminal.send('\x1b\x04');
+    const dump = await until(() => {
+      terminal.health();
+      try { return JSON.parse(readFileSync(join(terminal.output, `${name}.json`), 'utf8')); }
+      catch (error) { if (error.code === 'ENOENT' || error instanceof SyntaxError) return false; throw error; }
+    }, `directory ${name}`);
+    await terminal.settle(!dump.idle); terminal.session = dump.session;
+    assert.deepEqual(dump.after, dump.before); return terminal.captureScreen(name, dump);
+  };
+  const check = async (dump, { full = false, branch, name } = {}) => {
+    assert.equal(dump.statusRows.length, 2); await assertFits(dump.statusRows, dump.width);
+    const edge = dump.screen.findIndex(row => row.includes('╹▀')), y = edge - 1;
+    assert.ok(y >= 0); const text = dump.screen[y].trimEnd(), cells = dump.cells[y];
+    assert.equal(text, plain(dump.statusRows[0]), 'actual physical metadata row equals current component output');
+    assert.equal(cells[dump.width - 2].text, ' ', 'exactly one painted right-padding cell');
+    assert.equal(cells[dump.width - 1].bgMode, 0, 'exterior Editor padding remains unpainted');
+    const bg = await referenceCell(dump.styles.background);
+    assert.equal(cells[dump.width - 2].bg, bg.bg);
+    assert.equal(cells[dump.width - 2].bgMode, bg.bgMode);
+    const fg = async (start, count, style) => {
+      const reference = await referenceCell(style);
+      for (let x = start; x < start + count; x++) { assert.equal(cells[x].fg, reference.fg); assert.equal(cells[x].fgMode, reference.fgMode); }
+    };
+    if (full) {
+      const right = dump.cwd + (branch ? ':' + branch : '');
+      assert.ok(text.endsWith(right), 'full ctx.cwd and actual named branch are right-aligned');
+      const start = dump.width - 2 - visibleWidth(right), nameX = start + visibleWidth(dump.cwd.slice(0, -name.length));
+      assert.equal(cells[dump.width - 3].text, [...(branch || name)].at(-1) === '\u0301' ? 'é' : [...(branch || name)].at(-1));
+      await fg(start, nameX - start, dump.styles.parent);
+      await fg(nameX, visibleWidth(name), dump.styles.directory);
+      if (branch) { const colon = nameX + visibleWidth(name); await fg(colon, 1, dump.styles.colon); await fg(colon + 1, visibleWidth(branch), dump.styles.branch); }
+      assert.ok(text.slice(0, start).endsWith('  '), 'at least two spaces separate left and right');
+    } else if (dump.width >= 60) assert.ok(text.includes(name), 'complete last directory outranks branch at medium width');
+    assert.ok(!text.includes('Working'), 'activity is never budgeted into metadata');
+  };
+  try {
+    for (const mode of ['fullscreen', 'regular']) {
+      const repo = join(base, mode), name = 'important-界é', workspace = join(repo, 'parent', name);
+      mkdirSync(workspace, { recursive: true });
+      const git = (...args) => { const result = spawnSync('git', ['-C', repo, ...args], { encoding: 'utf8' }); assert.equal(result.status, 0, result.stderr); };
+      let branch = 'feature/input-status'; git('init', '-b', branch);
+      const terminal = new PiTerminal(`cwd-${mode}`, { mode, workspace, agentSettings: { editorPaddingX: 1 }, extensions: [join(fixtures, 'editor-driver.ts')] });
+      terminals.push(terminal); await terminal.ready(); await terminal.resize(220);
+      let dump = await observe(terminal, 'full'); await check(dump, { full: true, branch, name });
+      assert.equal(dump.cwd, workspace); assert.ok(dump.git.watchers >= 2);
+      for (const action of ['light', 'dark']) { dump = await observe(terminal, action, action); await check(dump, { full: true, branch, name }); }
+      const baseline = dump.git;
+      for (let i = 0; i < 3; i++) { dump = await observe(terminal, `hot-${i}`); assert.equal(dump.git.queries, baseline.queries); assert.equal(dump.git.spawned, baseline.spawned); }
+      for (const width of [100, 60, 24, 220]) { await terminal.resize(width); dump = await observe(terminal, `width-${width}`); await check(dump, { full: width === 220, branch, name }); }
+      branch = 'external-next'; git('symbolic-ref', 'HEAD', 'refs/heads/' + branch); await terminal.settle();
+      let external = 0;
+      dump = await until(async () => {
+        const value = await observe(terminal, `external-branch-${external++}`);
+        return value.git.activeJobs === 0 && plain(value.statusRows[0] || '').includes(':' + branch) ? value : false;
+      }, 'Git watch publishes external branch before physical capture');
+      await check(dump, { full: true, branch, name });
+      assert.ok(dump.git.branchReads > baseline.branchReads, 'external atomic HEAD mutation refreshes Git snapshot');
+      terminal.send('/tv-d'); await terminal.settle(); dump = await observe(terminal, 'menu'); assert.deepEqual(dump.statusRows, []);
+      terminal.send('\x03'); await terminal.settle();
+      terminal.send('run pending\r'); await terminal.event('provider_gate');
+      dump = await observe(terminal, 'busy'); const busy = dump.git;
+      for (let i = 0; i < 3; i++) {
+        dump = await observe(terminal, `busy-hot-${i}`); await check(dump, { full: true, branch, name });
+        assert.equal(dump.git.queries, busy.queries); assert.equal(dump.git.spawned, busy.spawned);
+        assert.ok(!dump.screen.some(row => row.includes(' • Idle'))); assert.ok(dump.screen.some(row => row.includes('Working')));
+      }
+      writeFileSync(join(terminal.output, 'provider-go'), 'go'); await terminal.event('tool_gate');
+      writeFileSync(join(terminal.output, 'tool-go'), 'go'); await terminal.event('agent_end');
+      const complete = await terminal.capture('directory-traffic'); assert.equal(complete.tools.length, 2);
+      dump = await observe(terminal, 'idle-after-operations'); await check(dump, { full: true, branch, name });
+      assert.ok(dump.screen.some(row => row.includes(' • Idle')));
+      const off = await observe(terminal, 'off', 'off'); assert.deepEqual(off.statusRows, []);
+      assert.equal(off.git.watchers, 0); assert.equal(off.git.activeJobs, 0);
+      dump = await observe(terminal, 'on', 'on'); await terminal.settle(); dump = await observe(terminal, 'on-ready'); await check(dump, { full: true, branch, name });
+      await terminal.command('/reload'); await terminal.event('start', 2); dump = await observe(terminal, 'reload'); await check(dump, { full: true, branch, name });
+      const native = new PiTerminal(`cwd-native-${mode}`, { mode, workspace }); terminals.push(native); await native.ready();
+      native.send('run pending\r'); await native.event('provider_gate'); writeFileSync(join(native.output, 'provider-go'), 'go'); await native.event('tool_gate');
+      writeFileSync(join(native.output, 'tool-go'), 'go'); await native.event('agent_end');
+      assert.deepEqual(traffic(terminal, 2), traffic(native, 2), 'cwd/status presentation leaves model traffic unchanged');
+      const replay = new PiTerminal(`cwd-replay-${mode}`, { mode, workspace, session: terminal.session,
+        agentSettings: { editorPaddingX: 1 }, extensions: [join(fixtures, 'editor-driver.ts')] });
+      terminals.push(replay); await replay.ready(); await replay.resize(220);
+      const replayDump = await observe(replay, 'replay'); await check(replayDump, { full: true, branch, name });
+      const persisted = await replay.capture('replay-traffic'); assert.deepEqual(persisted.branch, complete.branch);
+      rmSync(join(repo, '.git'), { recursive: true }); await terminal.settle();
+      let removed = 0;
+      dump = await until(async () => {
+        const value = await observe(terminal, `no-repository-${removed++}`);
+        return value.git.activeJobs === 0 && plain(value.statusRows[0] || '').endsWith(value.cwd) ? value : false;
+      }, 'repository removal clears branch before physical capture');
+      await check(dump, { full: true, name });
+      assert.ok(!dump.screen.some(row => row.endsWith(':' + branch)), 'no stale branch after repository removal');
+      writeFileSync(join(terminal.output, 'git-counters.json'), JSON.stringify({ warm: baseline, busy: busy, final: dump.git }, null, 2));
+    }
+  } finally { for (const terminal of terminals) { await terminal.close(); terminal.dispose(); } rmSync(base, { recursive: true, force: true }); }
+});
+
+
+async function footerObserve(terminal, name, action = 'snapshot', animated = false) {
+  writeFileSync(join(terminal.output, 'footer-request.json'), JSON.stringify({ name, action }));
+  terminal.send('\x1b\x06');
+  const dump = await until(() => {
+    terminal.health();
+    try { return JSON.parse(readFileSync(join(terminal.output, `${name}.json`), 'utf8')); }
+    catch (error) { if (error.code === 'ENOENT' || error instanceof SyntaxError) return false; throw error; }
+  }, `footer ${name}`);
+  await terminal.settle(animated); terminal.session = dump.session;
+  return terminal.captureScreen(name, dump);
+}
+function footerPhysical(dump) {
+  const expected = dump.rows.map(plain), starts = dump.screen.flatMap((row, y) => plain(row) === expected[0] &&
+    expected.every((value, offset) => plain(dump.screen[y + offset] || '') === value) ? [y] : []);
+  assert.ok(starts.length > 0, `complete physical footer at ${dump.width}: ${expected.join('|')}`);
+  for (const row of dump.rows) assert.ok(visibleWidth(row) <= dump.width);
+  return starts.at(-1);
+}
+
+test('footer whole-status fitting colors native data warm counters ownership and replay in both modes', { skip: stockOnly }, async () => {
+  const terminals = [], observations = [];
+  try {
+    for (const mode of ['regular', 'fullscreen']) {
+      const options = { mode, extraEnv: { TOOLVIEW_TEST_FOOTER: '1' }, extensions: [join(fixtures, 'footer-driver.ts')] };
+      const native = new PiTerminal(`footer-native-${mode}`, options); terminals.push(native); await native.ready();
+      await native.run('future'); const nativeTraffic = await native.capture('traffic');
+      const control = await footerObserve(native, 'accounting', 'accounting'); assert.equal(control.owner, 'FooterComponent');
+      const live = new PiTerminal(`footer-live-${mode}`, { ...options, extraEnv: { ...options.extraEnv, TOOLVIEW_TEST_FOOTER_PRESENTATION: '1' }, workspace: native.work }); terminals.push(live); await live.ready();
+      await live.run('future'); const liveTraffic = await live.capture('traffic');
+      const packet = await footerObserve(live, 'accounting', 'accounting');
+      assert.equal(packet.owner, 'FooterView'); footerPhysical(packet);
+      const usage = dump => dump.entries.flatMap(e => e.type === 'usage' ? [e.usage] : e.type === 'message' && e.message.role === 'assistant' ? [e.message.usage] : []);
+      assert.deepEqual(usage(packet), usage(control), 'identical actual persisted usage for native and Toolview');
+      assert.deepEqual(packet.context, control.context, 'same native current context estimate');
+      assert.deepEqual(persisted(liveTraffic), persisted(nativeTraffic));
+      assert.deepEqual(live.events().filter(e => ['call', 'result', 'model_context'].includes(e.type)), native.events().filter(e => ['call', 'result', 'model_context'].includes(e.type)));
+      assert.equal(live.events().filter(e => e.type === 'call').length, 1); assert.equal(live.events().filter(e => e.type === 'result').length, 1);
+      const bytes = readFileSync(packet.session);
+      let dump = await footerObserve(live, 'statuses', 'statuses'); footerPhysical(dump);
+      for (const width of [24, 60, 100, 140]) {
+        await live.resize(width); dump = await footerObserve(live, `width-${width}`); const y = footerPhysical(dump);
+        const text = dump.rows.map(plain).join('\n');
+        for (const [, value] of dump.statuses) assert.ok(text.includes(plain(value)), 'ordinary status is never broken or truncated merely for leftover space');
+        for (const row of dump.rows.map(plain)) assert.ok(!/^\s*•|•\s*$/u.test(row), 'no separator at row break');
+        if (width === 140) {
+          assert.equal(dump.rows.length, 1); const row = dump.screen[y];
+          assert.ok(row.endsWith('OTHER_STATUS'), 'right edge is fully aligned');
+          const refs = Object.fromEntries(await Promise.all(Object.entries(dump.styles).map(async ([role, style]) => [role, await referenceCell(style)])));
+          const check = (value, role, offset = 0, count = value.length - offset) => {
+            const x = row.indexOf(value); assert.ok(x >= 0, value);
+            for (let i = x + offset; i < x + offset + count; i++) { const cell = dump.cells[y][i]; assert.equal(cell.fgMode, refs[role].fgMode, value); assert.equal(cell.fg, refs[role].fg, value); }
+          };
+          for (const value of ['↑', '↓', 'R', 'W', '$']) check(value, 'text');
+          for (const value of ['11M', '1.5M', '272k', '243M']) check(value, 'muted');
+          const context = / (\d+k\/272k) \(/u.exec(row); assert.ok(context); check(context[1], 'text', 0, context[1].indexOf('/'));
+          check('/', 'dim'); check('(', 'dim'); check(')', 'dim'); check('CH86.4%', 'warning'); check(' • ', 'dim');
+          check('mc: 104.5K (51%) · idle', 'success');
+          const other = row.indexOf('OTHER_STATUS'); assert.ok(dump.cells[y][other].bold, 'producer attributes remain unchanged');
+        }
+      }
+      for (const action of ['light', 'dark']) { dump = await footerObserve(live, action, action); footerPhysical(dump); }
+      dump = await footerObserve(live, 'long', 'long'); await live.resize(24); dump = await footerObserve(live, 'long-narrow'); footerPhysical(dump);
+      const long = dump.rows.map(plain).filter(row => row.includes('LONG_STATUS_')); assert.equal(long.length, 1); assert.ok(long[0].endsWith('…'));
+      dump = await footerObserve(live, 'delete', 'delete'); assert.ok(!dump.rows.map(plain).join('\n').includes('OTHER_STATUS'));
+      dump = await footerObserve(live, 'clear', 'clear'); assert.ok(!dump.rows.map(plain).join('\n').includes('LONG_STATUS_'));
+      await live.resize(100);
+      for (const enabled of [false, true]) {
+        const before = await footerObserve(live, `auto-before-${enabled}`);
+        await live.command('/settings'); live.send('Auto-compact'); await live.settle();
+        assert.ok(live.screen().some(row => row.includes('Auto-compact')), 'actual native settings row is selected');
+        live.send('\r\x1b'); await live.settle();
+        const changed = await footerObserve(live, `auto-${enabled}`); footerPhysical(changed);
+        assert.equal(changed.rows.map(plain).join('\n').includes('(auto)'), enabled, 'native auto setting changes footer without reload');
+        for (const key of ['scans', 'contextReads', 'aggregations', 'entries']) assert.equal(changed.counters[key], before.counters[key], 'auto is presentation-only, not a history/context invalidation');
+      }
+      assert.deepEqual(readFileSync(packet.session), bytes, 'status/theme/resize/settings actions do not rewrite saved usage or session data');
+      await live.command('/toolview off'); dump = await footerObserve(live, 'off'); assert.equal(dump.owner, 'FooterComponent');
+      assert.ok(dump.rows.some(row => plain(row).includes(live.work)), 'off restores native cwd');
+      await live.command('/toolview on'); dump = await footerObserve(live, 'on'); assert.equal(dump.owner, 'FooterView'); footerPhysical(dump);
+      dump = await footerObserve(live, 'foreign', 'foreign'); await live.command('/toolview off'); dump = await footerObserve(live, 'foreign-off');
+      assert.deepEqual(dump.rows, ['FOREIGN_FOOTER']); assert.equal(dump.foreignDisposals, 0, 'off never removes a later owner'); footerPhysical(dump);
+      await live.command('/toolview on'); dump = await footerObserve(live, 'reclaimed'); assert.equal(dump.owner, 'FooterView'); assert.equal(dump.foreignDisposals, 1);
+      await live.command('/reload'); dump = await footerObserve(live, 'reloaded', 'accounting'); assert.equal(dump.owner, 'FooterView');
+      assert.deepEqual(usage(dump), usage(packet), 'reload never duplicates fixture side usage'); footerPhysical(dump);
+      const warm = await footerObserve(live, 'warm');
+      for (let i = 0; i < 8; i++) { const next = await footerObserve(live, `warm-${i}`); assert.deepEqual(next.counters, warm.counters, 'warm frames reuse stats/context/layout with zero scans'); }
+      const replay = new PiTerminal(`footer-replay-${mode}`, { ...options, extraEnv: { ...options.extraEnv, TOOLVIEW_TEST_FOOTER_PRESENTATION: '1' }, session: packet.session, workspace: live.work }); terminals.push(replay); await replay.ready();
+      const resumed = await footerObserve(replay, 'accounting', 'accounting'); footerPhysical(resumed);
+      assert.deepEqual(usage(resumed), usage(packet)); assert.deepEqual(resumed.rows, dump.rows, 'same usage/context presentation in live reload and saved replay');
+      assert.equal(replay.events().filter(e => ['call', 'result', 'model_context'].includes(e.type)).length, 0, 'replay executes no tools or provider requests');
+      observations.push({ mode, warm: warm.counters, nativeContext: control.context, replayContext: resumed.context });
+    }
+    writeFileSync(join(artifacts, 'footer-counters.json'), JSON.stringify(observations, null, 2));
+  } finally { for (const terminal of terminals) { await terminal.close(); terminal.dispose(); } }
+});
+
+test('footer animated Working and short-height clipping do not rescan session or replace native activity', { skip: stockOnly }, async () => {
+  const terminals = [];
+  try {
+    for (const mode of ['regular', 'fullscreen']) {
+      const terminal = new PiTerminal(`footer-working-${mode}`, { mode, extraEnv: { TOOLVIEW_TEST_FOOTER: '1', TOOLVIEW_TEST_FOOTER_PRESENTATION: '1' }, extensions: [join(fixtures, 'footer-driver.ts')] });
+      terminals.push(terminal); await terminal.ready(); terminal.send('run pending\r'); await terminal.event('provider_gate');
+      const baseline = await footerObserve(terminal, 'busy', 'statuses', true); footerPhysical(baseline);
+      assert.ok(baseline.screen.some(row => row.includes('Working')));
+      for (let i = 0; i < 8; i++) { const next = await footerObserve(terminal, `busy-${i}`, 'snapshot', true); assert.deepEqual(next.counters, baseline.counters, 'native activity ticks cause no stats or footer body rebuilds'); }
+      if (mode === 'fullscreen') {
+        await terminal.resize(100, 4, true); const clipped = await footerObserve(terminal, 'clipped', 'snapshot', true);
+        assert.equal(clipped.owner, 'FooterView'); assert.ok(clipped.rows.length > 0);
+        assert.equal(clipped.statusIdentity, baseline.statusIdentity, 'height clipping cannot replace or stop the native indicator');
+        assert.ok(clipped.nativeStatusRows.some(row => plain(row).includes('Working')), 'native container still renders its active object despite dock clipping');
+        const control = new PiTerminal('footer-height-native-separate', { mode, extraEnv: { TOOLVIEW_TEST_FOOTER: '1' }, extensions: [join(fixtures, 'footer-driver.ts')] });
+        terminals.push(control); await control.ready(); control.send('run pending\r'); await control.event('provider_gate');
+        const before = await footerObserve(control, 'native-busy', 'snapshot', true);
+        const separated = await footerObserve(control, 'native-separate', 'native-separate', true);
+        assert.equal(separated.statusIdentity, before.statusIdentity, 'public native relocation keeps the same indicator');
+        await control.resize(100, 4, true); const nativeClip = await footerObserve(control, 'native-clipped', 'snapshot', true);
+        assert.equal(nativeClip.statusIdentity, before.statusIdentity); assert.ok(nativeClip.nativeStatusRows.some(row => plain(row).includes('Working')));
+        assert.equal(clipped.screen.some(row => row.includes('Working')), nativeClip.screen.some(row => row.includes('Working')), 'low-height visibility matches Pi own separate-status dock allocation');
+        await terminal.resize(100, 80, true); const restored = await footerObserve(terminal, 'height-restored', 'snapshot', true); footerPhysical(restored);
+        assert.equal(restored.statusIdentity, baseline.statusIdentity); assert.ok(restored.screen.some(row => row.includes('Working')));
+      }
+      writeFileSync(join(terminal.output, 'provider-go'), 'go'); await terminal.event('tool_gate');
+      writeFileSync(join(terminal.output, 'tool-go'), 'go'); await terminal.event('agent_end'); await terminal.settle();
+      const done = await footerObserve(terminal, 'done', 'accounting'); assert.equal(done.idle, true); footerPhysical(done);
+      assert.ok(done.rows.map(plain).join('\n').includes('CH86.4%')); assert.ok(done.counters.aggregations > baseline.counters.aggregations);
     }
   } finally { for (const terminal of terminals) { await terminal.close(); terminal.dispose(); } }
 });

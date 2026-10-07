@@ -1,20 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, mkdtempSync, rmSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import xterm from "@xterm/headless";
-import { Box, Container, Editor, CURSOR_MARKER, Spacer, Text, visibleWidth, parseColor, colorToRgb, TuiAltScreen, TuiMainScreen, type Terminal, type TuiMouseEvent } from "@earendil-works/pi-tui";
+import { Box, Container, Editor, CURSOR_MARKER, Spacer, Text, visibleWidth, truncateToWidth, parseColor, colorToRgb, TuiAltScreen, TuiMainScreen, type Component, type Terminal, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { CustomEditor, ToolExecutionComponent as NativeToolExecution, createEditToolDefinition, createWriteToolDefinition, createWriteTool, highlightCode, getLanguageFromPath, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import toolview, { installToolview, describeArgs, sanitize, type ToolviewOptions } from "../src/index.ts";
 import { cardGeometry, frameRows, insidePanel } from "../src/card-frame.ts";
 import { renderUserCard } from "../src/user-card.ts";
+import { editorGeometry } from "../src/editor-card.ts";
 import { measureFileCard, renderFileCard } from "../src/file-card.ts";
 import { generateDiffString, generateUnifiedPatch } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/edit-diff.js";
 import type { CardTheme } from "../src/card-theme.ts";
 import { RenderCache } from "../src/render-cache.ts";
+import { renderEditorStatus, directoryStatus } from "../src/editor-status.ts";
+import { IdleStatus, StatusIndicator } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/status-indicator.js";
+import { InteractiveMode } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js";
+import { createChatViewport } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/chat-viewport.js";
+import { renderLayoutFrame } from "../node_modules/@earendil-works/pi-tui/dist/layout.js";
 import { PRIORITY_FIELDS, VALUE_TEXT_LIMIT, SUMMARY_TEXT_LIMIT } from "../src/summary-args.ts";
 import { UserMessageComponent } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/user-message.js";
 import { initTheme, theme as nativeTheme } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
@@ -526,19 +532,27 @@ function extensionHarness(mode: "tui" | "print" | "json" | "rpc" = "tui", flagVa
   const commands = new Map<string, { handler(args: string, ctx: ExtensionContext): Promise<void> }>();
   const flags = new Map<string, unknown>();
   const widgets: string[] = [], notices: string[] = [];
+  const widgetComponents = new Map<string, { render(width: number): string[] }>();
+  const widgetPlacements = new Map<string, unknown>();
   const api = {
     on: (name: string, handler: (event: unknown, ctx: ExtensionContext) => void) => events.set(name, handler),
     registerCommand: (name: string, command: { handler(args: string, ctx: ExtensionContext): Promise<void> }) => commands.set(name, command),
     registerFlag: (name: string, options: unknown) => flags.set(name, options),
     getFlag: (name: string) => flagValues[name],
+    getThinkingLevel: () => "off",
   } as unknown as ExtensionAPI;
-  const ctx = { mode, ui: {
+  const ctx = { mode, isIdle: () => true, ui: {
     theme: color,
     notify: (text: string) => notices.push(text),
-    setWidget: (name: string, factory?: (tui: Root) => unknown) => { widgets.push(name); factory?.(root); },
+    getEditorComponent: () => undefined,
+    setWidget: (name: string, factory?: (tui: Root) => { render(width: number): string[] }, options?: unknown) => {
+      widgets.push(name);
+      if (factory) { widgetComponents.set(name, factory(root)); widgetPlacements.set(name, options); }
+      else { widgetComponents.delete(name); widgetPlacements.delete(name); }
+    },
   } } as unknown as ExtensionContext;
   toolview(api);
-  return { root, ctx, events, commands, flags, widgets, notices };
+  return { root, ctx, events, commands, flags, widgets, notices, widgetComponents, widgetPlacements };
 }
 
 test("extension lifecycle removes the temporary widget, restores on shutdown, and does not stack", async () => {
@@ -550,10 +564,12 @@ test("extension lifecycle removes the temporary widget, restores on shutdown, an
     assert.notEqual(installed, before);
     h.events.get("session_start")!({}, h.ctx);
     assert.equal(Container.prototype.addChild, installed);
-    assert.equal(h.widgets.length, 2); // capture then remove; no permanent layout widget
+    assert.deepEqual(h.widgets, ["pi-toolview-capture", "pi-toolview-capture", "pi-toolview-editor-status"]);
+    assert.deepEqual(h.widgetPlacements.get("pi-toolview-editor-status"), { placement: "belowEditor" });
     assert.deepEqual([...h.flags.keys()], ["toolview-card", "toolview-compact", "toolview-cache-mb", "toolview-card-cache-mb"]);
     await h.commands.get("toolview")!.handler("off", h.ctx);
     assert.equal(Container.prototype.addChild, before);
+    assert.equal(h.widgetComponents.size, 0, "off removes the persistent status widget");
     await h.commands.get("toolview")!.handler("on", h.ctx);
     assert.notEqual(Container.prototype.addChild, before);
     assert.match(h.root.render(80).at(-1)!, /read a\.txt/);
@@ -3477,16 +3493,21 @@ function editorSetup(paddingX = 0) {
 }
 const editorPlain = (row: string) => stripVTControlCharacters(row.replaceAll(CURSOR_MARKER, ""));
 
-test("editor card uses user geometry without exchanging native state or caching input", () => {
-  for (const padding of [0, 1, 2, 6]) {
+test("editor card uses configured exterior geometry without exchanging native state or caching input", () => {
+  const nativeRender = Editor.prototype.render;
+  for (const padding of [0, 1, 2, 3, 6]) {
     const { root, editor } = editorSetup(padding), originalInput = editor.handleInput;
     editor.setText("EDITOR_LINE\n  indented\n> literal");
     const before = { text: editor.getText(), expanded: editor.getExpandedText(), cursor: editor.getCursor() };
     const controller = installToolview(root, () => color);
     try {
       for (const width of [100, 24, 12, 8, 7]) {
-        const rows = editor.render(width), geometry = cardGeometry(width);
+        const rows = editor.render(width), geometry = editorGeometry(width, padding);
         assert.ok(rows.every(row => visibleWidth(row) <= width), `editor fits width ${width}, native padding ${padding}`);
+        if (geometry.contentWidth < 2) {
+          assert.deepEqual(rows, nativeRender.call(editor, width), "impossible margins delegate to native actual width");
+          continue;
+        }
         assert.ok(rows.every(row => editorPlain(row)[geometry.panelX] === "┃"), "top/bottom padding and every text row share the stripe");
         assert.doesNotMatch(rows.map(editorPlain).join(""), /─/u);
         assert.equal(rows.filter(row => row.includes(CURSOR_MARKER)).length, 1);
@@ -3501,18 +3522,18 @@ test("editor card uses user geometry without exchanging native state or caching 
 });
 
 test("editor card retains full-width hardware cursor in right internal padding", () => {
-  for (const padding of [0, 1, 2]) {
+  for (const padding of [0, 1, 2, 3]) {
     const { root, editor } = editorSetup(padding);
     const controller = installToolview(root, () => color);
     try {
-      const width = 24, geometry = cardGeometry(width);
+      const width = 24, geometry = editorGeometry(width, padding);
       editor.setText("x".repeat(geometry.contentWidth));
       const rows = editor.render(width), cursorRow = rows.find(row => row.includes(CURSOR_MARKER))!;
       assert.ok(cursorRow, "focused end cursor survives framing");
-      assert.equal(visibleWidth(cursorRow.slice(0, cursorRow.indexOf(CURSOR_MARKER))), width - 2);
-      assert.equal(editorPlain(cursorRow).slice(geometry.contentX, width - 2), editor.getText());
+      assert.equal(visibleWidth(cursorRow.slice(0, cursorRow.indexOf(CURSOR_MARKER))), width - padding - 1);
+      assert.equal(editorPlain(cursorRow).slice(geometry.contentX, width - padding - 1), editor.getText());
       assert.equal(visibleWidth(cursorRow), width);
-      assert.equal(editorPlain(cursorRow).at(-1), " ", "cursor never consumes exterior margin");
+      if (padding) assert.equal(editorPlain(cursorRow).slice(-padding), " ".repeat(padding), "cursor never consumes exterior margin");
     } finally { controller.restore(); }
   }
 });
@@ -3542,7 +3563,7 @@ test("editor card keeps paste maps undo history shortcuts and nested text insert
 
 test("editor card maps normalized clicks to native CJK combining and wrapped cursor positions", () => {
   const originalRender = Editor.prototype.render, originalMouse = Editor.prototype.handleMouse;
-  for (const padding of [0, 1, 2]) {
+  for (const padding of [0, 1, 2, 3]) {
     const { root, editor, theme, keybindings } = editorSetup(padding);
     const control = new CustomEditor(root as never, theme, keybindings as never, { paddingX: padding });
     const value = "word 界é ".repeat(8);
@@ -3550,9 +3571,9 @@ test("editor card maps normalized clicks to native CJK combining and wrapped cur
     const controller = installToolview(root, () => color);
     try {
       for (const width of [24, 60]) {
-        const geometry = cardGeometry(width), nativeWidth = geometry.contentWidth + (padding ? 2 * padding : 1);
+        const geometry = editorGeometry(width, padding), nativeWidth = geometry.contentWidth + (padding ? 2 * padding : 1);
         const actualRows = editor.render(width); originalRender.call(control, nativeWidth);
-        for (const [x, y] of [[geometry.contentX, 1], [geometry.contentX + 7, 2], [width - 2, actualRows.length - 2]]) {
+        for (const [x, y] of [[geometry.contentX, 1], [geometry.contentX + 7, 2], [width - padding - 1, actualRows.length - 2]]) {
           editor.handleMouse({ ...mouse(y!, width), x: x!, screenX: x!, height: actualRows.length });
           originalMouse.call(control, { ...mouse(y!, nativeWidth), x: x! - geometry.contentX + padding, height: actualRows.length });
           assert.deepEqual(editor.getCursor(), control.getCursor(), `cursor mapping padding ${padding} width ${width}`);
@@ -3617,7 +3638,7 @@ test("editor card keeps native autocomplete outside frame and routes its normali
     const rows = editor.render(60), menu = rows.findIndex(row => editorPlain(row).includes("NATIVE_MENU"));
     assert.ok(menu > 0);
     assert.equal(editorPlain(rows[menu]!).includes("┃"), false);
-    assert.equal(editorPlain(rows[menu - 1]!)[1], "┃", "menu begins below bottom panel padding");
+    assert.equal(editorPlain(rows[menu - 1]!)[2], "┃", "menu begins below bottom panel padding");
     assert.equal(editor.handleMouse({ ...mouse(menu, 60), x: 5, height: rows.length })?.handled, true);
     assert.equal(editor.getText(), "/editor-result ");
     assert.equal(editor.isShowingAutocomplete(), false);
@@ -3683,13 +3704,14 @@ test("editor card foreground and padding retain user paint after the native inve
         terminal.reset(); await new Promise<void>(resolve => terminal.write(rows.join("\r\n"), resolve));
         const bg = colorToRgb(nativeTheme.colors.userMessageBg), fg = colorToRgb(nativeTheme.colors.userMessageText);
         const line = terminal.buffer.active.getLine(1)!;
-        for (let x = 2; x < 23; x++) {
+        for (let x = 3; x < 22; x++) {
           assert.equal(line.getCell(x)!.getBgColor(), (bg.r << 16) | (bg.g << 8) | bg.b);
           assert.equal(line.getCell(x)!.getFgColor(), (fg.r << 16) | (fg.g << 8) | fg.b);
         }
         assert.equal(line.getCell(0)!.getBgColorMode(), 0); assert.equal(line.getCell(23)!.getBgColorMode(), 0);
-        assert.equal(line.getCell(1)!.getBgColorMode(), 0);
-        assert.ok(line.getCell(9)!.isInverse(), "native fake cursor style survives");
+        assert.equal(line.getCell(1)!.getBgColorMode(), 0); assert.equal(line.getCell(22)!.getBgColorMode(), 0);
+        assert.equal(line.getCell(2)!.getBgColorMode(), 0, "stripe retains page background");
+        assert.ok(line.getCell(10)!.isInverse(), "native fake cursor style survives");
       } finally { controller.restore(); }
     }
   } finally { terminal.dispose(); }
@@ -3715,7 +3737,7 @@ test("editor card keeps excessive native padding bounded by actual-width delegat
 test("editor full-line cursor inverse never paints exterior margins or subsequent padding", async () => {
   initTheme("dark");
   const terminal = new xterm.Terminal({ cols: 24, rows: 10, allowProposedApi: true });
-  const { root, editor } = editorSetup(); editor.setText("x".repeat(cardGeometry(24).contentWidth));
+  const { root, editor } = editorSetup(1); editor.setText("x".repeat(editorGeometry(24, 1).contentWidth));
   const controller = installToolview(root, () => nativeTheme);
   try {
     await new Promise<void>(resolve => terminal.write(editor.render(24).join("\r\n"), resolve));
@@ -3724,4 +3746,1071 @@ test("editor full-line cursor inverse never paints exterior margins or subsequen
     assert.equal(line.getCell(23)!.isInverse(), 0, "exterior right margin must not inherit inverse cursor");
     for (let x = 0; x < 24; x++) assert.equal(terminal.buffer.active.getLine(2)!.getCell(x)!.isInverse(), 0);
   } finally { controller.restore(); terminal.dispose(); }
+});
+
+function nativeStatusEditorSetup() {
+  const value = editorWidgetSetup();
+  const { root, editor, host, input } = value;
+  Object.assign(root, { setFocus: (node: Component | null) => { editor.focused = node === editor; }, getClearOnShrink: () => true });
+  Object.assign(host, { defaultEditor: editor, editor, editorContainer: input, statusContainer: root.children[2],
+    idleStatus: new IdleStatus(), options: { tuiMode: "regular" } });
+  const options = { editorStatus: true, nativeEditor: () => host.editorComponentFactory === undefined,
+    rerouteEditorStatus: () => host.setCustomEditorComponent(undefined) } as ToolviewOptions;
+  return { ...value, options };
+}
+
+// Exercise the actual SDK switch/clear logic, not a reconstructed status state machine.
+test("native status container preserves active unknown indicator and same-editor draft across on/off", () => {
+  for (const mode of ["regular", "fullscreen"]) {
+    const { root, editor, host, options, frame } = nativeStatusEditorSetup();
+    host.options.tuiMode = mode;
+    editor.handleInput("\x1b[200~" + "PASTE_".repeat(300) + "\x1b[201~");
+    editor.handleInput("x"); editor.handleInput("\x1b[D");
+    const snapshot = () => ({ text: editor.getText(), expanded: editor.getExpandedText(), cursor: editor.getCursor(),
+      pastes: [...(editor as any).pastes.entries()], undo: structuredClone((editor as any).undoStack), history: structuredClone((editor as any).history) });
+    const before = snapshot(), descriptor = Object.getOwnPropertyDescriptor(editor, "embedWorkingStatus");
+    assert.ok(descriptor?.writable && descriptor.configurable, "SDK placement field must remain interceptable");
+    let disposed = 0, borderCalls = 0;
+    const indicator = { kind: "unknown-future-kind", render: () => ["", "FUTURE A─B ───"], invalidate() {},
+      renderInBorder: () => { borderCalls++; return "FUTURE A─B ───"; }, renderSpinnerInBorder: () => "S", dispose: () => disposed++ };
+    host.showStatusIndicator(indicator); assert.equal(host.activeWorkingIndicatorEmbedded, true);
+    const controller = installToolview(root, () => color, options);
+    try {
+      assert.equal(editor.embedWorkingStatus, false, "native SDK must select its own separate container");
+      assert.equal(host.editor, editor); assert.equal(host.editorComponentFactory, undefined);
+      assert.equal(host.activeStatusIndicator, indicator); assert.equal(host.activeWorkingIndicatorEmbedded, false);
+      assert.equal(host.statusContainer.children[0], indicator); assert.equal(disposed, 0);
+      assert.deepEqual(snapshot(), before, "native self-transfer must not alter paste/cursor/undo/history");
+      borderCalls = 0; frame(mode);
+      assert.doesNotMatch(editor.render(100).map(editorPlain).join("\n"), /FUTURE/u);
+      assert.equal(borderCalls, 0, "no discarded native border/status extraction");
+      // Capture at the same width as the preceding editor and native status group frame.
+      frame(mode, 100);
+      const metadata = controller.renderEditorStatus(100, { model: "MODEL", provider: "raw-id", thinking: "high", idle: true });
+      assert.equal(metadata.length, 2); assert.doesNotMatch(metadata.map(editorPlain).join("\n"), /FUTURE|Idle/u);
+      controller.restore();
+      assert.deepEqual(Object.getOwnPropertyDescriptor(editor, "embedWorkingStatus"), descriptor);
+      assert.equal(host.activeStatusIndicator, indicator); assert.equal(host.activeWorkingIndicatorEmbedded, true);
+      assert.equal(host.statusContainer.children.length, 0); assert.equal(disposed, 0); assert.deepEqual(snapshot(), before);
+      assert.match(editor.render(100).map(editorPlain).join("\n"), /FUTURE/u);
+      host.clearStatusIndicator(); assert.equal(disposed, 1, "only native lifecycle disposes the indicator");
+    } finally { controller.restore(); }
+  }
+});
+
+// Below-editor rows display Idle only; Pi owns all active status rendering.
+test("editor status never extracts native operation text and retains fixed editor geometry", () => {
+  const { root, editor, host, options, frame } = nativeStatusEditorSetup();
+  const controller = installToolview(root, () => color, options);
+  const info = { model: "GPT-6 Astra", provider: "openai-codex", thinking: "high", idle: true };
+  try {
+    for (const value of ["Working", "A─B ───", "── beginning", "界é", "\u0301leading", "ending\u0600"]) {
+      const raw = "\x1b[33m" + value + "\x1b[39m";
+      const indicator = { kind: "future-kind", render: () => [raw], invalidate() {}, dispose() {},
+        renderInBorder: () => assert.fail("no border extraction"), renderSpinnerInBorder: () => assert.fail("no border extraction") };
+      host.showStatusIndicator(indicator); frame("regular", 100);
+      assert.deepEqual(host.statusContainer.render(100), [raw], "native output and all semantic ANSI remain unchanged");
+      const rows = editor.render(100), footer = controller.renderEditorStatus(100, info);
+      assert.equal(footer.length, 2); assert.match(editorPlain(footer[0]!), /GPT-6 Astra \(openai-codex\) • high/u);
+      assert.doesNotMatch(editorPlain(footer[0]!), /Idle/u); assert.match(editorPlain(footer[1]!), /^ ╹▀+ $/u);
+      assert.equal(rows.filter(row => row.includes(CURSOR_MARKER)).length, 1); assert.equal(controller.cacheStats().entries, 0);
+    }
+    host.clearStatusIndicator(); frame("regular", 100);
+    assert.match(editorPlain(controller.renderEditorStatus(100, info)[0]!), / • Idle/u);
+  } finally { controller.restore(); }
+});
+
+test("editor status distinguishes native status, idle and busy-hidden and updates metadata without a draft", () => {
+  const { root, editor } = editorSetup();
+  const controller = installToolview(root, () => color, { editorStatus: true } as ToolviewOptions);
+  const info = { model: "GPT-6 Astra", provider: "openai-codex", thinking: "off", idle: true };
+  try {
+    editor.render(100);
+    const render = () => (controller as any).renderEditorStatus(100, info).map(editorPlain);
+    assert.match(render()[0], /GPT-6 Astra \(openai-codex\) • off • Idle/u);
+    info.idle = false; assert.doesNotMatch(render()[0], /Idle/u);
+    info.model = "New Model"; info.provider = "custom-id"; info.thinking = "max";
+    assert.match(render()[0], /New Model \(custom-id\) • max/u);
+    editor.setWorkingStatusIndicator({ renderInBorder: () => "ACTIVE", renderSpinnerInBorder: () => "S" } as never);
+    editor.render(100); assert.doesNotMatch(render()[0], /ACTIVE/u, "operation text never enters metadata");
+    editor.setWorkingStatusIndicator(undefined); editor.render(100);
+    assert.doesNotMatch(render()[0], /ACTIVE|Idle/u);
+    info.idle = true; assert.match(render()[0], / • Idle/u);
+  } finally { controller.restore(); }
+});
+
+test("editor status preserves native overflow and menu clicks with no added editor-local rows", async () => {
+  const { root, editor } = editorSetup(2);
+  const controller = installToolview(root, () => color, { editorStatus: true } as ToolviewOptions);
+  try {
+    editor.setWorkingStatusIndicator({ renderInBorder: () => "ACTIVE", renderSpinnerInBorder: () => "S" } as never);
+    editor.setText(Array.from({ length: 30 }, (_, i) => `ROW_${i}`).join("\n"));
+    assert.match(editorPlain(editor.render(60)[0]!), /↑ \d+ more/u);
+    for (let i = 0; i < 35; i++) editor.handleInput("\x1b[A");
+    assert.match(editorPlain(editor.render(60).at(-1)!), /↓ \d+ more/u);
+    editor.setText("");
+    editor.setAutocompleteProvider({
+      getSuggestions: async () => ({ items: [{ value: "/result", label: "/result", description: "STATUS_MENU" }], prefix: "/r" }),
+      applyCompletion: () => ({ lines: ["/result "], cursorLine: 0, cursorCol: 8 }),
+    });
+    editor.handleInput("/r"); await new Promise<void>(resolve => setImmediate(resolve));
+    const rows = editor.render(60), menu = rows.findIndex(row => editorPlain(row).includes("STATUS_MENU"));
+    assert.equal(menu, 3, "native top/input/bottom positions stay unchanged");
+    assert.deepEqual((controller as any).renderEditorStatus(60, { model: "M", provider: "P", thinking: "high", idle: false }), []);
+    assert.equal(editor.handleMouse({ ...mouse(menu, 60), x: 5, height: rows.length })?.handled, true);
+    assert.equal(editor.getText(), "/result ");
+  } finally { controller.restore(); }
+});
+
+test("editor status delegates tiny widths and foreign ownership without reading operation headers", () => {
+  const { root, editor } = editorSetup();
+  let stock = true, restored = 0;
+  const controller = installToolview(root, () => color, { editorStatus: true, nativeEditor: () => stock, editorStatusRestored: () => restored++ } as ToolviewOptions);
+  const info = { model: "M", provider: "P", thinking: "high", idle: true };
+  try {
+    for (const width of [0, 3, 6]) { editor.render(width); assert.deepEqual((controller as any).renderEditorStatus(width, info), []); }
+    editor.render(24); assert.equal((controller as any).renderEditorStatus(24, info).length, 2);
+    stock = false; assert.deepEqual((controller as any).renderEditorStatus(24, info), []);
+    assert.doesNotMatch(editor.render(24).map(editorPlain).join(""), /┃/u);
+    stock = true;
+    editor.setWorkingStatusIndicator({ renderInBorder: () => "X".repeat(100), renderSpinnerInBorder: () => "S" } as never);
+    editor.render(24);
+    assert.equal(controller.active, true, "opaque operation header is no longer inspected");
+    assert.equal(restored, 0);
+  } finally { controller.restore(); }
+});
+
+
+test("editor status renders exact half-block palette and default background in dark and light", async () => {
+  const terminal = new xterm.Terminal({ cols: 100, rows: 8, allowProposedApi: true });
+  try {
+    for (const mode of ["dark", "light"]) {
+      initTheme(mode);
+      for (const width of [7, 24, 60, 100]) {
+        const rows = renderEditorStatus(width, nativeTheme, { model: "GPT-6 Astra", provider: "openai-codex", thinking: "high", idle: true });
+        assert.equal(rows.length, 2); assert.ok(rows.every(row => visibleWidth(row) === width));
+        assert.match(editorPlain(rows[1]!), /^ ╹▀+ $/u);
+        assert.ok(editorPlain(rows[0]!).includes(width >= 9 ? "Idle" : "I…"));
+        terminal.reset(); await new Promise<void>(resolve => terminal.write(rows.join("\r\n"), resolve));
+        const rgb = colorToRgb(nativeTheme.colors.userMessageBg), panel = (rgb.r << 16) | (rgb.g << 8) | rgb.b;
+        for (let x = 2; x < width - 1; x++) {
+          assert.equal(terminal.buffer.active.getLine(0)!.getCell(x)!.getBgColor(), panel);
+          const cell = terminal.buffer.active.getLine(1)!.getCell(x)!;
+          assert.equal(cell.getChars(), "▀"); assert.equal(cell.getFgColor(), panel);
+          assert.equal(cell.getBgColorMode(), 0, "lower half is terminal-default background");
+        }
+        assert.equal(terminal.buffer.active.getLine(1)!.getCell(1)!.getChars(), "╹");
+        for (const y of [0, 1]) for (const x of [0, 1, width - 1])
+          assert.equal(terminal.buffer.active.getLine(y)!.getCell(x)!.getBgColorMode(), 0);
+      }
+    }
+  } finally { terminal.dispose(); }
+});
+
+test("editor status unsupported immutable placement preserves native editor and omits metadata", () => {
+  const { root, editor } = editorSetup();
+  Object.defineProperty(editor, "embedWorkingStatus", { value: true, writable: false, configurable: false });
+  const native = editor.render(100);
+  const controller = installToolview(root, () => color, { editorStatus: true });
+  try {
+    assert.deepEqual(editor.render(100), native);
+    assert.deepEqual(controller.renderEditorStatus(100, { model: "M", provider: "P", thinking: "high", idle: true }), []);
+    assert.equal(controller.active, true, "other Toolview features need not fail with the editor feature");
+    assert.deepEqual(renderEditorStatus(0, color, {} as never), []);
+    assert.deepEqual(renderEditorStatus(6, color, {} as never), []);
+  } finally { controller.restore(); }
+});
+
+test("editor status native clock stays in its container across animation off/on and native clearing", async t => {
+  const intervals = t.mock.method(globalThis, "setInterval"), clears = t.mock.method(globalThis, "clearInterval");
+  const { root, editor, host, options, frame } = nativeStatusEditorSetup();
+  const indicator = new StatusIndicator("unknown-future-kind" as never, root as never, text => text, text => text, "Future operation ───");
+  host.showStatusIndicator(indicator);
+  let controller = installToolview(root, () => color, options);
+  const info = { model: "M", provider: "P", thinking: "high", idle: true };
+  try {
+    frame("regular", 100); const before = editor.render(100), first = host.statusContainer.render(100);
+    assert.equal(intervals.mock.calls.length, 1); assert.doesNotMatch(controller.renderEditorStatus(100, info).map(editorPlain).join("\n"), /Idle|Future operation/u);
+    await new Promise<void>(resolve => setTimeout(resolve, 100)); frame("regular", 100);
+    assert.notDeepEqual(host.statusContainer.render(100), first, "native container frames advance");
+    assert.equal(editor.render(100).length, before.length); assert.equal(intervals.mock.calls.length, 1);
+    controller.restore(); assert.equal(clears.mock.calls.length, 0, "rerouting never disposes the indicator");
+    assert.match(editor.render(100).map(editorPlain).join("\n"), /Future operation ───/u);
+    controller = installToolview(root, () => color, options); frame("regular", 100);
+    assert.equal(host.statusContainer.children[0], indicator); assert.equal(intervals.mock.calls.length, 1);
+    host.clearStatusIndicator(); frame("regular", 100);
+    assert.match(controller.renderEditorStatus(100, info).map(editorPlain).join("\n"), / • Idle/u);
+    assert.equal(clears.mock.calls.length, 1);
+  } finally { controller.restore(); }
+});
+
+test("editor status public widget reads fresh session metadata and is removed on shutdown", async () => {
+  const h = extensionHarness(), { editor } = editorSetup();
+  Object.assign(h.root, { terminal: { rows: 24 }, setFocus() {}, getClearOnShrink: () => true });
+  const slots = Array.from({ length: 7 }, () => new Container()); slots[4]!.addChild(editor);
+  for (const child of h.root.children) slots[0]!.addChild(child);
+  h.root.clear(); for (const slot of slots) h.root.addChild(slot);
+  const host = Object.assign(Object.create(InteractiveMode.prototype), { ui: h.root, editor, defaultEditor: editor,
+    editorContainer: slots[4], statusContainer: slots[2], idleStatus: new IdleStatus(), options: { tuiMode: "regular" } });
+  Object.assign(h.ctx.ui, { setEditorComponent: (factory: unknown) => host.setCustomEditorComponent(factory),
+    getEditorComponent: () => host.editorComponentFactory });
+  const first = Object.assign(h.ctx, { model: { name: "First Name", provider: "literal-provider-id" }, thinkingLevel: "high" });
+  try {
+    h.events.get("session_start")!({}, first); editor.render(100);
+    const widget = h.widgetComponents.get("pi-toolview-editor-status")!;
+    assert.match(widget.render(100).map(editorPlain).join("\n"), /First Name \(literal-provider-id\) • high • Idle/u);
+    const next = { ...first, model: { name: "Second Name", provider: "other-id" }, thinkingLevel: "off" } as unknown as ExtensionContext;
+    h.events.get("session_start")!({}, next); editor.render(100);
+    assert.equal(h.widgetComponents.get("pi-toolview-editor-status"), widget, "no stacked widget on session events");
+    assert.match(widget.render(100).map(editorPlain).join("\n"), /Second Name \(other-id\) • off • Idle/u);
+    await h.commands.get("toolview")!.handler("off", next); assert.equal(h.widgetComponents.size, 0);
+    await h.commands.get("toolview")!.handler("on", next); editor.render(100);
+    assert.match(h.widgetComponents.get("pi-toolview-editor-status")!.render(100).map(editorPlain).join("\n"), /Second Name/u);
+  } finally { h.events.get("session_shutdown")!({}, h.ctx); }
+  assert.equal(h.widgetComponents.size, 0);
+});
+
+
+test("editor status semantic colors use heading parenthesized provider and thinking roles without activity", async () => {
+  const terminal = new xterm.Terminal({ cols: 100, rows: 4, allowProposedApi: true });
+  const rgb = (role: keyof typeof nativeTheme.colors) => {
+    const value = colorToRgb(nativeTheme.colors[role]); return (value.r << 16) | (value.g << 8) | value.b;
+  };
+  try {
+    for (const mode of ["dark", "light"]) {
+      initTheme(mode);
+      for (const level of ["off", "minimal", "low", "medium", "high", "xhigh", "max", "future"]) {
+        const rows = renderEditorStatus(100, nativeTheme, { model: "MODEL", provider: "raw-id", thinking: level, idle: false });
+        const text = editorPlain(rows[0]!);
+        assert.match(text, new RegExp(`MODEL \\(raw-id\\) • ${level}`, "u"));
+        assert.doesNotMatch(text, /Working|Idle/u);
+        terminal.reset(); await new Promise<void>(resolve => terminal.write(rows.join("\r\n"), resolve));
+        const line = terminal.buffer.active.getLine(0)!;
+        const check = (value: string, role: keyof typeof nativeTheme.colors) => {
+          const start = text.indexOf(value); assert.ok(start >= 0, value);
+          for (let x = start; x < start + value.length; x++) assert.equal(line.getCell(x)!.getFgColor(), rgb(role), `${mode}/${level}/${value}`);
+        };
+        check("MODEL", "mdHeading"); check("raw-id", "muted"); check("(", "dim"); check(")", "dim");
+        for (let x = 0; x < text.length; x++) if (text[x] === "•") assert.equal(line.getCell(x)!.getFgColor(), rgb("dim"));
+        const roles = { off: "thinkingOff", minimal: "thinkingMinimal", low: "thinkingLow", medium: "thinkingMedium", high: "thinkingHigh", xhigh: "thinkingXhigh", max: "thinkingMax" } as const;
+        const role = Object.hasOwn(roles, level) ? roles[level as keyof typeof roles] : "thinkingOff";
+        check(level, role);
+        for (const width of [7, 24, 40, 60]) {
+          const compact = renderEditorStatus(width, nativeTheme, { model: "界MODEL".repeat(30), provider: "RAW".repeat(50), thinking: level, idle: true });
+          assert.ok(compact.every(row => visibleWidth(row) === width));
+          const plain = editorPlain(compact[0]!); assert.equal(plain.includes("("), plain.includes(")"), "provider parentheses remain balanced after fitting");
+        }
+      }
+    }
+  } finally { terminal.dispose(); }
+});
+
+
+test("editor status Idle uses muted while its preceding bullet remains dim", async () => {
+  const terminal = new xterm.Terminal({ cols: 100, rows: 4, allowProposedApi: true });
+  try {
+    for (const mode of ["dark", "light"]) {
+      initTheme(mode);
+      const rows = renderEditorStatus(100, nativeTheme, { model: "MODEL", provider: "provider-id", thinking: "high", idle: true });
+      const text = editorPlain(rows[0]!), idle = text.indexOf("Idle"), bullet = text.lastIndexOf("•");
+      assert.ok(idle > bullet && bullet >= 0);
+      terminal.reset(); await new Promise<void>(resolve => terminal.write(rows.join("\r\n"), resolve));
+      const line = terminal.buffer.active.getLine(0)!;
+      const rgb = (role: "muted" | "dim") => { const c = colorToRgb(nativeTheme.colors[role]); return (c.r << 16) | (c.g << 8) | c.b; };
+      for (let x = idle; x < idle + 4; x++) assert.equal(line.getCell(x)!.getFgColor(), rgb("muted"), `${mode}: Idle muted`);
+      assert.equal(line.getCell(bullet)!.getFgColor(), rgb("dim"), `${mode}: separator dim`);
+    }
+  } finally { terminal.dispose(); }
+});
+
+
+test("editor status hides both metadata rows for autocomplete but native activity stays in its container", async t => {
+  const intervals = t.mock.method(globalThis, "setInterval"), clears = t.mock.method(globalThis, "clearInterval");
+  const { root, editor, host, options } = nativeStatusEditorSetup();
+  let resolve!: (value: any) => void;
+  editor.setAutocompleteProvider({
+    getSuggestions: () => new Promise(done => { resolve = done; }),
+    applyCompletion: () => ({ lines: ["/result "], cursorLine: 0, cursorCol: 8 }),
+  });
+  const indicator = new StatusIndicator("unknown-future-kind" as never, root as never, text => text, text => text, "ACTIVE");
+  host.showStatusIndicator(indicator);
+  const controller = installToolview(root, () => color, options);
+  const info = { model: "M", provider: "P", thinking: "high", idle: false };
+  const status = () => controller.renderEditorStatus(60, info);
+  try {
+    editor.render(60); assert.equal(status().length, 2);
+    editor.handleInput("/r"); await new Promise<void>(done => setImmediate(done));
+    assert.equal(editor.isShowingAutocomplete(), false, "pending provider request is not an open menu");
+    editor.render(60); assert.equal(status().length, 2, "do not hide during pending-only lookup");
+    resolve({ items: [{ value: "/result", label: "/result", description: "AUTOCOMPLETE_HIDE" }], prefix: "/r" });
+    await new Promise<void>(done => setImmediate(done));
+    assert.equal(editor.isShowingAutocomplete(), true);
+    const rows = editor.render(60), menu = rows.findIndex(row => editorPlain(row).includes("AUTOCOMPLETE_HIDE"));
+    assert.equal(menu, 3, "native editor/menu y coordinates remain unchanged");
+    assert.deepEqual(status(), [], "both metadata rows disappear");
+    assert.match(host.statusContainer.render(60).map(editorPlain).join("\n"), /ACTIVE/u, "native activity is independent of autocomplete");
+    assert.deepEqual(status(), [], "unchanged menu has no widget output");
+    assert.equal(intervals.mock.calls.length, 1); assert.equal(clears.mock.calls.length, 0);
+    controller.restore(); assert.match(editor.render(60).map(editorPlain).join("\n"), /ACTIVE/u);
+    const again = installToolview(root, () => color, options);
+    try {
+      editor.render(60); assert.deepEqual(again.renderEditorStatus(60, info), [], "on while menu open still hides widget");
+      assert.equal(editor.handleMouse({ ...mouse(menu, 60), x: 5, height: rows.length })?.handled, true);
+      assert.equal(editor.getText(), "/result "); assert.equal(editor.isShowingAutocomplete(), false);
+      editor.render(60);
+      assert.doesNotMatch(again.renderEditorStatus(60, info).map(editorPlain).join("\n"), /ACTIVE|Idle/u);
+      assert.equal(host.statusContainer.children[0], indicator, "completion retains the same native indicator");
+      assert.equal(intervals.mock.calls.length, 1); assert.equal(clears.mock.calls.length, 0);
+      editor.setText(""); editor.handleInput("/r"); await new Promise<void>(done => setImmediate(done));
+      resolve({ items: [{ value: "/result", label: "/result" }], prefix: "/r" });
+      await new Promise<void>(done => setImmediate(done)); editor.render(60);
+      assert.deepEqual(again.renderEditorStatus(60, info), []);
+      const draft = editor.getText(); editor.handleInput("\x1b");
+      assert.equal(editor.isShowingAutocomplete(), false); assert.equal(editor.getText(), draft);
+      editor.render(60); assert.equal(again.renderEditorStatus(60, info).length, 2, "Escape restores both rows");
+      editor.setText(""); editor.handleInput("/none"); await new Promise<void>(done => setImmediate(done));
+      resolve({ items: [], prefix: "/none" }); await new Promise<void>(done => setImmediate(done));
+      assert.equal(editor.isShowingAutocomplete(), false); editor.render(60);
+      assert.equal(again.renderEditorStatus(60, info).length, 2, "empty suggestions do not hide the widget");
+      assert.equal(intervals.mock.calls.length, 1); assert.equal(clears.mock.calls.length, 0);
+    } finally { again.restore(); }
+  } finally { controller.restore(); host.clearStatusIndicator(); }
+});
+
+
+test("editor padding moves the whole input and status panel live while inner spacing stays one", () => {
+  const { root, editor } = editorSetup(1);
+  const controller = installToolview(root, () => color, { editorStatus: true });
+  const info = { model: "MODEL", provider: "raw-id", thinking: "high", idle: false };
+  const budgets: number[] = [];
+  editor.setWorkingStatusIndicator({ renderInBorder: (width: number) => { budgets.push(width); return truncateToWidth("ACTIVE", width, ""); }, renderSpinnerInBorder: () => "S" } as never);
+  editor.setText("TEXT 界é");
+  const before = { text: editor.getText(), expanded: editor.getExpandedText(), cursor: editor.getCursor() };
+  try {
+    for (const width of [100, 24]) for (const padding of [0, 3, 2, 1, 0]) {
+      editor.setPaddingX(padding);
+      const rows = editor.render(width), status = controller.renderEditorStatus(width, info), contentX = padding + 2;
+      assert.equal(status.length, 2);
+      for (const row of [...rows, ...status.slice(0, 1)]) {
+        const plain = editorPlain(row);
+        assert.equal(visibleWidth(row), width);
+        assert.equal(plain[padding], "┃", `padding ${padding}: entire panel stripe moves`);
+        assert.equal(plain[padding + 1], " ", "fixed inner left gap separates text and stripe");
+        assert.equal(plain[width - padding - 1], " ", "fixed inner right gap");
+        assert.equal(plain.slice(0, padding), " ".repeat(padding));
+        if (padding) assert.equal(plain.slice(-padding), " ".repeat(padding));
+      }
+      assert.equal(editorPlain(rows[1]!).slice(contentX, contentX + 4), "TEXT");
+      assert.equal(editorPlain(status[1]!), " ".repeat(padding) + "╹" + "▀".repeat(width - 2 * padding - 1) + " ".repeat(padding));
+      assert.deepEqual(budgets, [], "metadata and geometry never format native operation text");
+      assert.deepEqual({ text: editor.getText(), expanded: editor.getExpandedText(), cursor: editor.getCursor() }, before);
+    }
+    controller.restore();
+    const native = editor.render(100); assert.ok(editorPlain(native[1]!).startsWith("TEXT"), "off restores selected native zero padding");
+  } finally { controller.restore(); }
+});
+
+// Native widget methods and fullscreen composition are deliberate SDK contract probes.
+// Do not replace these with a mock registry when upgrading the development host.
+function editorWidgetSetup() {
+  const { root, editor } = editorSetup(1); root.clear();
+  const document = new Container(), pendingMessages = new Container(), status = new Container();
+  const above = new Container(), input = new Container(), below = new Container(), footer = new Container();
+  input.addChild(editor);
+  const host = Object.assign(Object.create(InteractiveMode.prototype), {
+    ui: root, widgetContainerAbove: above, widgetContainerBelow: below,
+    extensionWidgetsAbove: new Map(), extensionWidgetsBelow: new Map(),
+  });
+  host.renderWidgets();
+  host.mountInteractiveTui(root, [document, pendingMessages, status, above, input, below, footer]);
+  const viewport = createChatViewport({ document, pendingMessages, status, widgetsAbove: above,
+    editor: input, widgetsBelow: below, footer });
+  const frame = (mode: string, width = 80) => mode === "fullscreen"
+    ? renderLayoutFrame(viewport.root, width, 40, () => {}).lines : root.render(width);
+  return { root, editor, host, above, input, below, viewport, frame };
+}
+
+test("editor widget gap SDK compatibility: stock spacer dock ordering and current-pass render contract", () => {
+  for (const mode of ["regular", "fullscreen"]) {
+    const { root, editor, host, above, input, below, viewport, frame } = editorWidgetSetup();
+    assert.equal(root.children.length, 7, "host mounting retains seven managed slots");
+    assert.equal(root.children[3], above); assert.equal(root.children[4], input); assert.equal(root.children[5], below);
+    assert.equal(above.children.length, 1, "native empty group supplies exactly one spacer");
+    assert.equal(Object.getPrototypeOf(above.children[0]!), Spacer.prototype);
+    assert.deepEqual(above.render(80), [""], "native empty spacer is one unpainted row");
+    assert.ok(viewport.root instanceof Container);
+    const dock = viewport.root.children[1] as Container;
+    assert.equal(dock.children.length, 6, "actual fullscreen dock keeps the known six slots");
+    assert.equal(dock.children[2], above); assert.equal(dock.children[3], input); assert.equal(dock.children[4], below);
+    const events: string[] = [], order: string[] = [];
+    host.setExtensionWidget("compat-upper", () => ({ render() { events.push("upper"); order.push("upper"); return ["SDK_WIDGET"]; }, invalidate() {} }));
+    frame(mode);
+    const nativeCalls = events.length;
+    assert.equal(nativeCalls, mode === "regular" ? 1 : 2, "actual SDK frame has an explicit native render-count control");
+    events.length = 0; order.length = 0;
+    const controller = installToolview(root, () => { order.push("editor"); return color; });
+    try {
+      const rows = frame(mode);
+      assert.deepEqual(order, Array.from({ length: nativeCalls }, () => ["upper", "editor"]).flat(), "SDK must render the upper group before every editor projection in the current pass");
+      const painted = editor.render(80).map(editorPlain);
+      assert.deepEqual(events, Array(nativeCalls).fill("upper"), "spacing adds no widget renders beyond the same native frame");
+      assert.equal(painted[0], "", "compatible native layout must activate the separator, not silently fall back");
+      assert.equal(painted[1]![1], "┃");
+      const widgetY = rows.findIndex(row => editorPlain(row).includes("SDK_WIDGET"));
+      assert.ok(widgetY >= 0); assert.equal(editorPlain(rows[widgetY + 1]!), "");
+      assert.equal(editorPlain(rows[widgetY + 2]!)[1], "┃", "separator follows the native upper group immediately");
+      host.setExtensionWidget("compat-upper", () => ({ render() { events.push("empty"); order.push("empty"); return []; }, invalidate() {} }));
+      assert.equal(above.children.length, 2, "native registered zero-height widgets retain the leading spacer");
+      order.length = 0; frame(mode);
+      assert.deepEqual(order, Array.from({ length: nativeCalls }, () => ["empty", "editor"]).flat(), "height-zero observation must precede the editor, not arrive a frame late");
+      assert.equal(editorPlain(editor.render(80)[0]!)[1], "┃", "zero-row current pass must replace the positive observation");
+      assert.deepEqual(events, [...Array(nativeCalls).fill("upper"), ...Array(nativeCalls).fill("empty")]);
+    } finally { controller.restore(); }
+  }
+});
+
+test("editor widget gap excludes absent zero-height and below-only widgets and follows live height", t => {
+  const clock = t.mock.method(globalThis, "setInterval");
+  for (const mode of ["regular", "fullscreen"]) {
+    const { root, editor, host, frame } = editorWidgetSetup();
+    editor.setText("GAP_INPUT_界é");
+    const controller = installToolview(root, () => color, { editorStatus: true });
+    let content: string[] = [], calls = 0;
+    const nativeCalls = mode === "regular" ? 1 : 2;
+    try {
+      const draw = () => { frame(mode); return editor.render(80); };
+      const baseline = draw();
+      assert.equal(editorPlain(baseline[0]!)[1], "┃", "native empty-group spacer does not add an editor row");
+      host.setExtensionWidget("lower-only", () => ({ render: () => ["LOWER_WIDGET"], invalidate() {} }), { placement: "belowEditor" });
+      assert.deepEqual(draw(), baseline, "lower widgets cannot trigger an upper separator");
+      host.setExtensionWidget("live-height", () => ({ render() { calls++; return content; }, invalidate() {} }));
+      assert.deepEqual(draw(), baseline, "registered zero-row component reserves no additional editor height");
+      assert.equal(calls, nativeCalls);
+      content = ["UPPER_ONE", "UPPER_TWO"];
+      const shown = draw(); assert.deepEqual(shown, ["", ...baseline]); assert.equal(calls, 2 * nativeCalls);
+      assert.equal(shown.findIndex(row => row.includes(CURSOR_MARKER)), baseline.findIndex(row => row.includes(CURSOR_MARKER)) + 1);
+      host.setExtensionWidget("later-registration", () => ({ render: () => ["LAST_UPPER"], invalidate() {} }));
+      assert.deepEqual(draw(), shown, "new widget registration cannot cross the editor-owned gap"); assert.equal(calls, 3 * nativeCalls);
+      content = []; host.setExtensionWidget("later-registration", undefined);
+      assert.deepEqual(draw(), baseline, "same registered component becoming zero-height removes the gap"); assert.equal(calls, 4 * nativeCalls);
+      host.setExtensionWidget("live-height", undefined);
+      assert.deepEqual(draw(), baseline, "removing the last upper widget removes the gap"); assert.equal(calls, 4 * nativeCalls);
+      assert.equal(controller.renderEditorStatus(80, { model: "M", provider: "P", thinking: "off", idle: true }).length, 2);
+      assert.equal(clock.mock.calls.length, 0, "widget spacing introduces no animation or polling clock");
+    } finally { controller.restore(); }
+  }
+});
+
+test("editor widget gap maps native text menu clicks and leaves the empty row noninteractive", async () => {
+  for (const mode of ["regular", "fullscreen"]) {
+    const { root, editor, host, frame } = editorWidgetSetup();
+    host.setExtensionWidget("upper", ["CLICK_WIDGET"]);
+    const controller = installToolview(root, () => color, { editorStatus: true });
+    try {
+      editor.setText("abc界éXYZ"); frame(mode);
+      const rows = editor.render(80); assert.equal(rows[0], "");
+      const cursor = editor.getCursor();
+      assert.equal(editor.handleMouse({ ...mouse(0), height: rows.length }), undefined);
+      assert.deepEqual(editor.getCursor(), cursor, "separator cannot move the cursor");
+      assert.equal(editor.handleMouse({ ...mouse(2), x: 3, height: rows.length })?.handled, true);
+      assert.deepEqual(editor.getCursor(), { line: 0, col: 0 }, "painted text y maps back to native y");
+      editor.setText("");
+      editor.setAutocompleteProvider({
+        getSuggestions: async () => ({ items: [{ value: "/gap-result", label: "/gap-result", description: "GAP_MENU" }], prefix: "/g" }),
+        applyCompletion: () => ({ lines: ["/gap-result "], cursorLine: 0, cursorCol: 12 }),
+      });
+      editor.handleInput("/g"); await new Promise<void>(resolve => setImmediate(resolve)); frame(mode);
+      const menuRows = editor.render(80), menu = menuRows.findIndex(row => editorPlain(row).includes("GAP_MENU"));
+      assert.equal(menu, 4, "only the one external row shifts native autocomplete");
+      assert.deepEqual(controller.renderEditorStatus(80, { model: "M", provider: "P", thinking: "off", idle: true }), []);
+      assert.equal(editor.handleMouse({ ...mouse(menu), x: 3, height: menuRows.length })?.handled, true);
+      assert.equal(editor.getText(), "/gap-result ");
+      frame(mode); assert.equal(editor.render(80)[0], "", "completion retains gap while upper widgets exist");
+      assert.equal(controller.renderEditorStatus(80, { model: "M", provider: "P", thinking: "off", idle: true }).length, 2);
+    } finally { controller.restore(); }
+  }
+});
+
+test("editor widget gap rejects changed managed layout spacer and later container-render owners", () => {
+  const { root, editor, host, above, frame } = editorWidgetSetup();
+  host.setExtensionWidget("upper", ["GUARD_WIDGET"]);
+  const original = Object.getOwnPropertyDescriptor(Container.prototype, "render")!;
+  const controller = installToolview(root, () => color);
+  try {
+    frame("regular"); const valid = editor.render(80); assert.equal(valid[0], "");
+    root.addChild(new Container()); frame("regular");
+    assert.equal(editorPlain(editor.render(80)[0]!)[1], "┃", "unknown managed slots omit optional gap rather than guessing");
+    root.removeChild(root.children.at(-1)!);
+    (above.children[0] as Spacer).setLines(2); frame("regular");
+    assert.equal(editorPlain(editor.render(80)[0]!)[1], "┃", "unknown stock spacer shape fails closed");
+    host.renderWidgets(); frame("regular"); assert.equal(editor.render(80)[0], "");
+    above.render = () => ["FOREIGN_GROUP"];
+    frame("regular"); assert.equal(editorPlain(editor.render(80)[0]!)[1], "┃", "foreign group renderer is not interpreted");
+    Reflect.deleteProperty(above, "render"); frame("regular"); assert.equal(editor.render(80)[0], "");
+    const later = function (this: Container, width: number) { return original.value.call(this, width); };
+    Container.prototype.render = later;
+    frame("regular"); assert.equal(editorPlain(editor.render(80)[0]!)[1], "┃", "later prototype owner invalidates measurements");
+    controller.restore(); assert.equal(Container.prototype.render, later, "restoration respects later owner");
+  } finally { controller.restore(); Object.defineProperty(Container.prototype, "render", original); }
+});
+
+
+test("editor widget gap ignores stale-width observations and restores both public render descriptors", () => {
+  const { root, editor, host, above, frame } = editorWidgetSetup();
+  host.setExtensionWidget("upper", ["WIDTH_WIDGET"]);
+  const container = Object.getOwnPropertyDescriptor(Container.prototype, "render")!;
+  const spacer = Object.getOwnPropertyDescriptor(Spacer.prototype, "render")!;
+  const controller = installToolview(root, () => color);
+  try {
+    frame("regular", 80); assert.equal(editor.render(80)[0], "");
+    assert.equal(editorPlain(editor.render(60)[0]!)[1], "┃", "another width cannot use the retained group height");
+    frame("fullscreen", 60); assert.equal(editor.render(60)[0], "");
+    host.renderWidgets();
+    assert.equal(editorPlain(editor.render(60)[0]!)[1], "┃", "replaced native spacer invalidates a previous group observation");
+    frame("regular", 60); assert.equal(editor.render(60)[0], "");
+    (above.children[0] as Spacer).render = () => [""];
+    frame("regular", 60); assert.equal(editorPlain(editor.render(60)[0]!)[1], "┃", "an instance spacer owner invalidates the proof");
+    controller.restore();
+    assert.deepEqual(Object.getOwnPropertyDescriptor(Container.prototype, "render"), container);
+    assert.deepEqual(Object.getOwnPropertyDescriptor(Spacer.prototype, "render"), spacer);
+    assert.notEqual(editor.render(80)[0], "", "off restores native rows rather than a lingering prefix");
+  } finally { controller.restore(); }
+});
+
+
+test("editor directory is right-aligned with one shared inner padding cell", () => {
+  const info = { model: "M", provider: "raw-id", thinking: "off", idle: false,
+    cwd: "/home/kot/work/project", branch: "feature/input-status" };
+  const row = plain(renderEditorStatus(100, { fg: (_role, text) => text }, info)[0]!);
+  assert.equal(visibleWidth(row), 100);
+  assert.ok(row.endsWith(info.cwd + ":" + info.branch + "  "), "one painted padding plus one exterior margin");
+  assert.ok(row.startsWith(" ┃ M (raw-id) • off"));
+  assert.match(row, /off {2,}\/home\//u);
+});
+
+test("editor directory colors keep last path element distinct from parents and branch", () => {
+  const calls: [string, string][] = [];
+  const info = { model: "M", provider: "P", thinking: "high", idle: true, cwd: "/home/kot/project", branch: "main" };
+  renderEditorStatus(100, { fg: (role, value) => { calls.push([role, value]); return value; } }, info);
+  for (const expected of [["dim", "/home/kot/"], ["mdLinkUrl", "project"], ["muted", ":"], ["text", "main"]])
+    assert.ok(calls.some(call => call[0] === expected[0] && call[1] === expected[1]), JSON.stringify(expected));
+});
+
+test("editor directory retains its last name before a long branch and recovers on resize", () => {
+  const info = { model: "long model name", provider: "raw-provider", thinking: "high", idle: false,
+    cwd: "/home/kot/work/important", branch: "feature/something-extremely-long" };
+  const theme = { fg: (_role: string, value: string) => value };
+  const wide = plain(renderEditorStatus(120, theme, info)[0]!);
+  const narrow = plain(renderEditorStatus(32, theme, info)[0]!);
+  assert.ok(narrow.includes("important"), "whole last directory outranks branch and parent path");
+  assert.ok(!narrow.includes(info.branch)); assert.ok(narrow.includes("…"));
+  assert.equal(plain(renderEditorStatus(120, theme, info)[0]!), wide);
+});
+
+
+test("Git branch source validates real repository kinds without environment redirection", async () => {
+  const { GitBranchSource } = await import("../src/git-branch.ts");
+  const base = mkdtempSync(join(tmpdir(), "toolview-git-"));
+  const git = (cwd: string, ...args: string[]) => {
+    const result = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr); return result.stdout.trim();
+  };
+  const sources: InstanceType<typeof GitBranchSource>[] = [];
+  try {
+    const plainDir = join(base, "plain"), fake = join(base, "fake"), repo = join(base, "repo"), bare = join(base, "bare");
+    for (const cwd of [plainDir, fake, repo, bare]) mkdirSync(cwd);
+    mkdirSync(join(fake, ".git"));
+    git(repo, "init", "-b", "unborn"); git(bare, "init", "--bare", "-b", "bare-main");
+    const nested = join(repo, "nested"); mkdirSync(nested);
+    for (const [cwd, expected] of [[plainDir, undefined], [fake, undefined], [repo, "unborn"], [nested, "unborn"], [bare, "bare-main"]] as const) {
+      const source = new GitBranchSource(() => {}); sources.push(source);
+      source.setDirectory(cwd); await source.settled(); assert.equal(source.branch(cwd), expected);
+    }
+    const poisoned = new GitBranchSource(() => {}, { env: { ...process.env, GIT_DIR: join(bare, "."), GIT_WORK_TREE: bare } });
+    sources.push(poisoned); poisoned.setDirectory(plainDir); await poisoned.settled(); assert.equal(poisoned.branch(plainDir), undefined);
+    poisoned.setDirectory(repo); await poisoned.settled(); assert.equal(poisoned.branch(repo), "unborn");
+    git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "initial");
+    git(repo, "checkout", "--detach"); poisoned.refresh(true); await poisoned.settled(); assert.equal(poisoned.branch(repo), undefined);
+    const worktree = join(base, "linked"); git(repo, "worktree", "add", "-b", "linked-name", worktree);
+    poisoned.setDirectory(worktree); await poisoned.settled(); assert.equal(poisoned.branch(worktree), "linked-name");
+  } finally { for (const source of sources) source.dispose(); rmSync(base, { recursive: true, force: true }); }
+});
+
+test("Git branch source observes atomic HEAD changes with zero warm-frame queries", async () => {
+  const { GitBranchSource, gitDiagnostics } = await import("../src/git-branch.ts");
+  const cwd = mkdtempSync(join(tmpdir(), "toolview-git-watch-"));
+  let resolve: (() => void) | undefined;
+  const source = new GitBranchSource(() => resolve?.());
+  try {
+    assert.equal(spawnSync("git", ["-C", cwd, "init", "-b", "first"]).status, 0);
+    source.setDirectory(cwd); await source.settled(); assert.equal(source.branch(cwd), "first");
+    const before = gitDiagnostics();
+    for (let n = 0; n < 100; n++) { source.setDirectory(cwd); source.branch(cwd); }
+    await source.settled(); assert.equal(gitDiagnostics().queries, before.queries);
+    const changed = new Promise<void>(done => { resolve = done; });
+    assert.equal(spawnSync("git", ["-C", cwd, "symbolic-ref", "HEAD", "refs/heads/second"]).status, 0);
+    await Promise.race([changed, new Promise((_, reject) => setTimeout(() => reject(new Error("HEAD watch did not refresh")), 3000).unref())]);
+    await source.settled(); assert.equal(source.branch(cwd), "second");
+    assert.ok(gitDiagnostics().queries > before.queries);
+    source.dispose(); assert.equal(source.branch(cwd), undefined);
+  } finally { source.dispose(); rmSync(cwd, { recursive: true, force: true }); }
+});
+
+
+test("directory reduction stages are ordered and column/grapheme safe", () => {
+  const theme = { fg: (_role: string, value: string) => value };
+  const path = "/home/kot/work/project", branch = "feature/input-status";
+  for (const [width, expected] of [[43, path + ":" + branch], [40, "/home/ko…rk/project:" + branch],
+    [36, "/home/…/project:" + branch], [21, "/home/…/project:fe…us"], [20, "…/project:fe…us"],
+    [14, "…/project:fe…s"], [12, "…/project:f…"], [11, "…/project"], [8, "project"], [6, "proje…"], [2, "p…"], [1, ""]] as const)
+    assert.equal(directoryStatus(path, branch, width, theme), expected, `stage width ${width}`);
+  for (const cwd of ["/", "C:\\", "\\\\server\\share\\", "C:\\Users\\kot\\project", "/project", "project",
+    "/home/界界/é👨‍👩‍👧‍👦界", "/home/kot/trailing/", "/tmp/\x1b[31mname\n"]) {
+    for (let width = 0; width < 100; width++) {
+      const text = directoryStatus(cwd, "alpha界界界", width, theme);
+      assert.ok(visibleWidth(text) <= width, JSON.stringify({ cwd, width, text }));
+      assert.notEqual(text, "…"); assert.ok(!text.endsWith(":")); assert.ok(!text.includes("……"));
+      assert.ok(!text.includes("\x1b") && !text.includes("\n"));
+    }
+  }
+  assert.equal(directoryStatus("/home/kot/trailing/", undefined, 100, theme), "/home/kot/trailing");
+  assert.equal(directoryStatus("/", "main", 100, theme), "/:main");
+  assert.equal(directoryStatus("C:\\", undefined, 100, theme), "C:\\");
+  assert.equal(directoryStatus("\\\\server\\share\\", undefined, 100, theme), "\\\\server\\share\\");
+});
+
+test("directory column quotas preserve Idle and release missing-block allocation", () => {
+  const theme = { fg: (_role: string, value: string) => value };
+  const info = { model: "m".repeat(80), provider: "p".repeat(80), thinking: "high", idle: true,
+    cwd: "/home/kot/work/important", branch: "b".repeat(80) };
+  for (let width = 7; width < 130; width++) {
+    const row = plain(renderEditorStatus(width, theme, info)[0]!);
+    assert.equal(visibleWidth(row), width);
+    if (width >= 9) assert.ok(row.includes("Idle"));
+    assert.equal(plain(renderEditorStatus(width, theme, info)[0]!), row, "deterministic resize fitting");
+  }
+  const plainInfo = { ...info, cwd: "/x", branch: undefined, idle: false };
+  const row = plain(renderEditorStatus(100, theme, plainInfo)[0]!);
+  assert.ok(row.includes("m".repeat(80)), "short right block releases quota back to left");
+});
+
+test("Git branch source ignores late cancelled replies and releases jobs/watches", async () => {
+  const { GitBranchSource, gitDiagnostics } = await import("../src/git-branch.ts");
+  let release: ((value: { ok: boolean; output: string }) => void) | undefined;
+  let started: (() => void) | undefined;
+  const waiting = new Promise<void>(done => { started = done; });
+  const before = gitDiagnostics();
+  const source = new GitBranchSource(() => {}, { execute: async (cwd, args) => {
+    if (args[1] === "--local-env-vars") return { ok: true, output: "GIT_DIR\n" };
+    if (args[0] !== "symbolic-ref") return { ok: false, output: "" };
+    if (cwd === "/toolview-old-not-present") { started?.(); return new Promise(done => { release = done; }); }
+    return { ok: true, output: "refs/heads/fresh\n" };
+  } });
+  source.setDirectory("/toolview-old-not-present"); await waiting;
+  source.setDirectory("/toolview-new-not-present");
+  release!({ ok: true, output: "refs/heads/stale\n" }); await source.settled();
+  assert.equal(source.branch("/toolview-old-not-present"), undefined);
+  assert.equal(source.branch("/toolview-new-not-present"), "fresh");
+  source.dispose(); await source.settled();
+  assert.equal(gitDiagnostics().activeJobs, before.activeJobs); assert.equal(gitDiagnostics().watchers, before.watchers);
+});
+
+test("Git branch source recovers repository creation and supports available reftable watches", async t => {
+  const { GitBranchSource } = await import("../src/git-branch.ts");
+  const cwd = mkdtempSync(join(tmpdir(), "toolview-git-new-"));
+  let listener: (() => void) | undefined;
+  const source = new GitBranchSource(() => listener?.());
+  const change = async (action: () => void) => {
+    let timer: ReturnType<typeof setTimeout>;
+    const done = new Promise<void>((resolve, reject) => {
+      listener = resolve; timer = setTimeout(() => reject(new Error("repository watch did not refresh")), 3000);
+    });
+    try { action(); await done; await source.settled(); } finally { clearTimeout(timer!); listener = undefined; }
+  };
+  try {
+    source.setDirectory(cwd); await source.settled(); assert.equal(source.branch(cwd), undefined);
+    await change(() => { assert.equal(spawnSync("git", ["-C", cwd, "init", "-b", "created"]).status, 0); });
+    assert.equal(source.branch(cwd), "created");
+    source.dispose(); await source.settled(); rmSync(join(cwd, ".git"), { recursive: true });
+    const reftable = spawnSync("git", ["-C", cwd, "init", "--ref-format=reftable", "-b", "table-first"]);
+    if (reftable.status !== 0) { t.diagnostic("Git reftable is unavailable; repository creation control passed"); return; }
+    source.setDirectory(cwd); await source.settled(); assert.equal(source.branch(cwd), "table-first");
+    await change(() => { assert.equal(spawnSync("git", ["-C", cwd, "symbolic-ref", "HEAD", "refs/heads/table-next"]).status, 0); });
+    assert.equal(source.branch(cwd), "table-next");
+  } finally { source.dispose(); await source.settled(); rmSync(cwd, { recursive: true, force: true }); }
+});
+
+
+test("Git rediscovery rearms watches after same-path metadata directory replacement", async () => {
+  const { GitBranchSource } = await import("../src/git-branch.ts");
+  const base = mkdtempSync(join(tmpdir(), "toolview-git-replaced-")), cwd = join(base, "current"), other = join(base, "other");
+  mkdirSync(cwd); mkdirSync(other);
+  const git = (path: string, ...args: string[]) => assert.equal(spawnSync("git", ["-C", path, ...args]).status, 0);
+  let listener: (() => void) | undefined;
+  const source = new GitBranchSource(() => listener?.());
+  const change = async (expected: string, action: () => void) => {
+    let timer: ReturnType<typeof setTimeout>;
+    const changed = new Promise<void>((done, fail) => {
+      listener = () => { if (source.branch(cwd) === expected) done(); };
+      timer = setTimeout(() => fail(new Error(`watch did not publish ${expected}; actual ${source.branch(cwd)}`)), 1500);
+    });
+    try { action(); await changed; await source.settled(); } finally { clearTimeout(timer!); listener = undefined; }
+  };
+  try {
+    git(cwd, "init", "-b", "first"); git(other, "init", "-b", "second");
+    source.setDirectory(cwd); await source.settled(); assert.equal(source.branch(cwd), "first");
+    await change("second", () => {
+      renameSync(join(cwd, ".git"), join(base, "moved-away")); renameSync(join(other, ".git"), join(cwd, ".git"));
+    });
+    await change("third", () => git(cwd, "symbolic-ref", "HEAD", "refs/heads/third"));
+    assert.equal(source.branch(cwd), "third");
+  } finally { source.dispose(); await source.settled(); rmSync(base, { recursive: true, force: true }); }
+});
+
+
+test("native activity same-editor routing restores another focused component", () => {
+  const { root, editor, host, options } = nativeStatusEditorSetup();
+  const other = new Text("focus-owner", 0, 0); (root.children[0] as Container).addChild(other);
+  let focused: Component | null = other;
+  Object.assign(root, { getFocusedComponent: () => focused,
+    setFocus: (node: Component | null) => { focused = node; editor.focused = node === editor; } });
+  const text = "PRESERVED_DRAFT"; editor.setText(text);
+  const before = editor.getCursor(); const controller = installToolview(root, () => color, options);
+  try {
+    assert.equal(focused, other); assert.equal(editor.focused, false); assert.equal(host.editor, editor);
+    assert.equal(editor.getText(), text); assert.deepEqual(editor.getCursor(), before);
+    controller.restore(); assert.equal(focused, other); assert.equal(editor.focused, false);
+    assert.equal(editor.getText(), text); assert.deepEqual(editor.getCursor(), before);
+  } finally { controller.restore(); }
+});
+
+
+test("Git failures omit branch without blocking cwd or retaining resources", async () => {
+  const { GitBranchSource, gitDiagnostics } = await import("../src/git-branch.ts");
+  const cwd = mkdtempSync(join(tmpdir(), "toolview-git-error-"));
+  const before = gitDiagnostics(), source = new GitBranchSource(() => {}, { env: { ...process.env, PATH: "/git-not-present" } });
+  try {
+    source.setDirectory(cwd); await source.settled(); assert.equal(source.branch(cwd), undefined);
+    const current = gitDiagnostics(); assert.equal(current.spawned, before.spawned, "missing binary started zero processes");
+    for (let n = 0; n < 50; n++) source.setDirectory(cwd);
+    await source.settled(); assert.equal(gitDiagnostics().queries, current.queries, "no retry polling on errors");
+  } finally { source.dispose(); await source.settled(); rmSync(cwd, { recursive: true, force: true }); }
+  assert.equal(gitDiagnostics().watchers, before.watchers); assert.equal(gitDiagnostics().activeJobs, before.activeJobs);
+});
+
+
+test("Git rediscovery reads HEAD after installing current metadata watches", async () => {
+  const { GitBranchSource } = await import("../src/git-branch.ts");
+  const cwd = mkdtempSync(join(tmpdir(), "toolview-git-rearm-race-"));
+  assert.equal(spawnSync("git", ["-C", cwd, "init", "-b", "before-rearm"]).status, 0);
+  let armed = false, mutations = 0;
+  const source = new GitBranchSource(() => {}, { execute: async (path, args, env) => {
+    const result = spawnSync("git", ["-C", path, ...args], { env, encoding: "utf8" });
+    if (armed && args.includes("--git-common-dir")) {
+      armed = false; mutations++;
+      assert.equal(spawnSync("git", ["-C", cwd, "symbolic-ref", "HEAD", "refs/heads/changed-during-rearm"]).status, 0);
+    }
+    return { ok: result.status === 0, output: result.stdout, code: result.status ?? undefined };
+  } });
+  try {
+    source.setDirectory(cwd); await source.settled(); assert.equal(source.branch(cwd), "before-rearm");
+    armed = true; source.refresh(true); await source.settled();
+    assert.equal(mutations, 1, "one controlled HEAD mutation before metadata-query completion");
+    assert.equal(source.branch(cwd), "changed-during-rearm", "publish post-installation HEAD, not stale pre-rearm snapshot");
+  } finally { source.dispose(); await source.settled(); rmSync(cwd, { recursive: true, force: true }); }
+});
+
+
+test("Git repository environment isolation removes case-variant redirect keys", async () => {
+  const { GitBranchSource } = await import("../src/git-branch.ts");
+  const source = new GitBranchSource(() => {}, { env: { Path: "/git", git_dir: "elsewhere", Git_Work_Tree: "wrong" },
+    execute: async (_cwd, args, env) => {
+      if (args.includes("--local-env-vars")) return { ok: true, output: "GIT_DIR\nGIT_WORK_TREE\n" };
+      assert.ok(!Object.keys(env).some(key => ["GIT_DIR", "GIT_WORK_TREE"].includes(key.toUpperCase())), "Windows environment keys are case-insensitive");
+      return { ok: args[0] === "symbolic-ref", output: args[0] === "symbolic-ref" ? "refs/heads/isolated\n" : "" };
+    } });
+  try {
+    source.setDirectory("/toolview-env-not-present"); await source.settled();
+    assert.equal(source.branch("/toolview-env-not-present"), "isolated");
+  } finally { source.dispose(); await source.settled(); }
+});
+
+
+// Footer integration starts with real SDK mounting/public UI and real session records.
+// The deterministic context/auth fixtures never emulate the native footer renderer.
+const footerForeignEditor: NonNullable<ReturnType<ExtensionContext["ui"]["getEditorComponent"]>> =
+  (value, theme, keys) => new CustomEditor(value, theme, keys);
+async function footerSetup(foreignEditor = false, selectorAtStartup = false) {
+  const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+  const { FooterComponent } = await import("../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/footer.js");
+  initTheme("dark");
+  const manager = SessionManager.inMemory("/footer-probe");
+  const model = { id: "FOOTER_MODEL", name: "Footer Model", provider: "footer-provider", contextWindow: 272000 };
+  let context: { tokens: number | null; percent: number | null; contextWindow: number } | undefined = { tokens: 104500, percent: 104500 / 272000 * 100, contextWindow: 272000 };
+  let scans = 0, contextReads = 0, auto = true, subscription = true;
+  const entries = manager.getEntries.bind(manager);
+  manager.getEntries = () => { scans++; return entries(); };
+  const statuses = new Map<string, string>([["magic-context", "mc: 104.5K (51%) · idle"]]);
+  const data = { getGitBranch: () => "FOOTER_BRANCH", getAvailableProviderCount: () => 2,
+    getExtensionStatuses: () => statuses, onBranchChange: () => () => {} };
+  const { root, editor, keybindings } = editorSetup(); root.clear();
+  Object.assign(root, { setFocus() {} });
+  const input = new Container(); input.addChild(editor);
+  const readContext = () => { contextReads++; return context; };
+  const session = { sessionManager: manager, model, state: { model, thinkingLevel: "off" },
+    modelRuntime: { isUsingSubscription: () => subscription }, getContextUsage: readContext };
+  const native = new FooterComponent(session as never, data);
+  const footer = new Container(); footer.addChild(native);
+  const above = new Container(), below = new Container();
+  const host = Object.assign(Object.create(InteractiveMode.prototype), { ui: root, footerContainer: footer,
+    footer: native, footerDataProvider: data, customFooter: undefined,
+    defaultEditor: editor, editor, editorContainer: input, statusContainer: new Container(), keybindings,
+    widgetContainerAbove: above, widgetContainerBelow: below,
+    extensionWidgetsAbove: new Map(), extensionWidgetsBelow: new Map() });
+  for (const child of [new Container(), new Container(), host.statusContainer, above, input, below, footer]) root.addChild(child);
+  const handlers = new Map<string, Function[]>();
+  let command: Function;
+  const pi = { on(name: string, fn: Function) { handlers.set(name, [...(handlers.get(name) ?? []), fn]); return () => {}; },
+    registerFlag() {}, getFlag() {}, getThinkingLevel: () => "off", getSettings: () => ({ compaction: { enabled: auto } }),
+    registerCommand(name: string, options: { handler: Function }) { if (name === "toolview") command = options.handler; } };
+  const ctx = { mode: "tui", cwd: "/footer-probe", ui: { ...host.createExtensionUIContext(), notify() {} }, model, sessionManager: manager,
+    modelRegistry: { isUsingOAuth: () => subscription, getProvider: () => ({ auth: { oauth: { isSubscription: true } } }) },
+    getContextUsage: readContext, isIdle: () => true };
+  const emit = (name: string) => { for (const fn of handlers.get(name) ?? []) fn({}, ctx); };
+  const append = (input = 11000000, output = 1500000, cacheRead = 243000000, cacheWrite = 0, cost = 61.761) => manager.appendMessage({
+    role: "assistant", content: [{ type: "text", text: "FOOTER_USAGE" }], api: "openai-responses", provider: model.provider,
+    model: model.id, timestamp: 1, stopReason: "stop", usage: { input, output, cacheRead, cacheWrite, totalTokens: input + output + cacheRead + cacheWrite,
+      cost: { input: cost, output: 0, cacheRead: 0, cacheWrite: 0, total: cost } } });
+  if (foreignEditor) ctx.ui.setEditorComponent(footerForeignEditor);
+  if (selectorAtStartup) { input.clear(); input.addChild(new Text("NATIVE_RELOAD_BOX", 0, 0)); }
+  append(); toolview(pi as unknown as ExtensionAPI); emit("session_start");
+  return { root, host, footer, native, ctx, manager, statuses, append, emit, editor, input,
+    render: (width = 140) => footer.children[0]!.render(width), counts: () => ({ scans, contextReads }),
+    context(value: typeof context) { context = value; }, auto(value: boolean) { auto = value; }, subscription(value: boolean) { subscription = value; },
+    control: (action: string) => command!(action, ctx), close: () => emit("session_shutdown") };
+}
+
+test("footer uses structured native usage with requested ordering and no cwd/model", async () => {
+  const f = await footerSetup();
+  try {
+    const rows = f.render().map(stripVTControlCharacters);
+    assert.equal(rows.length, 1);
+    assert.match(rows[0]!, /^↑11M ↓1\.5M 105k\/272k \(38\.4%\) \(auto\) R243M CH95\.7% \$61\.761 \(sub\)/);
+    assert.ok(rows[0]!.endsWith("mc: 104.5K (51%) · idle"));
+    assert.ok(!rows.join("\n").includes("FOOTER_MODEL")); assert.ok(!rows.join("\n").includes("FOOTER_BRANCH"));
+    assert.ok(!rows.join("\n").includes("/footer-probe"));
+  } finally { f.close(); }
+});
+
+test("footer moves whole statuses before truncation and right-aligns overflow", async () => {
+  const f = await footerSetup();
+  try {
+    f.statuses.clear(); f.statuses.set("b", "SECOND_STATUS"); f.statuses.set("a", "FIRST_STATUS");
+    const rows = f.render(80).map(stripVTControlCharacters);
+    assert.ok(rows[0]!.trimEnd().endsWith("FIRST_STATUS"));
+    assert.equal(rows[1], " ".repeat(80 - 13) + "SECOND_STATUS");
+    assert.ok(!rows.join("\n").includes("•"), "no dangling separator at a status row break");
+    f.statuses.clear(); f.statuses.set("x", "LONG_STATUS_" + "界é".repeat(40));
+    const narrow = f.render(24).map(stripVTControlCharacters);
+    const status = narrow.find(row => row.includes("LONG_STATUS_"))!;
+    assert.ok(status.endsWith("…")); assert.ok(visibleWidth(status) <= 24);
+    assert.equal(narrow.filter(row => row.includes("LONG_STATUS_")).length, 1);
+    assert.ok(narrow.slice(0, -1).join(" ").includes("$61.761"), "left overflow retains whole metric data");
+  } finally { f.close(); }
+});
+
+test("footer refreshes nullable context window flags and native cache writes", async () => {
+  const f = await footerSetup();
+  try {
+    f.context({ tokens: 1500000, contextWindow: 2000000, percent: 75 }); f.emit("model_select");
+    assert.ok(f.render().map(stripVTControlCharacters).join(" ").includes("1.50M/2.00M (75.0%)"));
+    f.context({ tokens: null, contextWindow: 272000, percent: null }); f.emit("session_compact");
+    f.auto(false); f.subscription(false); f.append(5, 6, 0, 12, 0);
+    const rows = f.render().map(stripVTControlCharacters).join(" ");
+    assert.ok(rows.includes("?/272k")); assert.ok(!rows.includes("(0.0%)")); assert.ok(!rows.includes("(auto)")); assert.ok(!rows.includes("(sub)"));
+    assert.ok(rows.includes("W12"));
+  } finally { f.close(); }
+});
+
+test("footer warm frames avoid session scans and context reads across status width theme invalidations", async () => {
+  const f = await footerSetup();
+  try {
+    const first = f.render(); const before = f.counts();
+    for (let i = 0; i < 32; i++) assert.equal(f.render(), first, "latest unchanged layout rows are reused");
+    f.statuses.set("extra", "EXTRA"); f.render(60); f.host.customFooter.invalidate(); f.render(60);
+    assert.deepEqual(f.counts(), before);
+    f.append(1, 2, 3, 4, 0); f.render(60);
+    assert.deepEqual(f.counts(), { scans: before.scans + 1, contextReads: before.contextReads + 1 });
+    const leaf = f.manager.getLeafId()!; f.append(1, 2, 3, 4, 0); f.manager.branch(leaf); f.emit("session_tree");
+    const rows = f.render().map(stripVTControlCharacters).join(" "); assert.ok(rows.includes("W8"), "branch-back must include abandoned cumulative usage even at a previous leaf");
+  } finally { f.close(); }
+});
+
+test("footer owns public slot until disposed and never erases a later foreign footer", async () => {
+  const f = await footerSetup();
+  try {
+    assert.notEqual(f.footer.children[0], f.native);
+    await f.control("off"); assert.equal(f.footer.children[0], f.native);
+    await f.control("on"); assert.notEqual(f.footer.children[0], f.native);
+    const foreign = { render: () => ["FOREIGN_FOOTER"], invalidate() {} };
+    f.ctx.ui.setFooter(() => foreign); await f.control("off");
+    assert.equal(f.footer.children[0], foreign); f.close(); assert.equal(f.footer.children[0], foreign);
+  } finally { f.close(); }
+});
+
+
+test("footer context precision normalizes k and M carries with magnitude-dependent trailing zeros", async () => {
+  const { contextTokens } = await import("../src/footer.ts");
+  for (const [count, expected] of [[0, "0k"], [104500, "105k"], [999499, "999k"], [999500, "1.00M"],
+    [1000000, "1.00M"], [1200000, "1.20M"], [1500000, "1.50M"], [9996000, "10.0M"],
+    [10000000, "10.0M"], [12400000, "12.4M"], [99960000, "100M"], [100000000, "100M"], [123000000, "123M"], [1234000000, "1234M"]] as const) {
+    assert.equal(contextTokens(count), expected, String(count));
+  }
+});
+
+test("footer cumulative accounting matches actual native SDK including side tool summaries and abandoned history", async () => {
+  const f = await footerSetup();
+  const { footerUsage } = await import("../src/footer.ts");
+  try {
+    const usage = { input: 7, output: 8, cacheRead: 9, cacheWrite: 10, totalTokens: 34,
+      cost: { input: 0.5, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.5 } };
+    f.manager.appendUsage("cache_warm", "probe", "probe", usage);
+    f.manager.appendMessage({ role: "toolResult", toolCallId: "side", toolName: "side", content: [{ type: "text", text: "SIDE" }], isError: false, timestamp: 1, usage });
+    f.manager.appendCompaction("summary", f.manager.getLeafId(), 100, undefined, true, usage);
+    f.manager.branchWithSummary(null, "abandoned branch", undefined, true, usage);
+    const total = footerUsage(f.manager.getEntries());
+    const native = (f.native as any).getSessionStats(); // Actual SDK private accounting oracle, test-only.
+    assert.deepEqual({ input: total.input, output: total.output, cacheRead: total.cacheRead, cacheWrite: total.cacheWrite, cost: total.cost }, native.usageTotals);
+    assert.equal(total.cacheHitRate, native.latestCacheHitRate);
+  } finally { f.close(); }
+});
+
+test("footer physical glyph colors CH displayed thresholds and raw native context warning thresholds", async () => {
+  const { renderFooter } = await import("../src/footer.ts");
+  const terminal = new xterm.Terminal({ cols: 180, rows: 4, allowProposedApi: true });
+  const write = async (row: string) => { terminal.reset(); await new Promise<void>(resolve => terminal.write(row, resolve)); };
+  const fg = (x: number) => { const c = terminal.buffer.active.getLine(0)!.getCell(x)!; return [c.getFgColorMode(), c.getFgColor()]; };
+  try {
+    for (const theme of ["dark", "light"]) {
+      initTheme(theme);
+      const refs: Record<string, number[]> = {};
+      for (const role of ["text", "muted", "dim", "success", "warning", "error"] as const) { await write(nativeTheme.fg(role, "X")); refs[role] = fg(0); }
+      for (const [rate, chColor] of [[79.94, "error"], [79.96, "warning"], [80, "warning"], [94.94, "warning"], [94.96, "success"], [95, "success"], [100, "success"], [0, "error"]] as const) {
+        for (const [percent, percentColor] of [[70, "muted"], [70.01, "warning"], [90, "warning"], [90.01, "error"], [105, "error"]] as const) {
+          const data = { usage: { input: 11e6, output: 1.5e6, cacheRead: 243e6, cacheWrite: 12, cost: 61.761, cacheHitRate: rate },
+            context: { tokens: 104500, contextWindow: 272000, percent }, auto: true, subscription: true };
+          const row = renderFooter(180, data, [], nativeTheme)[0]!;
+          const text = stripVTControlCharacters(row); await write(row);
+          const expect = (value: string, role: string) => { const start = text.indexOf(value); assert.ok(start >= 0, value); for (let i = start; i < start + value.length; i++) assert.deepEqual(fg(i), refs[role], `${theme} ${value} ${i}`); };
+          for (const value of ["↑", "↓", "105k", "R", "W", "$"]) expect(value, "text");
+          for (const value of ["11M", "1.5M", "272k", "auto", "243M", "61.761", "sub"]) expect(value, "muted");
+          expect("/", "dim"); expect("(", "dim"); expect(")", "dim");
+          const ch = text.indexOf("CH"); for (let i = ch; i < ch + ("CH" + rate.toFixed(1) + "%").length; i++) assert.deepEqual(fg(i), refs[chColor]);
+          const p = text.indexOf("(" + percent.toFixed(1) + "%)");
+          for (let i = p + 1; i < p + 1 + (percent.toFixed(1) + "%").length; i++) assert.deepEqual(fg(i), refs[percentColor]);
+        }
+      }
+    }
+  } finally { terminal.dispose(); initTheme("dark"); }
+});
+
+test("footer preserves producer ANSI isolates attributes and links and never splits whole statuses", async () => {
+  const { renderFooter } = await import("../src/footer.ts"); initTheme("dark");
+  const data = { usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 }, auto: false, subscription: false };
+  const terminal = new xterm.Terminal({ cols: 80, rows: 3, allowProposedApi: true });
+  try {
+    const producer = "\x1b[1;41;32mFIRST";
+    const rows = renderFooter(80, data, [["a", producer], ["b", "NEXT"]], nativeTheme);
+    assert.ok(rows[0]!.includes(producer));
+    await new Promise<void>(resolve => terminal.write(rows[0]!, resolve));
+    const text = stripVTControlCharacters(rows[0]!); const y = terminal.buffer.active.getLine(0)!;
+    assert.equal(y.getCell(text.indexOf("FIRST"))!.getBgColor(), 1);
+    for (const value of ["•", "NEXT"]) { const cell = y.getCell(text.indexOf(value))!; assert.ok(cell.isBgDefault()); assert.ok(!cell.isBold()); }
+    const status = "LINK\x1b]8;;https://example.test\x1b\\label";
+    const links = renderFooter(80, data, [["a", status], ["b", "NEXT"]], nativeTheme);
+    assert.ok(links[0]!.includes(status + "\x1b]8;;\x1b\\\x1b[0m"));
+    const clean = renderFooter(80, data, [["a", "  \x1b[31m\x1b[0m  "], ["b", "LINE\nWITH\tTAB"], ["c", "LAST"]], nativeTheme);
+    assert.ok(stripVTControlCharacters(clean[0]!).endsWith("LINE WITH TAB • LAST"));
+    for (const width of [0, 1, 2, 3, 4, 5, 6, 24, 60, 100]) for (const row of renderFooter(width, data, [["a", "界é".repeat(60)]], nativeTheme)) assert.ok(visibleWidth(row) <= width);
+  } finally { terminal.dispose(); }
+});
+
+
+test("footer missing context denominator and non-subscription OAuth keep native conditional visibility", async () => {
+  const f = await footerSetup();
+  try {
+    f.context(undefined); f.emit("session_compact");
+    f.ctx.modelRegistry.getProvider = () => ({ auth: { oauth: { isSubscription: false } } });
+    f.append(0, 0, 0, 0, 0);
+    let text = f.render().map(stripVTControlCharacters).join(" ");
+    assert.ok(!text.includes("272k")); assert.ok(!text.includes("(auto)"));
+    assert.ok(!text.includes("CH")); assert.ok(!text.includes("(sub)"), "OAuth alone does not mean subscription");
+    f.append(10, 0, 0, 0, 0); text = f.render().map(stripVTControlCharacters).join(" ");
+    assert.ok(text.includes("CH0.0%"), "real zero latest cache rate retains historical native cache visibility");
+    f.ctx.model.provider = "kimi-coding"; f.subscription(false);
+    assert.ok(f.render().map(stripVTControlCharacters).join(" ").includes("(sub)"), "native Kimi exception is independent of OAuth");
+  } finally { f.close(); }
+});
+
+
+test("footer stays native when the editor is foreign from startup including explicit on", async () => {
+  const f = await footerSetup(true);
+  try {
+    assert.equal(f.footer.children[0], f.native);
+    f.root.render(100); await Promise.resolve();
+    await f.control("on"); assert.equal(f.footer.children[0], f.native);
+    await f.control("off"); assert.equal(f.footer.children[0], f.native);
+  } finally { f.close(); }
+});
+
+test("footer restores native after late editor takeover and on only installs with eligible editor", async () => {
+  const f = await footerSetup();
+  try {
+    const first = f.footer.children[0]; assert.notEqual(first, f.native);
+    f.ctx.ui.setEditorComponent(footerForeignEditor);
+    f.root.render(100); await Promise.resolve();
+    assert.equal(f.footer.children[0], f.native, "same-name public factory disables our footer too");
+    await f.control("on"); assert.equal(f.footer.children[0], f.native);
+    f.ctx.ui.setEditorComponent(undefined); f.root.render(100); await Promise.resolve();
+    assert.equal(f.footer.children[0], f.native, "returning input never automatically reclaims a possibly foreign footer");
+    await f.control("on");
+    assert.notEqual(f.footer.children[0], f.native); assert.notEqual(f.footer.children[0], first);
+    f.input.clear(); f.input.addChild({ render: () => ["NATIVE_SELECTOR"], invalidate() {} });
+    f.root.render(100); await Promise.resolve();
+    assert.notEqual(f.footer.children[0], f.native, "temporary native selector is not editor-feature disablement");
+    f.input.clear(); f.input.addChild(f.editor);
+  } finally { f.close(); }
+});
+
+test("footer editor loss preserves later foreign footer and overridden stock editor guard", async () => {
+  const f = await footerSetup();
+  try {
+    const foreign = { render: () => ["FOREIGN_FOOTER"], invalidate() {} };
+    f.ctx.ui.setFooter(() => foreign);
+    f.ctx.ui.setEditorComponent(footerForeignEditor);
+    f.root.render(100); await Promise.resolve();
+    await f.control("on"); assert.equal(f.footer.children[0], foreign, "disabled input cannot reclaim a foreign footer");
+    f.ctx.ui.setEditorComponent(undefined); await f.control("on");
+    assert.notEqual(f.footer.children[0], foreign);
+    Object.defineProperty(f.editor, "render", { configurable: true, value: () => ["FOREIGN_INSTANCE_RENDER"] });
+    f.root.render(100); await Promise.resolve();
+    assert.equal(f.footer.children[0], f.native, "method ownership guard and footer share eligibility");
+    await f.control("on"); assert.equal(f.footer.children[0], f.native);
+  } finally { Reflect.deleteProperty(f.editor, "render"); f.close(); }
+});
+
+
+test("footer deferred startup handles native reload box without stealing a later footer", async () => {
+  for (const replacement of [false, true]) {
+    const f = await footerSetup(false, true);
+    try {
+      assert.equal(f.footer.children[0], f.native);
+      const foreign = { render: () => ["LATER_STARTUP_FOOTER"], invalidate() {} };
+      if (replacement) f.ctx.ui.setFooter(() => foreign);
+      f.input.clear(); f.input.addChild(f.editor);
+      f.root.render(100); await Promise.resolve();
+      if (replacement) assert.equal(f.footer.children[0], foreign, "delayed initial install verifies the exact previous footer owner");
+      else assert.notEqual(f.footer.children[0], f.native, "default input returning after session_start finishes initial installation");
+    } finally { f.close(); }
+  }
 });

@@ -1,13 +1,14 @@
 // Isolated actual-SDK work/ownership oracle; no real tools or user settings are touched.
 import assert from "node:assert/strict";
 import { stripVTControlCharacters } from "node:util";
-import { Container, ScrollView } from "@earendil-works/pi-tui";
+import { Container, ScrollView, Spacer, Text } from "@earendil-works/pi-tui";
 import { renderLayoutFrame } from "../../node_modules/@earendil-works/pi-tui/dist/layout.js";
 import { ToolExecutionComponent } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/tool-execution.js";
 import { UserMessageComponent } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/user-message.js";
 import { initTheme, theme } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
-import { installToolview } from "../../src/index.ts";
-import { CustomEditor, getSelectListTheme, createWriteToolDefinition } from "@earendil-works/pi-coding-agent";
+import toolview, { installToolview } from "../../src/index.ts";
+import { InteractiveMode } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js";
+import { CustomEditor, getSelectListTheme, createWriteToolDefinition, SessionManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 initTheme("dark", false);
 class Root extends Container { requestRender() {} }
@@ -150,14 +151,58 @@ try {
     const editorRoot = Object.assign(new Root(), { terminal: { rows: 24 } });
     let editor: CustomEditor | undefined = new CustomEditor(editorRoot as never,
       { borderColor: text => theme.fg("border", text), selectList: getSelectListTheme() }, { matches: () => false } as never);
-    editorRoot.addChild(editor);
-    const editorController = installToolview(editorRoot as never, () => theme);
+    const input = new Container(); input.addChild(editor);
+    let upper: Container | undefined = new Container();
+    upper.addChild(new Spacer(1)); upper.addChild(new Text("GC_UPPER_WIDGET", 0, 0));
+    for (const child of [new Container(), new Container(), new Container(), upper, input, new Container(), new Container()]) editorRoot.addChild(child);
+    const editorController = installToolview(editorRoot as never, () => theme, { editorStatus: true });
     try {
+      editorRoot.render(80);
+      assert.equal(editor.render(80)[0], "", "recognized upper group activates the first installer's separator");
       assert.ok(editor.render(80).some(row => row.includes("┃")));
-      const reference = new WeakRef(editor); editorRoot.removeChild(editor); editor = undefined;
+      assert.equal(editorController.renderEditorStatus(80, { model: "M", provider: "P", thinking: "off", idle: true }).length, 2);
+      const reference = new WeakRef(editor), groupReference = new WeakRef(upper!);
+      input.clear(); input.render(80); editorRoot.clear(); editorRoot.render(80); editor = undefined; upper = undefined;
       for (let i = 0; i < 12; i++) { await new Promise<void>(resolve => setImmediate(resolve)); globalThis.gc!(); }
-      assert.equal(reference.deref(), undefined, "active editor prototype hooks must not retain their first installer or draft engine");
-      observations.push({ firstEditorInstallerCollected: true, editorCache: editorController.cacheStats() });
+      assert.equal(reference.deref(), undefined, "active editor prototype hooks/status widget must not retain their first installer or draft engine");
+      assert.equal(groupReference.deref(), undefined, "upper-group measurement and transient spacer observation do not retain the first widget group");
+      assert.deepEqual(editorController.renderEditorStatus(80, { model: "M", provider: "P", thinking: "off", idle: true }), []);
+      observations.push({ firstEditorInstallerCollected: true, firstUpperGroupCollected: true, editorCache: editorController.cacheStats() });
     } finally { editorController.restore(); }
+    const footerRoot = Object.assign(new Root(), { terminal: { rows: 24 }, setFocus() {} });
+    const footerContainer = new Container(), aboveFooter = new Container(), belowFooter = new Container(), footerInput = new Container();
+    const footerEditor = new CustomEditor(footerRoot as never,
+      { borderColor: text => theme.fg("border", text), selectList: getSelectListTheme() }, { matches: () => false } as never);
+    footerInput.addChild(footerEditor);
+    const nativeFooter = new Text("NATIVE_FOOTER", 0, 0); footerContainer.addChild(nativeFooter);
+    const footerHost = Object.assign(Object.create(InteractiveMode.prototype), { ui: footerRoot, footerContainer,
+      footer: nativeFooter, footerDataProvider: { getExtensionStatuses: () => new Map(), onBranchChange: () => () => {} },
+      defaultEditor: footerEditor, editor: footerEditor, editorContainer: footerInput, statusContainer: new Container(),
+      widgetContainerAbove: aboveFooter, widgetContainerBelow: belowFooter,
+      extensionWidgetsAbove: new Map(), extensionWidgetsBelow: new Map() });
+    for (const child of [new Container(), new Container(), footerHost.statusContainer, aboveFooter, footerInput, belowFooter, footerContainer]) footerRoot.addChild(child);
+    const manager = SessionManager.inMemory("/tmp");
+    const footerContext = { mode: "tui", cwd: "/tmp", ui: { ...footerHost.createExtensionUIContext(), notify() {} }, sessionManager: manager,
+      getContextUsage: () => undefined, isIdle: () => true } as unknown as ExtensionContext;
+    const handlers = new Map<string, Function[]>(); let footerCommand: Function;
+    toolview({ on(name: string, callback: Function) { handlers.set(name, [...(handlers.get(name) ?? []), callback]); },
+      registerFlag() {}, getFlag() {}, getThinkingLevel: () => "off", getSettings: () => ({}),
+      registerCommand(name: string, options: { handler: Function }) { if (name === "toolview") footerCommand = options.handler; },
+    } as unknown as ExtensionAPI);
+    for (const callback of handlers.get("session_start") ?? []) callback({}, footerContext);
+    const replaceFirstFooter = async () => {
+      const first = footerHost.customFooter;
+      first.render(80); const reference = new WeakRef(first);
+      await footerCommand!("off", footerContext); assert.equal(footerContainer.children[0], nativeFooter);
+      await footerCommand!("on", footerContext); assert.notEqual(footerHost.customFooter, first);
+      assert.ok(footerHost.customFooter.render(80)[0].includes("↑"));
+      return reference;
+    };
+    try {
+      const reference = await replaceFirstFooter();
+      for (let i = 0; i < 12; i++) { await new Promise<void>(resolve => setImmediate(resolve)); globalThis.gc!(); }
+      assert.equal(reference.deref(), undefined, "active runtime/events/next footer must not retain the first public footer component");
+      observations.push({ firstFooterCollected: true });
+    } finally { for (const callback of handlers.get("session_shutdown") ?? []) callback({}, footerContext); }
     console.log(JSON.stringify(observations));
 } finally { controller.restore(); Intl.Segmenter.prototype.segment = original; }

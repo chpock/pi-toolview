@@ -1,11 +1,15 @@
 import { CustomEditor, createEditToolDefinition, highlightCode, getLanguageFromPath, type ExtensionAPI, type ExtensionContext, type ThemeColor } from "@earendil-works/pi-coding-agent";
-import { Box, Container, Editor, Markdown, visibleWidth, type Component, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
+import { Box, Container, Editor, Markdown, Spacer, visibleWidth, type Component, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { isAbsolute, resolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { renderBashCard } from "./bash-card.ts";
 import { filePath, measureFileCard, renderFileCard } from "./file-card.ts";
 import { renderUserCard } from "./user-card.ts";
 import { EDITOR_TOP, EDITOR_BOTTOM, renderEditorCard, type EditorLayout } from "./editor-card.ts";
 import { cardGeometry, insidePanel } from "./card-frame.ts";
+import { renderEditorStatus, type EditorStatusInfo } from "./editor-status.ts";
+import { GitBranchSource } from "./git-branch.ts";
+import { FooterView, footerUsage, type FooterData } from "./footer.ts";
 import type { CardTheme } from "./card-theme.ts";
 import { RenderCache, type CacheEntry, type CacheStats } from "./render-cache.ts";
 import { argumentParts, summaryName } from "./summary-args.ts";
@@ -52,6 +56,8 @@ const compatibleUser = (node: UserNode) => typeof node.text === "string" &&
 type LiveTui = Component & {
   requestRender(): void;
   hasActiveSelection?(): boolean;
+  getFocusedComponent?(): Component | null;
+  setFocus?(component: Component | null): void;
 };
 type Palette = CardTheme;
 type Render = (this: ToolNode, width: number) => string[];
@@ -65,12 +71,21 @@ export interface ToolviewOptions {
   cardCacheMiB?: number;
   /** Do not compete with a public editor factory owned by another extension. */
   nativeEditor?: () => boolean;
+  /** The runtime has a public belowEditor metadata widget. */
+  editorStatus?: boolean;
+  /** Public setEditorComponent(undefined), retaining the same stock default editor. */
+  rerouteEditorStatus?: () => void;
+  editorStatusRestored?: () => void;
 }
 export interface ToolviewCacheStats extends CacheStats { ordinary: CacheStats; cards: CacheStats }
 export interface ToolviewController {
   readonly active: boolean;
   readonly reason: string | undefined;
+  readonly editorStatusActive: boolean;
+  /** Recognized input ownership, including temporary native selector detachment. */
+  readonly editorActive: boolean;
   restore(): void;
+  renderEditorStatus(width: number, info: EditorStatusInfo): string[];
   cacheStats(): ToolviewCacheStats;
   clearCache(): void;
   setCacheLimitMiB(value: number): void;
@@ -264,6 +279,11 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
   const overrides = new Set(options.compact ?? []);
   const nativeOverrides = new Set(options.cards ?? []);
   const originalAdd = Container.prototype.addChild;
+  const containerRender = Object.getOwnPropertyDescriptor(Container.prototype, "render")!;
+  const containerClear = Container.prototype.clear;
+  const spacerRender = Object.getOwnPropertyDescriptor(Spacer.prototype, "render")!;
+  let widgetSpacerPass: { spacer: Spacer; width: number; rows?: number; blank?: boolean } | undefined;
+  let upperWidgetRows = new WeakMap<Container, { width: number; rows: number; spacer: WeakRef<Spacer> }>();
   const patches = new Map<object, {
     render: PropertyDescriptor; mouse: PropertyDescriptor; patchedRender: Render; patchedMouse: Mouse;
     updates: { name: string; original?: PropertyDescriptor; wrapper: (...args: unknown[]) => unknown }[];
@@ -327,12 +347,32 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
   const controller: ToolviewController = {
     get active() { return active; },
     get reason() { return reason; },
+    get editorActive() {
+      const editor = statusEditor?.deref();
+      return !!(active && editor && managedStockEditor(editor));
+    },
+    get editorStatusActive() {
+      const editor = statusEditor?.deref();
+      return !!(active && options.editorStatus && editor && stockEditor(editor));
+    },
     cacheStats: () => {
       const ordinary = cache.stats(), cards = cardCache.stats();
       return { ordinary, cards,
         retainedBytes: ordinary.retainedBytes + cards.retainedBytes, limitBytes: ordinary.limitBytes + cards.limitBytes,
         entries: ordinary.entries + cards.entries, hits: ordinary.hits + cards.hits, misses: ordinary.misses + cards.misses,
         builds: ordinary.builds + cards.builds, evictions: ordinary.evictions + cards.evictions, skips: ordinary.skips + cards.skips };
+    },
+    renderEditorStatus(width, info) {
+      const editor = statusEditor?.deref(), state = editor && editorStates.get(editor);
+      if (!active || !options.editorStatus || !editor || !stockEditor(editor) || !state?.framed || state.width !== width) return [];
+      try {
+        if (editor.isShowingAutocomplete()) return [];
+        const group = managedEditorSlots(editor)?.[2] as Container | undefined;
+        const activity = group?.render === observeWidgetRows ? nativeStatusRows.get(group) : undefined;
+        return renderEditorStatus(width, getTheme(), { ...info,
+          idle: info.idle && !(activity?.width === width && activity.visible) }, state.geometry);
+      }
+      catch { fail("Toolview could not render editor status; native rendering restored"); return []; }
     },
     clearCache,
     setCacheLimitMiB: (value) => cache.setLimit(value * 1024 * 1024),
@@ -343,6 +383,9 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
       stopSpinner(); animated.clear(); animationRefs = new WeakMap();
       clearCache();
       if (Container.prototype.addChild === patchedAdd) Container.prototype.addChild = originalAdd;
+      if (Container.prototype.render === observeWidgetRows) Object.defineProperty(Container.prototype, "render", containerRender);
+      if (Spacer.prototype.render === observeWidgetSpacer) Object.defineProperty(Spacer.prototype, "render", spacerRender);
+      upperWidgetRows = new WeakMap(); nativeStatusRows = new WeakMap(); widgetSpacerPass = undefined;
       for (const [prototype, patch] of patches) {
         if (Object.getOwnPropertyDescriptor(prototype, "render")?.value === patch.patchedRender)
           Object.defineProperty(prototype, "render", patch.render);
@@ -365,12 +408,23 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
         }
       }
       userPatches.clear();
+      const restoredPlacement = new WeakSet<CustomEditor>();
+      for (const reference of editorFlagRefs) {
+        const editor = reference.deref(), flag = editor && editorFlags.get(editor);
+        const descriptor = editor && Object.getOwnPropertyDescriptor(editor, "embedWorkingStatus");
+        if (editor && flag && descriptor?.get === statusEmbedding && descriptor.configurable) {
+          Object.defineProperty(editor, "embedWorkingStatus", flag); restoredPlacement.add(editor);
+        }
+      }
+      try { rerouteNativeStatus(restoredPlacement); } catch { /* Retain native ownership on an unsupported host. */ }
+      editorFlagRefs.clear();
       for (const [prototype, hooks] of editorPatches) for (const hook of hooks) {
         if (Object.getOwnPropertyDescriptor(prototype, hook.name)?.value !== hook.wrapper) continue;
         if (hook.original) Object.defineProperty(prototype, hook.name, hook.original);
         else Reflect.deleteProperty(prototype, hook.name);
       }
-      editorPatches.clear(); editorStates = new WeakMap(); editorPasses = new WeakMap();
+      editorPatches.clear(); editorStates = new WeakMap(); editorPasses = new WeakMap(); statusEditor = undefined;
+      options.editorStatusRestored?.();
       refresh();
     },
   };
@@ -654,21 +708,148 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
   }
   type EditorHook = { name: string; original: PropertyDescriptor | undefined; wrapper: Function };
   const editorPatches = new Map<object, EditorHook[]>();
-  let editorStates = new WeakMap<CustomEditor, Omit<EditorLayout, "rows"> & { width: number }>();
+  let statusEditor: WeakRef<CustomEditor> | undefined;
+  let editorStates = new WeakMap<CustomEditor, Omit<EditorLayout, "rows"> & { width: number; offsetY: number }>();
+  const editorFlags = new WeakMap<CustomEditor, PropertyDescriptor>();
+  const editorFlagRefs = new Set<WeakRef<CustomEditor>>();
+  const selfTransfers = new WeakMap<CustomEditor, Function>();
+  let installingEditorHooks = true, queuedEditorRoute = false;
+  let nativeStatusRows = new WeakMap<Container, { width: number; visible: boolean }>();
   let editorPasses = new WeakMap<CustomEditor, { width: number; top: string; bottom: string }>();
   // Public stock identities are resolved before installing any hooks. No editor
   // instance is captured in these persistent closures; editing methods stay native.
   const editorRender = Editor.prototype.render, editorMouse = Editor.prototype.handleMouse;
   const editorPrototype = CustomEditor.prototype as unknown as Record<string, Function>;
   const editorTop = editorPrototype.renderTopBorder!, editorBottom = editorPrototype.renderBottomBorder!;
-  function stockEditor(node: CustomEditor): boolean {
+  function plainStockEditor(node: CustomEditor): boolean {
     const hooks = editorPatches.get(CustomEditor.prototype);
     return Object.getPrototypeOf(node) === CustomEditor.prototype && Object.getPrototypeOf(CustomEditor.prototype) === Editor.prototype &&
       ["render", "handleMouse", "renderTopBorder", "renderBottomBorder"].every(name =>
         (node as unknown as Record<string, unknown>)[name] === hooks?.find(hook => hook.name === name)?.wrapper) &&
       node.getPaddingX === Editor.prototype.getPaddingX && node.getText === Editor.prototype.getText &&
+      (node.setText === Editor.prototype.setText || node.setText === selfTransfers.get(node)) &&
       typeof node.borderColor === "function" && !!Object.getOwnPropertyDescriptor(node, "borderColor")?.writable &&
-      (options.nativeEditor?.() ?? true) && attached(node);
+      (options.nativeEditor?.() ?? true);
+  }
+  function managedStockEditor(node: CustomEditor): boolean {
+    return plainStockEditor(node) && (!options.editorStatus ||
+      Object.getOwnPropertyDescriptor(node, "embedWorkingStatus")?.get === statusEmbedding);
+  }
+  function stockEditor(node: CustomEditor): boolean { return managedStockEditor(node) && attached(node); }
+  // Public readonly in TypeScript, but an own configurable data field in the
+  // supported SDK. Native Pi consumes this flag and owns routing/lifecycle.
+  function statusEmbedding(this: CustomEditor): boolean {
+    return active && plainStockEditor(this) ? false : editorFlags.get(this)?.value as boolean;
+  }
+  function patchEditorPlacement(editor: CustomEditor) {
+    if (!options.editorStatus || editorFlags.has(editor) || !plainStockEditor(editor) ||
+      (options.rerouteEditorStatus && !managedEditorSlots(editor))) return;
+    const flag = Object.getOwnPropertyDescriptor(editor, "embedWorkingStatus");
+    const setter = Object.getOwnPropertyDescriptor(editor, "setText");
+    if (!flag?.configurable || !flag.writable || typeof flag.value !== "boolean" ||
+      (setter ? !setter.writable : !Object.isExtensible(editor))) return;
+    editorFlags.set(editor, flag); editorFlagRefs.add(new WeakRef(editor));
+    Object.defineProperty(editor, "embedWorkingStatus", { configurable: true, enumerable: flag.enumerable, get: statusEmbedding });
+    if (!installingEditorHooks && options.rerouteEditorStatus && !queuedEditorRoute) {
+      queuedEditorRoute = true;
+      // A selector can temporarily remove the default editor. Rebind after its
+      // normal attachment finishes, never inside addChild or with a modal mounted.
+      queueMicrotask(() => {
+        queuedEditorRoute = false;
+        if (active) try { rerouteNativeStatus(); }
+        catch { fail("Toolview could not route native editor activity; native rendering restored"); }
+      });
+    }
+  }
+  function rerouteNativeStatus(restored?: WeakSet<CustomEditor>) {
+    if (!options.rerouteEditorStatus) return;
+    for (const reference of editorFlagRefs) {
+      const editor = reference.deref();
+      if (!editor || !plainStockEditor(editor) || !managedEditorSlots(editor) || !attached(editor) ||
+        (restored ? !restored.has(editor) : Object.getOwnPropertyDescriptor(editor, "embedWorkingStatus")?.get !== statusEmbedding)) continue;
+      const descriptor = Object.getOwnPropertyDescriptor(editor, "setText");
+      if (descriptor ? !descriptor.writable : !Object.isExtensible(editor)) continue;
+      const text = editor.getText(), transfers: string[] = [], focus = tui.getFocusedComponent?.();
+      // Native same-default rebinding copies getText() through setText(), which
+      // would reset cursor/undo and turn collapsed pastes into literal markers.
+      // Suppress only this synchronous self-transfer; no editor is constructed.
+      const setter = function (this: CustomEditor, value: string) {
+        if (this === editor) transfers.push(value); else Editor.prototype.setText.call(this, value);
+      };
+      selfTransfers.set(editor, setter);
+      Object.defineProperty(editor, "setText", { configurable: true, writable: true, ...descriptor, value: setter });
+      try {
+        options.rerouteEditorStatus();
+        if (transfers.length !== 1 || transfers[0] !== text || !attached(editor))
+          throw new Error("Native same-editor status routing contract changed");
+      } finally {
+        selfTransfers.delete(editor);
+        if (Object.getOwnPropertyDescriptor(editor, "setText")?.value === setter) {
+          if (descriptor) Object.defineProperty(editor, "setText", descriptor); else Reflect.deleteProperty(editor, "setText");
+        }
+        if (focus !== undefined && focus !== editor) tui.setFocus?.(focus);
+      }
+      return; // The public API has one current default editor, never a factory substitution.
+    }
+  }
+  // Both native modes retain seven managed public children, even when fullscreen
+  // paints a separate dock. Never infer this slot from names or arbitrary siblings.
+  function managedEditorSlots(editor: CustomEditor): Component[] | undefined {
+    const input = parents.get(editor)?.parent;
+    if (!input || Object.getPrototypeOf(input) !== Container.prototype || input.children.length !== 1 || input.children[0] !== editor)
+      return undefined;
+    const position = parents.get(input), slots = position?.parent.children;
+    if (!(tui instanceof Container) || !slots || slots !== tui.children || slots.length !== 7 || slots[4] !== input ||
+      !slots.every(node => Object.getPrototypeOf(node) === Container.prototype)) return undefined;
+    return slots;
+  }
+  function upperWidgetGroup(editor: CustomEditor): Container | undefined {
+    const slots = managedEditorSlots(editor);
+    if (!slots) return undefined;
+    const group = slots[3] as Container, spacer = group.children[0];
+    if (group.render !== observeWidgetRows || group.clear !== containerClear || group.addChild !== patchedAdd ||
+      !spacer || Object.getPrototypeOf(spacer) !== Spacer.prototype || spacer.render !== observeWidgetSpacer)
+      return undefined;
+    return group;
+  }
+  // Observe the already-required native group render, not each widget and not a
+  // second render for spacing. This closure owns no installer/group/editor node.
+  function observeWidgetRows(this: Container, width: number): string[] {
+    const position = active && parents.get(this);
+    const input = tui instanceof Container && position && position.parent.children === tui.children &&
+      (position.parent.children[3] === this || position.parent.children[2] === this) && position.parent.children[4];
+    const editor = input instanceof Container && input.children[0];
+    if (!(editor instanceof CustomEditor) || !stockEditor(editor))
+      return containerRender.value.call(this, width) as string[];
+    if (managedEditorSlots(editor)?.[2] === this) {
+      const rows = containerRender.value.call(this, width) as string[];
+      nativeStatusRows.set(this, { width, visible: rows.some(row => stripVTControlCharacters(row).trim().length > 0) });
+      return rows;
+    }
+    if (upperWidgetGroup(editor) !== this) return containerRender.value.call(this, width) as string[];
+    const previous = widgetSpacerPass;
+    const pass = { spacer: this.children[0] as Spacer, width } as NonNullable<typeof widgetSpacerPass>;
+    widgetSpacerPass = pass;
+    try {
+      const rows = containerRender.value.call(this, width) as string[];
+      if (pass.rows === 1 && pass.blank && rows.length >= 1 && rows[0] === "" && upperWidgetGroup(editor) === this)
+        upperWidgetRows.set(this, { width, rows: rows.length - 1, spacer: new WeakRef(pass.spacer) });
+      else upperWidgetRows.delete(this);
+      return rows;
+    } finally { widgetSpacerPass = previous; }
+  }
+  function observeWidgetSpacer(this: Spacer, width: number): string[] {
+    const rows = spacerRender.value.call(this, width) as string[];
+    if (widgetSpacerPass?.spacer === this && widgetSpacerPass.width === width) {
+      widgetSpacerPass.rows = rows.length;
+      widgetSpacerPass.blank = rows[0] === "";
+    }
+    return rows;
+  }
+  function editorGap(editor: CustomEditor, width: number): number {
+    const group = upperWidgetGroup(editor), measured = group && upperWidgetRows.get(group);
+    return group && group.children.length > 1 && measured?.width === width && measured.rows > 0 &&
+      measured.spacer.deref() === group.children[0] ? 1 : 0;
   }
   function patchEditorPrototype(prototype: object) {
     if (editorPatches.has(prototype)) return;
@@ -687,8 +868,10 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
           finally { editorPasses.delete(this); }
         });
         const { rows, ...mapping } = layout;
-        editorStates.set(this, { ...mapping, width });
-        return rows;
+        const offsetY = mapping.framed ? editorGap(this, width) : 0;
+        editorStates.set(this, { ...mapping, width, offsetY });
+        if (mapping.framed && options.editorStatus) statusEditor = new WeakRef(this);
+        return offsetY ? ["", ...rows] : rows;
       } catch {
         fail("Toolview could not render this editor; native rendering restored");
         return editorRender.call(this, width);
@@ -698,7 +881,9 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
       const state = editorStates.get(this);
       if (!active || !stockEditor(this) || !state?.framed || state.width !== event.width)
         return editorMouse.call(this, event);
-      return editorMouse.call(this, { ...event, x: event.x - state.offsetX, width: state.nativeWidth });
+      if (event.y < state.offsetY) return undefined; // The outside separator is not input or autocomplete.
+      return editorMouse.call(this, { ...event, x: event.x - state.offsetX, y: event.y - state.offsetY,
+        width: state.nativeWidth, height: Math.max(0, event.height - state.offsetY) });
     };
     const border = (name: "top" | "bottom", original: Function) => function (this: CustomEditor, width: number, hidden: number): string {
       const pass = editorPasses.get(this);
@@ -727,7 +912,10 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     if (parent) parents.set(node, { parent, index });
     if (candidate(node)) install(node);
     else if (userCandidate(node)) installUser(node);
-    else if (Object.getPrototypeOf(node) === CustomEditor.prototype) patchEditorPrototype(CustomEditor.prototype);
+    else if (Object.getPrototypeOf(node) === CustomEditor.prototype) {
+      patchEditorPrototype(CustomEditor.prototype); patchEditorPlacement(node as CustomEditor);
+      if (stockEditor(node as CustomEditor)) statusEditor = new WeakRef(node as CustomEditor);
+    }
     if (node instanceof Container) node.children.forEach((child, index) => visit(child, node, index));
   }
   function patchedAdd(this: Container, child: Component) {
@@ -745,6 +933,10 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     visit(tui);
     if (active) {
       Container.prototype.addChild = patchedAdd;
+      Object.defineProperty(Container.prototype, "render", { ...containerRender, value: observeWidgetRows });
+      Object.defineProperty(Spacer.prototype, "render", { ...spacerRender, value: observeWidgetSpacer });
+      installingEditorHooks = false;
+      rerouteNativeStatus();
       refresh();
     }
   } catch {
@@ -766,9 +958,75 @@ export default function toolview(pi: ExtensionAPI) {
   }
   let controller: ToolviewController | undefined;
   let enabled = true;
+  let liveContext: ExtensionContext | undefined;
+  let directorySource: GitBranchSource | undefined;
+  let ownedFooter: FooterView | undefined;
+  let footerEpoch = 0;
+  function restoreFooter() {
+    // Public dispose tells us when another owner replaced our component.
+    if (ownedFooter) liveContext?.ui.setFooter(undefined);
+  }
+  let footerRestoreQueued = false, footerStartQueued = false;
+  let pendingFooter: { slot: WeakRef<Container>; owner: WeakRef<Component> } | undefined;
+  function finishFooterStart() {
+    if (!pendingFooter || !controller?.editorActive || footerStartQueued) return;
+    footerStartQueued = true;
+    const pending = pendingFooter;
+    queueMicrotask(() => {
+      footerStartQueued = false;
+      if (pendingFooter !== pending) return;
+      pendingFooter = undefined;
+      // /reload can mount a selector during session_start. Wait for the default
+      // input, but never claim a slot another extension replaced meanwhile.
+      const owner = pending?.owner.deref();
+      if (owner && liveContext && pending?.slot.deref()?.children[0] === owner) startFooter(liveContext);
+    });
+  }
+  function footerActive() {
+    if (controller?.editorActive) return true;
+    if (ownedFooter && !footerRestoreQueued) {
+      footerRestoreQueued = true;
+      // Finish native measurement before changing its footer container.
+      queueMicrotask(() => {
+        footerRestoreQueued = false;
+        if (!controller?.editorActive) restoreFooter();
+      });
+    }
+    return false;
+  }
+  function startFooter(ctx: ExtensionContext) {
+    if (ctx.mode !== "tui" || !enabled || !controller?.editorActive || ownedFooter || typeof ctx.ui.setFooter !== "function") return;
+    pendingFooter = undefined;
+    ctx.ui.setFooter((_tui, _theme, data) => {
+      let snapshot: FooterData | undefined;
+      let stamp: { epoch: number; session: string; leaf: string | null; model: ExtensionContext["model"] } | undefined;
+      const view = new FooterView(() => {
+        const current = liveContext!;
+        const manager = current.sessionManager, session = manager.getSessionId(), leaf = manager.getLeafId(), model = current.model;
+        const auto = pi.getSettings().compaction?.enabled ?? true;
+        const subscription = !!model && (model.provider === "kimi-coding" ||
+          (current.modelRegistry.isUsingOAuth(model) && current.modelRegistry.getProvider(model.provider)?.auth.oauth?.isSubscription === true));
+        if (!snapshot || !stamp || stamp.epoch !== footerEpoch || stamp.session !== session || stamp.leaf !== leaf || stamp.model !== model) {
+          snapshot = { usage: footerUsage(manager.getEntries()), context: current.getContextUsage(), auto, subscription };
+          stamp = { epoch: footerEpoch, session, leaf, model };
+        } else if (snapshot.auto !== auto || snapshot.subscription !== subscription) snapshot = { ...snapshot, auto, subscription };
+        return snapshot;
+      }, () => data.getExtensionStatuses(), () => liveContext!.ui.theme, footerActive);
+      ownedFooter = view;
+      return Object.assign(view, { dispose() {
+        view.clear(); snapshot = undefined; stamp = undefined;
+        if (ownedFooter === view) ownedFooter = undefined;
+      } });
+    });
+  }
+  const statusWidget = "pi-toolview-editor-status";
   const names = (flag: string) => String(pi.getFlag(flag) ?? "").split(",").map((name) => name.trim()).filter(Boolean);
   function start(ctx: ExtensionContext) {
-    if (ctx.mode !== "tui" || !enabled || controller?.active) return;
+    liveContext = ctx;
+    footerEpoch++;
+    directorySource?.refresh(true);
+    if (ctx.mode !== "tui" || !enabled) return;
+    if (controller?.active) { startFooter(ctx); return; }
     if (cacheMiB === undefined) {
       try { cacheMiB = cacheLimit(String(pi.getFlag("toolview-cache-mb") ?? "8")); }
       catch { ctx.ui.notify("Pi Toolview: invalid --toolview-cache-mb; using 8 MiB", "warning"); cacheMiB = 8; }
@@ -780,20 +1038,58 @@ export default function toolview(pi: ExtensionAPI) {
     // A public widget factory exposes the actual live tree, including bundled CLI classes.
     // Remove the empty widget immediately: it is not part of our layout.
     ctx.ui.setWidget("pi-toolview-capture", (tui) => {
+      const slot = tui.children.length === 7 ? tui.children[6] : undefined;
+      if (ctx.ui.getEditorComponent() === undefined && slot instanceof Container && slot.children.length === 1)
+        pendingFooter = { slot: new WeakRef(slot), owner: new WeakRef(slot.children[0]!) };
       controller = installToolview(tui, () => ctx.ui.theme, {
         cards: names("toolview-card"), compact: names("toolview-compact"), cacheMiB, cardCacheMiB,
-        nativeEditor: () => ctx.ui.getEditorComponent() === undefined,
-        warn: (message) => ctx.ui.notify(`Pi Toolview disabled: ${message}`, "warning"),
+        nativeEditor: () => liveContext?.ui.getEditorComponent() === undefined,
+        editorStatus: true,
+        rerouteEditorStatus: () => liveContext?.ui.setEditorComponent(undefined),
+        editorStatusRestored: () => {
+          directorySource?.dispose(); directorySource = undefined;
+          liveContext?.ui.setWidget(statusWidget, undefined);
+        },
+        warn: (message) => { restoreFooter(); liveContext?.ui.notify(`Pi Toolview disabled: ${message}`, "warning"); },
       });
       return { render: () => [], invalidate() {} };
     });
     ctx.ui.setWidget("pi-toolview-capture", undefined);
+    if (controller?.active) ctx.ui.setWidget(statusWidget, (tui) => {
+      directorySource ??= new GitBranchSource(() => tui.requestRender());
+      return {
+      render(width) {
+        const current = liveContext;
+        if (!current || !controller?.active) return [];
+        finishFooterStart();
+        directorySource?.setDirectory(controller.editorStatusActive && typeof current.cwd === "string" ? current.cwd : undefined);
+        return controller.renderEditorStatus(width, { model: current.model?.name || "No model",
+          provider: current.model?.provider || "—", thinking: current.thinkingLevel ?? pi.getThinkingLevel(), idle: current.isIdle(),
+          cwd: current.cwd, branch: directorySource?.branch(current.cwd) });
+      },
+      invalidate() {},
+    }; }, { placement: "belowEditor" });
+    startFooter(ctx);
   }
+  const refreshFooter = (_event: unknown, ctx: ExtensionContext) => { liveContext = ctx; footerEpoch++; };
+  pi.on("session_tree", refreshFooter);
+  pi.on("session_compact", refreshFooter);
+  pi.on("model_select", refreshFooter);
+  pi.on("message_end", refreshFooter);
+  pi.on("turn_end", refreshFooter);
+  const refreshDirectory = (_event: unknown, ctx: ExtensionContext) => {
+    refreshFooter(_event, ctx);
+    directorySource?.setDirectory(controller?.editorStatusActive ? ctx.cwd : undefined);
+    directorySource?.refresh(true);
+  };
+  pi.on("tool_execution_end", refreshDirectory);
+  pi.on("agent_end", refreshDirectory);
   pi.on("session_start", (_event, ctx) => start(ctx));
-  pi.on("session_shutdown", () => { controller?.restore(); controller = undefined; });
+  pi.on("session_shutdown", (_event, ctx) => { liveContext = ctx; pendingFooter = undefined; restoreFooter(); controller?.restore(); controller = undefined; liveContext = undefined; });
   pi.registerCommand("toolview", {
     description: "Control tool presentation and bounded render cache: on, off, status, cache",
     handler: async (args, ctx) => {
+      liveContext = ctx;
       const command = args.trim() || "status";
       const words = command.split(/\s+/u);
       if (words[0] === "cache") {
@@ -812,7 +1108,7 @@ export default function toolview(pi: ExtensionAPI) {
           processHeapUsedBytes: process.memoryUsage().heapUsed, processMemoryScope: "whole Pi process, not Toolview" })}`, "info");
         return;
       }
-      if (command === "off") { enabled = false; controller?.restore(); }
+      if (command === "off") { enabled = false; pendingFooter = undefined; restoreFooter(); controller?.restore(); }
       else if (command === "on") { enabled = true; start(ctx); }
       else if (command !== "status") { ctx.ui.notify("Usage: /toolview on|off|status|cache [clear|limit <MiB>|cards limit <MiB>]", "warning"); return; }
       const status = controller?.active ? "on" : ctx.mode !== "tui" ? "unavailable outside terminal mode" : controller?.reason ?? "off";

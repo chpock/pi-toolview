@@ -27,6 +27,9 @@ export default function terminalDriver(pi: ExtensionAPI) {
   let tui: any;
   const record = (event: object) => appendFileSync(join(output, "events.jsonl"), JSON.stringify(event) + "\n");
   const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+  // Observe host geometry only: no draft access, command injection or render request.
+  const observeTerminalSize = () => record({ type: "terminal_size", width: process.stdout.columns, height: process.stdout.rows });
+  pi.on("session_shutdown", () => { process.stdout.off("resize", observeTerminalSize); });
   // Opt-in UI-clock observations only: real timers/render requests, no model/session mutation.
   const editPerformance = process.env.TOOLVIEW_TEST_EDIT_PERFORMANCE === "1";
   const editDiagnostics = process.env.TOOLVIEW_TEST_EDIT_CARDS === "1" || editPerformance;
@@ -384,14 +387,16 @@ export default function terminalDriver(pi: ExtensionAPI) {
     api: "toolview-offline", baseUrl: "http://127.0.0.1/unused", apiKey: "offline-fixture",
     models: [{ id: "scripted", name: "Offline terminal fixture", reasoning: false,
       // The opt-in eight-output cache scenario must not trigger unrelated automatic compaction.
-      input: ["text", "image"], contextWindow: process.env.TOOLVIEW_TEST_CACHE_DIAGNOSTICS === "1" ? 512000 : 32000, maxTokens: 1024,
+      input: ["text", "image"], contextWindow: process.env.TOOLVIEW_TEST_FOOTER === "1" ? 272000 : process.env.TOOLVIEW_TEST_CACHE_DIAGNOSTICS === "1" ? 512000 : 32000, maxTokens: 1024,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
     streamSimple(model, context, options) {
       const stream = createAssistantMessageEventStream();
       const message: any = {
         role: "assistant", api: model.api, provider: model.provider, model: model.id,
         timestamp: Date.now(), content: [], stopReason: "stop",
-        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+        usage: process.env.TOOLVIEW_TEST_FOOTER === "1" ? { input: 1000, output: 100, cacheRead: 9500, cacheWrite: 500, totalTokens: 11100,
+          cost: { input: 0.123, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.123 } } :
+          { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
       };
       void (async () => {
@@ -476,6 +481,9 @@ export default function terminalDriver(pi: ExtensionAPI) {
   });
   pi.on("session_start", (_event, ctx) => {
     if (ctx.mode !== "tui") return;
+    process.stdout.off("resize", observeTerminalSize);
+    process.stdout.on("resize", observeTerminalSize);
+    observeTerminalSize();
     ctx.ui.setWidget("terminal-driver", (liveTui) => {
       tui = liveTui;
       if (spinnerDiagnostics) {
