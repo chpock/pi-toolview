@@ -1,0 +1,137 @@
+{
+  "date": "2026-10-07T21:05:58.489Z",
+  "purpose": "Source/data and measured binary provenance; no extension implementation",
+  "node": "v22.19.0",
+  "rust": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Arch Linux rust 1:1.98.0-1.1)",
+  "platform": "linux",
+  "arch": "x64",
+  "kernel": "7.1.9-arch1-2",
+  "cpu": "Intel(R) Core(TM) Ultra 5 125H",
+  "repositoryHeadAtInspection": "a4f7c92a64edf3313931281711aebb35119648c8",
+  "baselineHeadAtResearchStart": "2c19660",
+  "harnessVersion": 2,
+  "measuredNativeExecutable": {
+    "path": "/tmp/pi-toolview-highlight-service-target/release/highlight-service-research",
+    "sha256": "ed7e37d0b3c1238d1717d6f192a887d0b00a3f40b0e16c781e5336ddb0971829",
+    "bytes": 12364184
+  },
+  "sourceOnlyCandidates": {
+    "arborium": "2.18.2",
+    "lumis": "0.17.0",
+    "syntastica": "0.6.1",
+    "syntaxmate": "0.2.1",
+    "inkjet": "0.11.1",
+    "autumnus": "0.9.0"
+  },
+  "files": {
+    "docs/research/syntax-highlighting/probes/shared-service/Cargo.lock": {
+      "sha256": "07a3ef9ff9d7ced2ed3f11b9855240de0688b054438d56db49ea05ffb61ab62b",
+      "bytes": 33130
+    },
+    "docs/research/syntax-highlighting/probes/shared-service/Cargo.toml": {
+      "sha256": "cc32608d34c1e5c8dc3928a41c435481d93f8b1088c0cd589e8f945dba7e4e41",
+      "bytes": 750
+    },
+    "docs/research/syntax-highlighting/probes/shared-service/check-giallo.json": {
+      "sha256": "aae7e4efaea7aeef8dd11134effd48bdcda8a1a5cae20c9c540115db12395049",
+      "bytes": 20632
+    },
+    "docs/research/syntax-highlighting/probes/shared-service/check-shiki.json": {
+      "sha256": "3f70f210f82bb687e8e4621dd58651c4d204b1904da6b9dd695c0541d71f2316",
+      "bytes": 21916
+    },
+    "docs/research/syntax-highlighting/probes/shared-service/check-syntect.json": {
+      "sha256": "552dfaf99dc58d7924def3e4b9799b16a325c73413a2e0ff57f9b87f4fa0e962",
+      "bytes": 20416
+    },
+    "docs/research/syntax-highlighting/probes/shared-service/check-tree.json": {
+      "sha256": "eb517f1aa41042ea7fb8a72f60261215c2ea4a011777bb2bf8719e53e0569dc3",
+      "bytes": 22125
+    },
+    "docs/research/syntax-highlighting/probes/shared-service/client.mjs": {
+      "sha256": "6c9dc41ca3165e88b783bd06bf4a02aae1be6d0f39aada0bfeb17410f1b8fb80",
+      "bytes": 3528
+    },
+    "docs/research/syntax-highlighting/probes/shared-service/controller.mjs": {
+      "sha256": "039d35239d70a96dfc444a4d8f917b3173c9afca0f57adaaf78dc2d2d1eb7772",
+      "bytes": 8143
+    },
+    "docs/research/syntax-highlighting/probes/shared-service/discarded-unbuffered-v1.jsonl": {
+      "sha256": "ed1289e8a9f970643a2728cde39fae8bf667149a643f3c92e2f2c947ad55900e",
+      "bytes": 926855
+    },
+    "docs/research/syntax-highlighting/probes/shared-service/inventory.json": {
+      "sha256": "3c23d9cd77e7b7692bbfe4b7b237bfbf5a858674bd26942a9955d91719f6001d",
+      "bytes": 2200
+    },
+    "docs/research/syntax-highlighting/probes/shared-service/node-server.mjs": {
+      "sha256": "17fafe27596ccbb2b50f9f03ef8aef3f8525ba56a9586f023f27881e409e4f52",
+      "bytes": 2355
+    },
+    "docs/research/syntax-highlighting/probes/shared-service/quality.json": {
+      "sha256": "f82abb3fdaa797e9c4365463d1a364c2dc5aae388584ffb3f3f19d3272b46428",
+      "bytes": 5859
+    },
+    "docs/research/syntax-highlighting/probes/shared-service/quality.mjs": {
+      "sha256": "127c049b03ad55bfa5398f0088e24782319290a068a733b0f4909547b2ef6bfc",
+      "bytes": 1121
+    },
+    "docs/research/syntax-highlighting/probes/shared-service/results.jsonl": {
+      "sha256": "02d446cfdc4e1b2f1e4945c20a634af196710aadce66957a63db8166c4d62544",
+      "bytes": 1239947
+    },
+    "docs/research/syntax-highlighting/probes/shared-service/rpc.mjs": {
+      "sha256": "229958b701cc269a83ed659fb50c7b5bb4f8a2619470a86e5c4c6ad3387d7a81",
+      "bytes": 1611
+    },
+    "docs/research/syntax-highlighting/probes/shared-service/summarize.mjs": {
+      "sha256": "10ea9448834e4a7152a77cc3a3a8f7a96315df58dfef4949d79ed63ac07f0b22",
+      "bytes": 3586
+    },
+    "docs/research/syntax-highlighting/probes/shared-service/summary.json": {
+      "sha256": "d15fbc54a55443394a324c92148d52a1c759f9f29a4b296fa9551c619987a0be",
+      "bytes": 95947
+    },
+    "docs/research/syntax-highlighting/probes/shared-service/theme.json": {
+      "sha256": "48efd108b86bd11aac422b6a5b98881408f11cca82263a58d627df296b1258de",
+      "bytes": 1030
+    },
+    "docs/research/syntax-highlighting/probes/shared-service/verify.mjs": {
+      "sha256": "b08e588e97b3bd264e3afa2bdd2ee010710dd30de5b484ff42d63c553da14d99",
+      "bytes": 3721
+    },
+    "docs/research/syntax-highlighting/probes/shared-service/src/main.rs": {
+      "sha256": "6c08be97f45a56e624779d656e26edd25a2bd6075bfb213edc4ca8cb6551bf14",
+      "bytes": 9863,
+      "measuredSource": {
+        "sha256": "fa38520c7de03fabd14bab5826b64f8ee05aef7ea15ea721a7e49f02495f8e0b",
+        "bytes": 9864
+      },
+      "archiveNote": "Removed one trailing ASCII space before committing the archive; no logic change, rebuild or repeated measurements. measuredSource records the source used for the measured executable."
+    },
+    "docs/research/syntax-highlighting/probes/shared-service/src/bin/inventory.rs": {
+      "sha256": "b0634d01289fb672142474bd6651815347557a7571e0c3d267988c63f8c4b104",
+      "bytes": 1077
+    },
+    "docs/research/syntax-highlighting/probes/head-to-head/engine.mjs": {
+      "sha256": "4d289bbbb8321e6596dd72b9cd4f0ebc33b92bd31d78d6a960184bb27837b428",
+      "bytes": 12292
+    },
+    "docs/research/syntax-highlighting/probes/head-to-head/corpus.mjs": {
+      "sha256": "f167bf3efe9ad53079dc3830261a68fc562377c1b21a9e949a5e5e78d9d7879e",
+      "bytes": 2366
+    },
+    "docs/research/syntax-highlighting/probes/head-to-head/file-card-snapshot.txt": {
+      "sha256": "6ddf560938abd989a0ea75a40da9cfb81ae8e8b61c04d42643b520be81b10e7e",
+      "bytes": 20007
+    },
+    "docs/research/syntax-highlighting/probes/head-to-head/dependencies.json": {
+      "sha256": "a181305cb3f76c826cb67fb3a46f97d5c08a14ba0c8b8ee4e7b8ef1e24700b5e",
+      "bytes": 437
+    },
+    "docs/research/syntax-highlighting/probes/head-to-head/dependencies-lock.json": {
+      "sha256": "eb5c531b52d17eef2eb5363d97d6c578c5e0b5dcb0c1d977a1a864340a2d3a4a",
+      "bytes": 29739
+    }
+  }
+}

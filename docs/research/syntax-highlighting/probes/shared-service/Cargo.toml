@@ -1,0 +1,24 @@
+[package]
+name = "highlight-service-research"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Isolated experiment; this is not the extension's dependency manifest.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+giallo = { version = "=0.5.2", features = ["dump"] }
+syntect = { version = "=5.3.0", default-features = false, features = ["default-syntaxes", "default-themes", "regex-onig"] }
+bat = { version = "=0.26.1", default-features = false, features = ["regex-onig"] }
+tree-sitter-highlight = "=0.27.0"
+tree-sitter-typescript = "=0.23.2"
+tree-sitter-javascript = "=0.25.0"
+tree-sitter-python = "=0.25.0"
+tree-sitter-rust = "=0.24.2"
+tree-sitter-bash = "=0.25.1"
+
+[workspace]
+
+[profile.release]
+opt-level = 3

@@ -1,0 +1,414 @@
+{
+  "tree": {
+    "typescript": {
+      "const": [
+        "keyword"
+      ],
+      "result": [
+        "variable"
+      ],
+      "User": [
+        "type"
+      ],
+      "client": [
+        "variable"
+      ],
+      "fetch": [
+        "function"
+      ],
+      "user": [
+        "variable"
+      ],
+      "id": [
+        "property"
+      ],
+      "fallback": [
+        "variable"
+      ],
+      "greet": [
+        "function"
+      ],
+      "name": [
+        "variable"
+      ],
+      "return": [
+        "keyword"
+      ]
+    },
+    "python": {
+      "result": [
+        "variable"
+      ],
+      "client": [
+        "variable"
+      ],
+      "fetch": [
+        "property"
+      ],
+      "user": [
+        "variable"
+      ],
+      "id": [
+        "property"
+      ],
+      "fallback": [
+        "variable"
+      ],
+      "greet": [
+        "function"
+      ],
+      "name": [
+        "variable"
+      ],
+      "return": [
+        "keyword"
+      ]
+    },
+    "bash": {
+      "name": [
+        "property"
+      ]
+    },
+    "rust": {
+      "let": [
+        "keyword"
+      ],
+      "result": [
+        "plain"
+      ],
+      "User": [
+        "type"
+      ],
+      "client": [
+        "plain"
+      ],
+      "fetch": [
+        "function"
+      ],
+      "user": [
+        "plain"
+      ],
+      "id": [
+        "property"
+      ],
+      "fallback": [
+        "plain"
+      ],
+      "greet": [
+        "function"
+      ],
+      "name": [
+        "variable"
+      ]
+    }
+  },
+  "syntect": {
+    "typescript": {
+      "const": [
+        "keyword"
+      ],
+      "result": [
+        "variable"
+      ],
+      "User": [
+        "type"
+      ],
+      "client": [
+        "variable"
+      ],
+      "fetch": [
+        "function"
+      ],
+      "user": [
+        "variable"
+      ],
+      "id": [
+        "plain"
+      ],
+      "fallback": [
+        "variable"
+      ],
+      "greet": [
+        "function"
+      ],
+      "name": [
+        "variable"
+      ],
+      "return": [
+        "keyword"
+      ]
+    },
+    "python": {
+      "result": [
+        "plain"
+      ],
+      "client": [
+        "plain"
+      ],
+      "fetch": [
+        "variable"
+      ],
+      "user": [
+        "plain"
+      ],
+      "id": [
+        "plain"
+      ],
+      "fallback": [
+        "plain"
+      ],
+      "greet": [
+        "function"
+      ],
+      "name": [
+        "variable"
+      ],
+      "return": [
+        "keyword"
+      ]
+    },
+    "bash": {
+      "name": [
+        "variable"
+      ]
+    },
+    "rust": {
+      "let": [
+        "keyword"
+      ],
+      "result": [
+        "plain"
+      ],
+      "User": [
+        "plain"
+      ],
+      "client": [
+        "plain"
+      ],
+      "fetch": [
+        "function"
+      ],
+      "user": [
+        "plain"
+      ],
+      "id": [
+        "plain"
+      ],
+      "fallback": [
+        "plain"
+      ],
+      "greet": [
+        "function"
+      ],
+      "name": [
+        "variable"
+      ]
+    }
+  },
+  "giallo": {
+    "typescript": {
+      "const": [
+        "keyword"
+      ],
+      "result": [
+        "variable"
+      ],
+      "User": [
+        "type"
+      ],
+      "client": [
+        "variable"
+      ],
+      "fetch": [
+        "function"
+      ],
+      "user": [
+        "variable"
+      ],
+      "id": [
+        "property"
+      ],
+      "fallback": [
+        "variable"
+      ],
+      "greet": [
+        "function"
+      ],
+      "name": [
+        "variable"
+      ],
+      "return": [
+        "keyword"
+      ]
+    },
+    "python": {
+      "result": [
+        "plain"
+      ],
+      "client": [
+        "plain"
+      ],
+      "fetch": [
+        "plain"
+      ],
+      "user": [
+        "plain"
+      ],
+      "id": [
+        "plain"
+      ],
+      "fallback": [
+        "plain"
+      ],
+      "greet": [
+        "function"
+      ],
+      "name": [
+        "variable"
+      ],
+      "return": [
+        "keyword"
+      ]
+    },
+    "bash": {
+      "name": [
+        "variable"
+      ]
+    },
+    "rust": {
+      "let": [
+        "keyword"
+      ],
+      "result": [
+        "variable"
+      ],
+      "User": [
+        "type"
+      ],
+      "client": [
+        "variable"
+      ],
+      "fetch": [
+        "function"
+      ],
+      "user": [
+        "variable"
+      ],
+      "id": [
+        "plain"
+      ],
+      "fallback": [
+        "variable"
+      ],
+      "greet": [
+        "function"
+      ],
+      "name": [
+        "variable"
+      ]
+    }
+  },
+  "shiki": {
+    "typescript": {
+      "const": [
+        "keyword"
+      ],
+      "result": [
+        "variable"
+      ],
+      "User": [
+        "type"
+      ],
+      "client": [
+        "variable"
+      ],
+      "fetch": [
+        "function"
+      ],
+      "user": [
+        "variable"
+      ],
+      "id": [
+        "property"
+      ],
+      "fallback": [
+        "variable"
+      ],
+      "greet": [
+        "function"
+      ],
+      "name": [
+        "variable"
+      ],
+      "return": [
+        "keyword"
+      ]
+    },
+    "python": {
+      "result": [
+        "plain"
+      ],
+      "client": [
+        "plain"
+      ],
+      "fetch": [
+        "plain"
+      ],
+      "user": [
+        "plain"
+      ],
+      "id": [
+        "plain"
+      ],
+      "fallback": [
+        "plain"
+      ],
+      "greet": [
+        "function"
+      ],
+      "name": [
+        "variable"
+      ],
+      "return": [
+        "keyword"
+      ]
+    },
+    "bash": {
+      "name": [
+        "variable"
+      ]
+    },
+    "rust": {
+      "let": [
+        "keyword"
+      ],
+      "result": [
+        "variable"
+      ],
+      "User": [
+        "type"
+      ],
+      "client": [
+        "variable"
+      ],
+      "fetch": [
+        "function"
+      ],
+      "user": [
+        "variable"
+      ],
+      "id": [
+        "plain"
+      ],
+      "fallback": [
+        "variable"
+      ],
+      "greet": [
+        "function"
+      ],
+      "name": [
+        "variable"
+      ]
+    }
+  }
+}

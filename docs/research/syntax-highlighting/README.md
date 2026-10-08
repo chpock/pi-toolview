@@ -1,12 +1,16 @@
 # Syntax highlighting research and decision
 
-**Date:** 2026-10-06. **Status:** expanded head-to-head research and fresh advisory review complete. **Implementation:** not started or authorized by this report.
+**Date:** 2026-10-07. **Status:** in-process/shared-service research and communication selection complete; expanded five-library comparison independently audited, factual findings source-checked and incorporated. **Implementation:** not started or authorized.
 
 ## Recommended decision
 
-**Select Shiki as the shared highlighting technology, with Oniguruma as the preferred engine.** Use structured tokens, not an editor/diff framework. Growing source is a first-class use case, including future Bash command highlighting; arbitrary command output is not automatically Bash source.
+**For the many-agent deployment, prefer CortexKit Subconscious; the library decision is explicitly conditional.** The [expanded Rust-library comparison](daemon-library-selection.md) examines **Lumis, Arborium, Syntect + two-face, Giallo and Syntaxmate**, including the full Zola migration discussion and links. **Lumis** is the provisional whole-snapshot/category preference; **Syntect + two-face** is the mature ready line-state alternative; **Syntaxmate** is a serious but young functional contender. Lumis's incomplete-code support is not a public retained-document API; Giallo is not excluded merely for CRLF normalization. The [communication report](daemon-communication.md) remains unchanged. No new performance tests/POC, implementation authorization or relaxed quality gates.
 
-The authoritative decision is now [Tree-sitter versus Shiki](tree-sitter-vs-shiki.md), supported by [versioned coverage research](head-to-head-coverage.md), [48 final fresh-process measurement records](probes/head-to-head/results.jsonl), [reproducible probes and controls](probes/head-to-head/) and a [fresh Oracle review](head-to-head-review.md).
+**For an in-process Node integration, select Shiki with Oniguruma as the preferred engine.** Use structured tokens, not an editor/diff framework. Growing source is a first-class use case, including future Bash command highlighting; arbitrary command output is not automatically Bash source.
+
+The in-process technology decision is [Tree-sitter versus Shiki](tree-sitter-vs-shiki.md), supported by [versioned coverage research](head-to-head-coverage.md), [48 final fresh-process measurement records](probes/head-to-head/results.jsonl), [reproducible probes and controls](probes/head-to-head/) and a [fresh Oracle review](head-to-head-review.md).
+
+A separately requested [shared-service study](shared-service.md) investigates a different deployment: one native or Node service for independent agent processes. Native Rust highlighters, process-wide asset sharing and IPC are not selected or ruled out by the earlier Node-binding comparison. The new report records 33 buffered-transport experiments with 1/10 clients, PSS/queueing/counter controls and the native-engine shortlist, including ready Tree-sitter collections. It recommends a common service for the operator's many-agent deployment, not duplicating a highlighter inside every process; its numeric native prototype is not an Arborium/Lumis benchmark.
 
 ### Why the initial recommendation changed
 
@@ -20,7 +24,10 @@ This selects a technology, not an implementation. All production lifecycle, owne
 
 | Report | Contents |
 |---|---|
-| [Final head-to-head decision](tree-sitter-vs-shiki.md) | Full/streamed/local-edit timing, phase memory, quality limits and final recommendation |
+| [Daemon communication selection](daemon-communication.md) | Subconscious versus sockets/HTTP/gRPC, real protocol/SDK/lifecycle, limits/security and recommendation |
+| [Rust daemon library selection](daemon-library-selection.md) | Five ready candidates, Zola evidence, incomplete/retained-state distinction, maintenance/adoption, query/embedding semantics, source/palette APIs and conditional recommendation |
+| [Shared native service](shared-service.md) | Common-service architecture, native engine/transport candidates, AFT/Subconscious distinction, multi-process PSS and socket controls |
+| [Final in-process head-to-head decision](tree-sitter-vs-shiki.md) | Full/streamed/local-edit timing, phase memory, quality limits and in-process recommendation |
 | [Head-to-head coverage](head-to-head-coverage.md) | 21 pinned grammar/query entries, embeddings and deployment qualifications |
 | [Head-to-head advisory review](head-to-head-review.md) | Fresh verification of final data and weighted decision |
 | [Current implementation](current-implementation.md) | Actual file-card/SDK pipeline and root causes, with physical foreground controls |
@@ -52,7 +59,7 @@ Seven native/card examples compared **419 actual source-cell foregrounds**, all 
 | **Shiki — selected in the expanded study** | Broad maintained bundle, editor-style scopes/themes, direct tokens, useful shell/embedded support | Ordinary Python names remain a gap in tested grammar; initialization and uncached work are not free |
 | **Modern highlight.js/lowlight** | Easy JS integration and broader/denser than Pi's old 10.x in tested TS | Still sparse ordinary Python/object/argument names; modern multi-class decoding required; duplicate host engine |
 | **Prism** | Broad catalogue and nested token API without HTML | Not all identifiers/types classified; removed TS rules; v1 maintenance restrictions |
-| **syntect** | Mature Rust terminal ecosystem: Codex/delta/bat | Unvalidated Node bridge/native/WASM/subprocess boundary; no demonstrated benefit justifying it here |
+| **syntect** | Mature Rust terminal ecosystem: Codex/delta/bat | Earlier in-process work did not validate a Node bridge; [the native-service study](shared-service.md) now measures Rust/bat assets, line-state APIs and deployment limits |
 | **OpenTUI/Pierre/Hunk as dependencies** | Full diff/UI infrastructure already exists | Imports unrelated renderers, runtime/data models and ownership; wrong boundary for tokenization alone |
 
 Language totals are not comparable quality scores. Tree-sitter coverage depends on selected grammars **and** queries; TextMate coverage also depends on scope mapping and embeddings. None resolves cross-file symbols/types like an LSP semantic-token service.

@@ -1,0 +1,3325 @@
+{
+  "records": 33,
+  "description": "Medians across three fresh trials; per-trial request median/p95; actual process footprints, not retained engine bytes.",
+  "groups": {
+    "inprocess/1": {
+      "node": "v22.19.0",
+      "memory": {
+        "baseline": {
+          "rss": {
+            "clientsMiB": 63.81640625,
+            "serversMiB": 0,
+            "totalMiB": 63.81640625,
+            "aboveClientBaselineMiB": 0
+          },
+          "pss": {
+            "clientsMiB": 38.880859375,
+            "serversMiB": 0,
+            "totalMiB": 38.880859375,
+            "aboveClientBaselineMiB": 0
+          },
+          "private": {
+            "clientsMiB": 17.90625,
+            "serversMiB": 0,
+            "totalMiB": 17.90625,
+            "aboveClientBaselineMiB": 0
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "init": {
+          "rss": {
+            "clientsMiB": 109.9765625,
+            "serversMiB": 0,
+            "totalMiB": 109.9765625,
+            "aboveClientBaselineMiB": 46.22265625
+          },
+          "pss": {
+            "clientsMiB": 84.791015625,
+            "serversMiB": 0,
+            "totalMiB": 84.791015625,
+            "aboveClientBaselineMiB": 45.91015625
+          },
+          "private": {
+            "clientsMiB": 63.56640625,
+            "serversMiB": 0,
+            "totalMiB": 63.56640625,
+            "aboveClientBaselineMiB": 45.66015625
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "bench": {
+          "rss": {
+            "clientsMiB": 167.984375,
+            "serversMiB": 0,
+            "totalMiB": 167.984375,
+            "aboveClientBaselineMiB": 104.16796875
+          },
+          "pss": {
+            "clientsMiB": 145.73828125,
+            "serversMiB": 0,
+            "totalMiB": 145.73828125,
+            "aboveClientBaselineMiB": 104.07421875
+          },
+          "private": {
+            "clientsMiB": 125.55078125,
+            "serversMiB": 0,
+            "totalMiB": 125.55078125,
+            "aboveClientBaselineMiB": 104.04296875
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stream": {
+          "rss": {
+            "clientsMiB": 169.78515625,
+            "serversMiB": 0,
+            "totalMiB": 169.78515625,
+            "aboveClientBaselineMiB": 105.96875
+          },
+          "pss": {
+            "clientsMiB": 145.224609375,
+            "serversMiB": 0,
+            "totalMiB": 145.224609375,
+            "aboveClientBaselineMiB": 105.875
+          },
+          "private": {
+            "clientsMiB": 123.98828125,
+            "serversMiB": 0,
+            "totalMiB": 123.98828125,
+            "aboveClientBaselineMiB": 105.84375
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stress": {
+          "rss": {
+            "clientsMiB": 206.07421875,
+            "serversMiB": 0,
+            "totalMiB": 206.07421875,
+            "aboveClientBaselineMiB": 142.6328125
+          },
+          "pss": {
+            "clientsMiB": 183.533203125,
+            "serversMiB": 0,
+            "totalMiB": 183.533203125,
+            "aboveClientBaselineMiB": 142.2890625
+          },
+          "private": {
+            "clientsMiB": 165.41015625,
+            "serversMiB": 0,
+            "totalMiB": 165.41015625,
+            "aboveClientBaselineMiB": 142.0078125
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "release": {
+          "rss": {
+            "clientsMiB": 204.8125,
+            "serversMiB": 0,
+            "totalMiB": 204.8125,
+            "aboveClientBaselineMiB": 141.37109375
+          },
+          "pss": {
+            "clientsMiB": 182.271484375,
+            "serversMiB": 0,
+            "totalMiB": 182.271484375,
+            "aboveClientBaselineMiB": 141.02734375
+          },
+          "private": {
+            "clientsMiB": 164.1484375,
+            "serversMiB": 0,
+            "totalMiB": 164.1484375,
+            "aboveClientBaselineMiB": 140.74609375
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        }
+      },
+      "cases": {
+        "typescript-25": {
+          "medianMs": 5.303769999999986,
+          "p95Ms": 6.169421,
+          "computeMedianMs": 5.211248,
+          "outputBytesMedian": 14084,
+          "inputBytesMedian": 1460
+        },
+        "typescript-1000": {
+          "medianMs": 124.74574499999994,
+          "p95Ms": 129.50471499999998,
+          "computeMedianMs": 121.665418,
+          "outputBytesMedian": 562934,
+          "inputBytesMedian": 58910
+        },
+        "python-25": {
+          "medianMs": 3.0386969999999565,
+          "p95Ms": 3.321741999999972,
+          "computeMedianMs": 3.015357,
+          "outputBytesMedian": 5207,
+          "inputBytesMedian": 1559
+        },
+        "python-1000": {
+          "medianMs": 118.73332200000004,
+          "p95Ms": 135.07853,
+          "computeMedianMs": 117.686688,
+          "outputBytesMedian": 206957,
+          "inputBytesMedian": 62909
+        },
+        "bash-25": {
+          "medianMs": 1.6204850000001443,
+          "p95Ms": 1.7263910000001488,
+          "computeMedianMs": 1.577465,
+          "outputBytesMedian": 8008,
+          "inputBytesMedian": 784
+        },
+        "bash-1000": {
+          "medianMs": 49.929788000000144,
+          "p95Ms": 51.978578999999854,
+          "computeMedianMs": 48.736978,
+          "outputBytesMedian": 319933,
+          "inputBytesMedian": 31909
+        },
+        "rust-25": {
+          "medianMs": 2.787315000000035,
+          "p95Ms": 3.3150249999998778,
+          "computeMedianMs": 2.726445,
+          "outputBytesMedian": 14344,
+          "inputBytesMedian": 1624
+        },
+        "rust-1000": {
+          "medianMs": 126.004097,
+          "p95Ms": 131.9441979999997,
+          "computeMedianMs": 123.139682,
+          "outputBytesMedian": 569044,
+          "inputBytesMedian": 64924
+        },
+        "real-typescript": {
+          "medianMs": 57.555381000000125,
+          "p95Ms": 60.66074000000026,
+          "computeMedianMs": 56.707329,
+          "outputBytesMedian": 149216,
+          "inputBytesMedian": 20028
+        }
+      },
+      "stream": {
+        "bash": {
+          "totalPerClientMedianMs": 122.54047700000137,
+          "updateMedianMs": 3.371142000000418,
+          "updateP95Ms": 6.267133000000285,
+          "computeMedianMs": 3.276393
+        },
+        "typescript-function": {
+          "totalPerClientMedianMs": 261.63319800000045,
+          "updateMedianMs": 7.756930000000011,
+          "updateP95Ms": 14.090553,
+          "computeMedianMs": 7.628408
+        }
+      },
+      "statistics": [
+        [],
+        [],
+        []
+      ]
+    },
+    "inprocess/10": {
+      "node": "v22.19.0",
+      "memory": {
+        "baseline": {
+          "rss": {
+            "clientsMiB": 636.0703125,
+            "serversMiB": 0,
+            "totalMiB": 636.0703125,
+            "aboveClientBaselineMiB": 0
+          },
+          "pss": {
+            "clientsMiB": 212.072265625,
+            "serversMiB": 0,
+            "totalMiB": 212.072265625,
+            "aboveClientBaselineMiB": 0
+          },
+          "private": {
+            "clientsMiB": 173.13671875,
+            "serversMiB": 0,
+            "totalMiB": 173.13671875,
+            "aboveClientBaselineMiB": 0
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "init": {
+          "rss": {
+            "clientsMiB": 1084.91796875,
+            "serversMiB": 0,
+            "totalMiB": 1084.91796875,
+            "aboveClientBaselineMiB": 448.21875
+          },
+          "pss": {
+            "clientsMiB": 640.943359375,
+            "serversMiB": 0,
+            "totalMiB": 640.943359375,
+            "aboveClientBaselineMiB": 428.5390625
+          },
+          "private": {
+            "clientsMiB": 599.9765625,
+            "serversMiB": 0,
+            "totalMiB": 599.9765625,
+            "aboveClientBaselineMiB": 426.4453125
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "bench": {
+          "rss": {
+            "clientsMiB": 1675.45703125,
+            "serversMiB": 0,
+            "totalMiB": 1675.45703125,
+            "aboveClientBaselineMiB": 1040.3828125
+          },
+          "pss": {
+            "clientsMiB": 1230.5859375,
+            "serversMiB": 0,
+            "totalMiB": 1230.5859375,
+            "aboveClientBaselineMiB": 1018.701171875
+          },
+          "private": {
+            "clientsMiB": 1189.4609375,
+            "serversMiB": 0,
+            "totalMiB": 1189.4609375,
+            "aboveClientBaselineMiB": 1016.43359375
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stream": {
+          "rss": {
+            "clientsMiB": 1689.78125,
+            "serversMiB": 0,
+            "totalMiB": 1689.78125,
+            "aboveClientBaselineMiB": 1054.70703125
+          },
+          "pss": {
+            "clientsMiB": 1244.91015625,
+            "serversMiB": 0,
+            "totalMiB": 1244.91015625,
+            "aboveClientBaselineMiB": 1033.025390625
+          },
+          "private": {
+            "clientsMiB": 1203.78515625,
+            "serversMiB": 0,
+            "totalMiB": 1203.78515625,
+            "aboveClientBaselineMiB": 1030.7578125
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stress": {
+          "rss": {
+            "clientsMiB": 2388.765625,
+            "serversMiB": 0,
+            "totalMiB": 2388.765625,
+            "aboveClientBaselineMiB": 1752.06640625
+          },
+          "pss": {
+            "clientsMiB": 1943.1171875,
+            "serversMiB": 0,
+            "totalMiB": 1943.1171875,
+            "aboveClientBaselineMiB": 1730.712890625
+          },
+          "private": {
+            "clientsMiB": 1901.9609375,
+            "serversMiB": 0,
+            "totalMiB": 1901.9609375,
+            "aboveClientBaselineMiB": 1728.4296875
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "release": {
+          "rss": {
+            "clientsMiB": 2374.2890625,
+            "serversMiB": 0,
+            "totalMiB": 2374.2890625,
+            "aboveClientBaselineMiB": 1738.21875
+          },
+          "pss": {
+            "clientsMiB": 1928.8349609375,
+            "serversMiB": 0,
+            "totalMiB": 1928.8349609375,
+            "aboveClientBaselineMiB": 1716.7626953125
+          },
+          "private": {
+            "clientsMiB": 1887.70703125,
+            "serversMiB": 0,
+            "totalMiB": 1887.70703125,
+            "aboveClientBaselineMiB": 1714.5703125
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        }
+      },
+      "cases": {
+        "typescript-25": {
+          "medianMs": 13.949138000000062,
+          "p95Ms": 48.22191299999997,
+          "computeMedianMs": 13.840907,
+          "outputBytesMedian": 14084,
+          "inputBytesMedian": 1460
+        },
+        "typescript-1000": {
+          "medianMs": 266.3661460000001,
+          "p95Ms": 291.603799,
+          "computeMedianMs": 261.670104,
+          "outputBytesMedian": 562934,
+          "inputBytesMedian": 58910
+        },
+        "python-25": {
+          "medianMs": 6.7474749999996675,
+          "p95Ms": 7.431221999999707,
+          "computeMedianMs": 6.699096,
+          "outputBytesMedian": 5207,
+          "inputBytesMedian": 1559
+        },
+        "python-1000": {
+          "medianMs": 236.41067599999997,
+          "p95Ms": 247.50386200000003,
+          "computeMedianMs": 234.930284,
+          "outputBytesMedian": 206957,
+          "inputBytesMedian": 62909
+        },
+        "bash-25": {
+          "medianMs": 3.8894470000000183,
+          "p95Ms": 6.821812000000136,
+          "computeMedianMs": 3.821417,
+          "outputBytesMedian": 8008,
+          "inputBytesMedian": 784
+        },
+        "bash-1000": {
+          "medianMs": 110.62824499999988,
+          "p95Ms": 130.85580900000014,
+          "computeMedianMs": 108.482942,
+          "outputBytesMedian": 319933,
+          "inputBytesMedian": 31909
+        },
+        "rust-25": {
+          "medianMs": 6.474600999999893,
+          "p95Ms": 7.483663000000433,
+          "computeMedianMs": 6.366454,
+          "outputBytesMedian": 14344,
+          "inputBytesMedian": 1624
+        },
+        "rust-1000": {
+          "medianMs": 242.72144499999922,
+          "p95Ms": 259.02226599999995,
+          "computeMedianMs": 238.765553,
+          "outputBytesMedian": 569044,
+          "inputBytesMedian": 64924
+        },
+        "real-typescript": {
+          "medianMs": 120.4045930000002,
+          "p95Ms": 141.0634799999998,
+          "computeMedianMs": 118.715267,
+          "outputBytesMedian": 149216,
+          "inputBytesMedian": 20028
+        }
+      },
+      "stream": {
+        "bash": {
+          "totalPerClientMedianMs": 315.3615599999994,
+          "updateMedianMs": 8.821609999999964,
+          "updateP95Ms": 17.814393999999993,
+          "computeMedianMs": 8.661249
+        },
+        "typescript-function": {
+          "totalPerClientMedianMs": 552.5142390000001,
+          "updateMedianMs": 15.32235000000037,
+          "updateP95Ms": 33.806596000000354,
+          "computeMedianMs": 15.124313
+        }
+      },
+      "statistics": [
+        [],
+        [],
+        []
+      ]
+    },
+    "tree/1": {
+      "node": "v22.19.0",
+      "memory": {
+        "baseline": {
+          "rss": {
+            "clientsMiB": 63.890625,
+            "serversMiB": 14.28125,
+            "totalMiB": 78.19140625,
+            "aboveClientBaselineMiB": 14.28125
+          },
+          "pss": {
+            "clientsMiB": 38.896484375,
+            "serversMiB": 12.03515625,
+            "totalMiB": 50.9599609375,
+            "aboveClientBaselineMiB": 12.03515625
+          },
+          "private": {
+            "clientsMiB": 17.921875,
+            "serversMiB": 12.02734375,
+            "totalMiB": 29.9765625,
+            "aboveClientBaselineMiB": 12.02734375
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "init": {
+          "rss": {
+            "clientsMiB": 64.05859375,
+            "serversMiB": 14.4609375,
+            "totalMiB": 78.51953125,
+            "aboveClientBaselineMiB": 14.62109375
+          },
+          "pss": {
+            "clientsMiB": 39.033203125,
+            "serversMiB": 12.21875,
+            "totalMiB": 51.2568359375,
+            "aboveClientBaselineMiB": 12.34375
+          },
+          "private": {
+            "clientsMiB": 18.02734375,
+            "serversMiB": 12.2109375,
+            "totalMiB": 30.2421875,
+            "aboveClientBaselineMiB": 12.3046875
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "bench": {
+          "rss": {
+            "clientsMiB": 72.734375,
+            "serversMiB": 19.65625,
+            "totalMiB": 92.36328125,
+            "aboveClientBaselineMiB": 28.38671875
+          },
+          "pss": {
+            "clientsMiB": 48.119140625,
+            "serversMiB": 17.4140625,
+            "totalMiB": 65.533203125,
+            "aboveClientBaselineMiB": 26.046875
+          },
+          "private": {
+            "clientsMiB": 27.1328125,
+            "serversMiB": 17.40625,
+            "totalMiB": 44.5390625,
+            "aboveClientBaselineMiB": 25.9453125
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stream": {
+          "rss": {
+            "clientsMiB": 82.6015625,
+            "serversMiB": 19.65625,
+            "totalMiB": 102.2578125,
+            "aboveClientBaselineMiB": 38.3671875
+          },
+          "pss": {
+            "clientsMiB": 59.349609375,
+            "serversMiB": 17.4140625,
+            "totalMiB": 76.763671875,
+            "aboveClientBaselineMiB": 36.0986328125
+          },
+          "private": {
+            "clientsMiB": 38.36328125,
+            "serversMiB": 17.40625,
+            "totalMiB": 55.76953125,
+            "aboveClientBaselineMiB": 36.05859375
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stress": {
+          "rss": {
+            "clientsMiB": 105.765625,
+            "serversMiB": 59.328125,
+            "totalMiB": 165.09765625,
+            "aboveClientBaselineMiB": 101.25390625
+          },
+          "pss": {
+            "clientsMiB": 80.759765625,
+            "serversMiB": 57.0859375,
+            "totalMiB": 137.8505859375,
+            "aboveClientBaselineMiB": 98.9541015625
+          },
+          "private": {
+            "clientsMiB": 59.72265625,
+            "serversMiB": 57.078125,
+            "totalMiB": 116.8046875,
+            "aboveClientBaselineMiB": 98.8828125
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "release": {
+          "rss": {
+            "clientsMiB": 104.515625,
+            "serversMiB": 59.390625,
+            "totalMiB": 163.91015625,
+            "aboveClientBaselineMiB": 100.0625
+          },
+          "pss": {
+            "clientsMiB": 79.505859375,
+            "serversMiB": 57.0869140625,
+            "totalMiB": 136.5966796875,
+            "aboveClientBaselineMiB": 97.7001953125
+          },
+          "private": {
+            "clientsMiB": 58.46875,
+            "serversMiB": 57.078125,
+            "totalMiB": 115.55078125,
+            "aboveClientBaselineMiB": 97.62890625
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        }
+      },
+      "cases": {
+        "typescript-25": {
+          "medianMs": 0.8305210000000045,
+          "p95Ms": 0.8790109999999913,
+          "computeMedianMs": 0.539418,
+          "outputBytesMedian": 13484,
+          "inputBytesMedian": 1460
+        },
+        "typescript-1000": {
+          "medianMs": 22.686369999999997,
+          "p95Ms": 23.910216000000005,
+          "computeMedianMs": 15.885563,
+          "outputBytesMedian": 538934,
+          "inputBytesMedian": 58910
+        },
+        "python-25": {
+          "medianMs": 0.9652229999999804,
+          "p95Ms": 1.252206000000001,
+          "computeMedianMs": 0.539141,
+          "outputBytesMedian": 14783,
+          "inputBytesMedian": 1559
+        },
+        "python-1000": {
+          "medianMs": 22.16016099999996,
+          "p95Ms": 23.258901999999978,
+          "computeMedianMs": 14.69579,
+          "outputBytesMedian": 590933,
+          "inputBytesMedian": 62909
+        },
+        "bash-25": {
+          "medianMs": 0.7824300000000335,
+          "p95Ms": 1.0362690000000043,
+          "computeMedianMs": 0.439075,
+          "outputBytesMedian": 8608,
+          "inputBytesMedian": 784
+        },
+        "bash-1000": {
+          "medianMs": 15.737817000000007,
+          "p95Ms": 15.94460399999997,
+          "computeMedianMs": 11.484598,
+          "outputBytesMedian": 343933,
+          "inputBytesMedian": 31909
+        },
+        "rust-25": {
+          "medianMs": 1.0389109999999846,
+          "p95Ms": 2.163086000000021,
+          "computeMedianMs": 0.582172,
+          "outputBytesMedian": 7744,
+          "inputBytesMedian": 1624
+        },
+        "rust-1000": {
+          "medianMs": 15.349253000000033,
+          "p95Ms": 16.59901400000001,
+          "computeMedianMs": 12.434634,
+          "outputBytesMedian": 305044,
+          "inputBytesMedian": 64924
+        },
+        "real-typescript": {
+          "medianMs": 9.092759999999998,
+          "p95Ms": 10.092141000000026,
+          "computeMedianMs": 5.250676,
+          "outputBytesMedian": 144252,
+          "inputBytesMedian": 20028
+        }
+      },
+      "stream": {
+        "bash": {
+          "totalPerClientMedianMs": 36.42122300000028,
+          "updateMedianMs": 1.2209139999999934,
+          "updateP95Ms": 1.8176390000000993,
+          "computeMedianMs": 0.920469
+        },
+        "typescript-function": {
+          "totalPerClientMedianMs": 46.20452799999964,
+          "updateMedianMs": 1.3852990000000318,
+          "updateP95Ms": 2.223897000000079,
+          "computeMedianMs": 1.027916
+        }
+      },
+      "statistics": [
+        [
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          }
+        ],
+        [
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          }
+        ],
+        [
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          }
+        ]
+      ]
+    },
+    "tree/10": {
+      "node": "v22.19.0",
+      "memory": {
+        "baseline": {
+          "rss": {
+            "clientsMiB": 636.453125,
+            "serversMiB": 14.32421875,
+            "totalMiB": 650.77734375,
+            "aboveClientBaselineMiB": 14.32421875
+          },
+          "pss": {
+            "clientsMiB": 212.18359375,
+            "serversMiB": 12.05078125,
+            "totalMiB": 224.193359375,
+            "aboveClientBaselineMiB": 12.05078125
+          },
+          "private": {
+            "clientsMiB": 173.31640625,
+            "serversMiB": 12.04296875,
+            "totalMiB": 185.3125,
+            "aboveClientBaselineMiB": 12.04296875
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "init": {
+          "rss": {
+            "clientsMiB": 637.96875,
+            "serversMiB": 14.7734375,
+            "totalMiB": 652.765625,
+            "aboveClientBaselineMiB": 16.28125
+          },
+          "pss": {
+            "clientsMiB": 213.1748046875,
+            "serversMiB": 12.5234375,
+            "totalMiB": 225.552734375,
+            "aboveClientBaselineMiB": 13.46875
+          },
+          "private": {
+            "clientsMiB": 174.20703125,
+            "serversMiB": 12.515625,
+            "totalMiB": 186.61328125,
+            "aboveClientBaselineMiB": 13.40234375
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "bench": {
+          "rss": {
+            "clientsMiB": 738.17578125,
+            "serversMiB": 27.7734375,
+            "totalMiB": 766.140625,
+            "aboveClientBaselineMiB": 129.55859375
+          },
+          "pss": {
+            "clientsMiB": 312.0869140625,
+            "serversMiB": 25.5,
+            "totalMiB": 337.7939453125,
+            "aboveClientBaselineMiB": 125.6103515625
+          },
+          "private": {
+            "clientsMiB": 273.03515625,
+            "serversMiB": 25.4921875,
+            "totalMiB": 298.734375,
+            "aboveClientBaselineMiB": 125.41796875
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stream": {
+          "rss": {
+            "clientsMiB": 834.84765625,
+            "serversMiB": 27.7734375,
+            "totalMiB": 862.5234375,
+            "aboveClientBaselineMiB": 226.109375
+          },
+          "pss": {
+            "clientsMiB": 408.818359375,
+            "serversMiB": 25.5,
+            "totalMiB": 434.248046875,
+            "aboveClientBaselineMiB": 222.1640625
+          },
+          "private": {
+            "clientsMiB": 369.76953125,
+            "serversMiB": 25.4921875,
+            "totalMiB": 395.19140625,
+            "aboveClientBaselineMiB": 221.98046875
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stress": {
+          "rss": {
+            "clientsMiB": 1047.0546875,
+            "serversMiB": 134.75390625,
+            "totalMiB": 1183.078125,
+            "aboveClientBaselineMiB": 546.49609375
+          },
+          "pss": {
+            "clientsMiB": 620.5927734375,
+            "serversMiB": 132.5078125,
+            "totalMiB": 754.16015625,
+            "aboveClientBaselineMiB": 541.9765625
+          },
+          "private": {
+            "clientsMiB": 581.41796875,
+            "serversMiB": 132.5,
+            "totalMiB": 715.046875,
+            "aboveClientBaselineMiB": 541.73046875
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "release": {
+          "rss": {
+            "clientsMiB": 1035.265625,
+            "serversMiB": 134.81640625,
+            "totalMiB": 1171.3828125,
+            "aboveClientBaselineMiB": 534.80078125
+          },
+          "pss": {
+            "clientsMiB": 608.169921875,
+            "serversMiB": 132.5078125,
+            "totalMiB": 741.7099609375,
+            "aboveClientBaselineMiB": 529.5263671875
+          },
+          "private": {
+            "clientsMiB": 568.87890625,
+            "serversMiB": 132.5,
+            "totalMiB": 702.4765625,
+            "aboveClientBaselineMiB": 529.16015625
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        }
+      },
+      "cases": {
+        "typescript-25": {
+          "medianMs": 4.508706999999987,
+          "p95Ms": 4.990066999999982,
+          "computeMedianMs": 0.441721,
+          "outputBytesMedian": 13484,
+          "inputBytesMedian": 1460
+        },
+        "typescript-1000": {
+          "medianMs": 155.91474900000003,
+          "p95Ms": 169.97547499999996,
+          "computeMedianMs": 15.39941,
+          "outputBytesMedian": 538934,
+          "inputBytesMedian": 58910
+        },
+        "python-25": {
+          "medianMs": 3.622726000000057,
+          "p95Ms": 70.92749600000002,
+          "computeMedianMs": 0.382509,
+          "outputBytesMedian": 14783,
+          "inputBytesMedian": 1559
+        },
+        "python-1000": {
+          "medianMs": 144.9875609999999,
+          "p95Ms": 171.8042079999998,
+          "computeMedianMs": 15.449476,
+          "outputBytesMedian": 590933,
+          "inputBytesMedian": 62909
+        },
+        "bash-25": {
+          "medianMs": 3.045910000000049,
+          "p95Ms": 99.81295699999964,
+          "computeMedianMs": 0.318479,
+          "outputBytesMedian": 8608,
+          "inputBytesMedian": 784
+        },
+        "bash-1000": {
+          "medianMs": 119.2851499999997,
+          "p95Ms": 139.56256600000006,
+          "computeMedianMs": 12.090641,
+          "outputBytesMedian": 343933,
+          "inputBytesMedian": 31909
+        },
+        "rust-25": {
+          "medianMs": 14.324965999999677,
+          "p95Ms": 67.47582700000021,
+          "computeMedianMs": 0.365482,
+          "outputBytesMedian": 7744,
+          "inputBytesMedian": 1624
+        },
+        "rust-1000": {
+          "medianMs": 126.71976600000016,
+          "p95Ms": 140.09264100000019,
+          "computeMedianMs": 13.710717,
+          "outputBytesMedian": 305044,
+          "inputBytesMedian": 64924
+        },
+        "real-typescript": {
+          "medianMs": 53.78186699999969,
+          "p95Ms": 77.09808199999998,
+          "computeMedianMs": 5.29425,
+          "outputBytesMedian": 144252,
+          "inputBytesMedian": 20028
+        }
+      },
+      "stream": {
+        "bash": {
+          "totalPerClientMedianMs": 234.77662399999963,
+          "updateMedianMs": 7.212776999999733,
+          "updateP95Ms": 14.488816999999926,
+          "computeMedianMs": 0.739492
+        },
+        "typescript-function": {
+          "totalPerClientMedianMs": 303.958832000003,
+          "updateMedianMs": 9.525225000000319,
+          "updateP95Ms": 16.481293999999252,
+          "computeMedianMs": 0.942507
+        }
+      },
+      "statistics": [
+        [
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 1170,
+            "id": 1,
+            "ok": true,
+            "requests": 1171
+          }
+        ],
+        [
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 1170,
+            "id": 1,
+            "ok": true,
+            "requests": 1171
+          }
+        ],
+        [
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 1170,
+            "id": 1,
+            "ok": true,
+            "requests": 1171
+          }
+        ]
+      ]
+    },
+    "syntect/1": {
+      "node": "v22.19.0",
+      "memory": {
+        "baseline": {
+          "rss": {
+            "clientsMiB": 63.84375,
+            "serversMiB": 7.6015625,
+            "totalMiB": 71.41796875,
+            "aboveClientBaselineMiB": 7.6015625
+          },
+          "pss": {
+            "clientsMiB": 38.876953125,
+            "serversMiB": 5.41015625,
+            "totalMiB": 44.314453125,
+            "aboveClientBaselineMiB": 5.41015625
+          },
+          "private": {
+            "clientsMiB": 17.90234375,
+            "serversMiB": 5.40234375,
+            "totalMiB": 23.33203125,
+            "aboveClientBaselineMiB": 5.40234375
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "init": {
+          "rss": {
+            "clientsMiB": 63.99609375,
+            "serversMiB": 14.78515625,
+            "totalMiB": 78.75,
+            "aboveClientBaselineMiB": 14.95703125
+          },
+          "pss": {
+            "clientsMiB": 39.017578125,
+            "serversMiB": 12.458984375,
+            "totalMiB": 51.4404296875,
+            "aboveClientBaselineMiB": 12.6181640625
+          },
+          "private": {
+            "clientsMiB": 18.01171875,
+            "serversMiB": 12.44921875,
+            "totalMiB": 30.42578125,
+            "aboveClientBaselineMiB": 12.578125
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "bench": {
+          "rss": {
+            "clientsMiB": 71.91796875,
+            "serversMiB": 17.9765625,
+            "totalMiB": 89.89453125,
+            "aboveClientBaselineMiB": 26.20703125
+          },
+          "pss": {
+            "clientsMiB": 46.876953125,
+            "serversMiB": 15.6513671875,
+            "totalMiB": 62.5283203125,
+            "aboveClientBaselineMiB": 23.8681640625
+          },
+          "private": {
+            "clientsMiB": 25.890625,
+            "serversMiB": 15.640625,
+            "totalMiB": 41.53125,
+            "aboveClientBaselineMiB": 23.828125
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stream": {
+          "rss": {
+            "clientsMiB": 76.28125,
+            "serversMiB": 18.0078125,
+            "totalMiB": 94.2890625,
+            "aboveClientBaselineMiB": 30.66015625
+          },
+          "pss": {
+            "clientsMiB": 51.240234375,
+            "serversMiB": 15.6826171875,
+            "totalMiB": 66.9228515625,
+            "aboveClientBaselineMiB": 28.3212890625
+          },
+          "private": {
+            "clientsMiB": 30.25390625,
+            "serversMiB": 15.671875,
+            "totalMiB": 45.92578125,
+            "aboveClientBaselineMiB": 28.28125
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stress": {
+          "rss": {
+            "clientsMiB": 93.32421875,
+            "serversMiB": 30.8515625,
+            "totalMiB": 124.19921875,
+            "aboveClientBaselineMiB": 60.35546875
+          },
+          "pss": {
+            "clientsMiB": 68.326171875,
+            "serversMiB": 28.5263671875,
+            "totalMiB": 96.8525390625,
+            "aboveClientBaselineMiB": 58.0166015625
+          },
+          "private": {
+            "clientsMiB": 47.30859375,
+            "serversMiB": 28.515625,
+            "totalMiB": 75.82421875,
+            "aboveClientBaselineMiB": 57.9765625
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "release": {
+          "rss": {
+            "clientsMiB": 92.0703125,
+            "serversMiB": 30.9140625,
+            "totalMiB": 123.0078125,
+            "aboveClientBaselineMiB": 59.1640625
+          },
+          "pss": {
+            "clientsMiB": 67.076171875,
+            "serversMiB": 28.5263671875,
+            "totalMiB": 95.6025390625,
+            "aboveClientBaselineMiB": 56.7626953125
+          },
+          "private": {
+            "clientsMiB": 46.05859375,
+            "serversMiB": 28.515625,
+            "totalMiB": 74.57421875,
+            "aboveClientBaselineMiB": 56.72265625
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        }
+      },
+      "cases": {
+        "typescript-25": {
+          "medianMs": 4.0989079999999944,
+          "p95Ms": 4.727712999999994,
+          "computeMedianMs": 3.644822,
+          "outputBytesMedian": 12884,
+          "inputBytesMedian": 1460
+        },
+        "typescript-1000": {
+          "medianMs": 125.67276399999992,
+          "p95Ms": 129.390037,
+          "computeMedianMs": 118.321498,
+          "outputBytesMedian": 514934,
+          "inputBytesMedian": 58910
+        },
+        "python-25": {
+          "medianMs": 2.123768000000041,
+          "p95Ms": 2.236564000000044,
+          "computeMedianMs": 1.927874,
+          "outputBytesMedian": 6407,
+          "inputBytesMedian": 1559
+        },
+        "python-1000": {
+          "medianMs": 84.55869099999995,
+          "p95Ms": 93.25728400000003,
+          "computeMedianMs": 80.152578,
+          "outputBytesMedian": 254957,
+          "inputBytesMedian": 62909
+        },
+        "bash-25": {
+          "medianMs": 1.693234000000075,
+          "p95Ms": 2.210939999999937,
+          "computeMedianMs": 1.30437,
+          "outputBytesMedian": 8008,
+          "inputBytesMedian": 784
+        },
+        "bash-1000": {
+          "medianMs": 37.87069900000006,
+          "p95Ms": 43.27127600000017,
+          "computeMedianMs": 32.517683,
+          "outputBytesMedian": 319933,
+          "inputBytesMedian": 31909
+        },
+        "rust-25": {
+          "medianMs": 1.7335379999999532,
+          "p95Ms": 2.383628999999928,
+          "computeMedianMs": 1.361788,
+          "outputBytesMedian": 6544,
+          "inputBytesMedian": 1624
+        },
+        "rust-1000": {
+          "medianMs": 53.56701100000009,
+          "p95Ms": 58.533575000000155,
+          "computeMedianMs": 50.188368,
+          "outputBytesMedian": 257044,
+          "inputBytesMedian": 64924
+        },
+        "real-typescript": {
+          "medianMs": 46.26220000000012,
+          "p95Ms": 47.845525999999836,
+          "computeMedianMs": 43.258159,
+          "outputBytesMedian": 147008,
+          "inputBytesMedian": 20028
+        }
+      },
+      "stream": {
+        "bash": {
+          "totalPerClientMedianMs": 79.6292119999996,
+          "updateMedianMs": 2.804309000000103,
+          "updateP95Ms": 4.724468999999999,
+          "computeMedianMs": 2.28136
+        },
+        "typescript-function": {
+          "totalPerClientMedianMs": 238.87960299999918,
+          "updateMedianMs": 8.14486399999987,
+          "updateP95Ms": 14.543382999999722,
+          "computeMedianMs": 7.544468
+        }
+      },
+      "statistics": [
+        [
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          }
+        ],
+        [
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          }
+        ],
+        [
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          }
+        ]
+      ]
+    },
+    "syntect/10": {
+      "node": "v22.19.0",
+      "memory": {
+        "baseline": {
+          "rss": {
+            "clientsMiB": 636.421875,
+            "serversMiB": 7.65234375,
+            "totalMiB": 644.07421875,
+            "aboveClientBaselineMiB": 7.65234375
+          },
+          "pss": {
+            "clientsMiB": 212.0654296875,
+            "serversMiB": 5.49609375,
+            "totalMiB": 217.5654296875,
+            "aboveClientBaselineMiB": 5.49609375
+          },
+          "private": {
+            "clientsMiB": 173.19921875,
+            "serversMiB": 5.48828125,
+            "totalMiB": 178.69140625,
+            "aboveClientBaselineMiB": 5.48828125
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "init": {
+          "rss": {
+            "clientsMiB": 637.890625,
+            "serversMiB": 15.08203125,
+            "totalMiB": 652.97265625,
+            "aboveClientBaselineMiB": 16.55078125
+          },
+          "pss": {
+            "clientsMiB": 212.9677734375,
+            "serversMiB": 12.7900390625,
+            "totalMiB": 225.7734375,
+            "aboveClientBaselineMiB": 13.7080078125
+          },
+          "private": {
+            "clientsMiB": 174.04296875,
+            "serversMiB": 12.78125,
+            "totalMiB": 186.83984375,
+            "aboveClientBaselineMiB": 13.640625
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "bench": {
+          "rss": {
+            "clientsMiB": 670.26171875,
+            "serversMiB": 25.48046875,
+            "totalMiB": 695.765625,
+            "aboveClientBaselineMiB": 59.91015625
+          },
+          "pss": {
+            "clientsMiB": 244.5537109375,
+            "serversMiB": 23.2001953125,
+            "totalMiB": 267.75390625,
+            "aboveClientBaselineMiB": 55.890625
+          },
+          "private": {
+            "clientsMiB": 205.5078125,
+            "serversMiB": 23.19140625,
+            "totalMiB": 228.69921875,
+            "aboveClientBaselineMiB": 55.69921875
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stream": {
+          "rss": {
+            "clientsMiB": 715.15234375,
+            "serversMiB": 25.48046875,
+            "totalMiB": 740.6328125,
+            "aboveClientBaselineMiB": 104.2109375
+          },
+          "pss": {
+            "clientsMiB": 289.1044921875,
+            "serversMiB": 23.2001953125,
+            "totalMiB": 312.30859375,
+            "aboveClientBaselineMiB": 100.2431640625
+          },
+          "private": {
+            "clientsMiB": 250.0546875,
+            "serversMiB": 23.19140625,
+            "totalMiB": 273.25,
+            "aboveClientBaselineMiB": 100.05078125
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stress": {
+          "rss": {
+            "clientsMiB": 880.17578125,
+            "serversMiB": 101.46875,
+            "totalMiB": 981.4296875,
+            "aboveClientBaselineMiB": 345.0078125
+          },
+          "pss": {
+            "clientsMiB": 452.68359375,
+            "serversMiB": 99.1611328125,
+            "totalMiB": 551.6611328125,
+            "aboveClientBaselineMiB": 339.595703125
+          },
+          "private": {
+            "clientsMiB": 413.390625,
+            "serversMiB": 99.15234375,
+            "totalMiB": 512.359375,
+            "aboveClientBaselineMiB": 339.16015625
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "release": {
+          "rss": {
+            "clientsMiB": 857.15234375,
+            "serversMiB": 101.53125,
+            "totalMiB": 958.46875,
+            "aboveClientBaselineMiB": 322.046875
+          },
+          "pss": {
+            "clientsMiB": 428.1279296875,
+            "serversMiB": 99.162109375,
+            "totalMiB": 527.10546875,
+            "aboveClientBaselineMiB": 315.0400390625
+          },
+          "private": {
+            "clientsMiB": 388.65234375,
+            "serversMiB": 99.15234375,
+            "totalMiB": 487.62109375,
+            "aboveClientBaselineMiB": 314.421875
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        }
+      },
+      "cases": {
+        "typescript-25": {
+          "medianMs": 27.100002999999987,
+          "p95Ms": 30.245945000000006,
+          "computeMedianMs": 2.728321,
+          "outputBytesMedian": 12884,
+          "inputBytesMedian": 1460
+        },
+        "typescript-1000": {
+          "medianMs": 1131.6157979999998,
+          "p95Ms": 1231.7686199999998,
+          "computeMedianMs": 106.515876,
+          "outputBytesMedian": 514934,
+          "inputBytesMedian": 58910
+        },
+        "python-25": {
+          "medianMs": 19.127105000000483,
+          "p95Ms": 24.98992999999973,
+          "computeMedianMs": 1.932641,
+          "outputBytesMedian": 6407,
+          "inputBytesMedian": 1559
+        },
+        "python-1000": {
+          "medianMs": 749.2278980000001,
+          "p95Ms": 779.0718099999995,
+          "computeMedianMs": 73.289738,
+          "outputBytesMedian": 254957,
+          "inputBytesMedian": 62909
+        },
+        "bash-25": {
+          "medianMs": 7.433144000000539,
+          "p95Ms": 77.34586800000034,
+          "computeMedianMs": 0.74875,
+          "outputBytesMedian": 8008,
+          "inputBytesMedian": 784
+        },
+        "bash-1000": {
+          "medianMs": 283.0599029999994,
+          "p95Ms": 359.8548840000003,
+          "computeMedianMs": 28.647439,
+          "outputBytesMedian": 319933,
+          "inputBytesMedian": 31909
+        },
+        "rust-25": {
+          "medianMs": 17.02058600000055,
+          "p95Ms": 155.85783400000037,
+          "computeMedianMs": 1.306683,
+          "outputBytesMedian": 6544,
+          "inputBytesMedian": 1624
+        },
+        "rust-1000": {
+          "medianMs": 462.0015480000002,
+          "p95Ms": 490.1554980000001,
+          "computeMedianMs": 47.389547,
+          "outputBytesMedian": 257044,
+          "inputBytesMedian": 64924
+        },
+        "real-typescript": {
+          "medianMs": 436.7528419999999,
+          "p95Ms": 483.77158099999906,
+          "computeMedianMs": 43.410429,
+          "outputBytesMedian": 147008,
+          "inputBytesMedian": 20028
+        }
+      },
+      "stream": {
+        "bash": {
+          "totalPerClientMedianMs": 660.9988270000067,
+          "updateMedianMs": 21.71636000000035,
+          "updateP95Ms": 38.75057700000252,
+          "computeMedianMs": 2.199189
+        },
+        "typescript-function": {
+          "totalPerClientMedianMs": 2299.99770799999,
+          "updateMedianMs": 67.62683599999946,
+          "updateP95Ms": 132.08661500000017,
+          "computeMedianMs": 6.993088
+        }
+      },
+      "statistics": [
+        [
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 1170,
+            "id": 1,
+            "ok": true,
+            "requests": 1171
+          }
+        ],
+        [
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 1170,
+            "id": 1,
+            "ok": true,
+            "requests": 1171
+          }
+        ],
+        [
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 1170,
+            "id": 1,
+            "ok": true,
+            "requests": 1171
+          }
+        ]
+      ]
+    },
+    "giallo/1": {
+      "node": "v22.19.0",
+      "memory": {
+        "baseline": {
+          "rss": {
+            "clientsMiB": 63.73046875,
+            "serversMiB": 31.84765625,
+            "totalMiB": 95.578125,
+            "aboveClientBaselineMiB": 31.84765625
+          },
+          "pss": {
+            "clientsMiB": 38.974609375,
+            "serversMiB": 29.6025390625,
+            "totalMiB": 68.5771484375,
+            "aboveClientBaselineMiB": 29.6025390625
+          },
+          "private": {
+            "clientsMiB": 18,
+            "serversMiB": 29.59375,
+            "totalMiB": 47.59375,
+            "aboveClientBaselineMiB": 29.59375
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "init": {
+          "rss": {
+            "clientsMiB": 63.875,
+            "serversMiB": 47.19140625,
+            "totalMiB": 111.06640625,
+            "aboveClientBaselineMiB": 47.3359375
+          },
+          "pss": {
+            "clientsMiB": 39.099609375,
+            "serversMiB": 44.9462890625,
+            "totalMiB": 84.0458984375,
+            "aboveClientBaselineMiB": 45.0712890625
+          },
+          "private": {
+            "clientsMiB": 18.09375,
+            "serversMiB": 44.9375,
+            "totalMiB": 63.03125,
+            "aboveClientBaselineMiB": 45.03125
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "bench": {
+          "rss": {
+            "clientsMiB": 72.65234375,
+            "serversMiB": 71.48828125,
+            "totalMiB": 144.00390625,
+            "aboveClientBaselineMiB": 80.0390625
+          },
+          "pss": {
+            "clientsMiB": 47.630859375,
+            "serversMiB": 69.2421875,
+            "totalMiB": 116.7646484375,
+            "aboveClientBaselineMiB": 77.7900390625
+          },
+          "private": {
+            "clientsMiB": 26.625,
+            "serversMiB": 69.234375,
+            "totalMiB": 95.75,
+            "aboveClientBaselineMiB": 77.75
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stream": {
+          "rss": {
+            "clientsMiB": 79.421875,
+            "serversMiB": 72.60546875,
+            "totalMiB": 152.15234375,
+            "aboveClientBaselineMiB": 88.578125
+          },
+          "pss": {
+            "clientsMiB": 54.400390625,
+            "serversMiB": 70.3681640625,
+            "totalMiB": 124.873046875,
+            "aboveClientBaselineMiB": 86.30859375
+          },
+          "private": {
+            "clientsMiB": 33.39453125,
+            "serversMiB": 70.359375,
+            "totalMiB": 103.87890625,
+            "aboveClientBaselineMiB": 86.26953125
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stress": {
+          "rss": {
+            "clientsMiB": 107.515625,
+            "serversMiB": 95.73828125,
+            "totalMiB": 203.28125,
+            "aboveClientBaselineMiB": 139.55078125
+          },
+          "pss": {
+            "clientsMiB": 82.462890625,
+            "serversMiB": 93.5,
+            "totalMiB": 176.5458984375,
+            "aboveClientBaselineMiB": 137.279296875
+          },
+          "private": {
+            "clientsMiB": 61.42578125,
+            "serversMiB": 93.4921875,
+            "totalMiB": 155.5,
+            "aboveClientBaselineMiB": 137.234375
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "release": {
+          "rss": {
+            "clientsMiB": 105.27734375,
+            "serversMiB": 95.80078125,
+            "totalMiB": 201.078125,
+            "aboveClientBaselineMiB": 137.50390625
+          },
+          "pss": {
+            "clientsMiB": 80.205078125,
+            "serversMiB": 93.5009765625,
+            "totalMiB": 173.7060546875,
+            "aboveClientBaselineMiB": 135.1416015625
+          },
+          "private": {
+            "clientsMiB": 59.1875,
+            "serversMiB": 93.4921875,
+            "totalMiB": 152.6796875,
+            "aboveClientBaselineMiB": 135.0703125
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        }
+      },
+      "cases": {
+        "typescript-25": {
+          "medianMs": 3.8276769999999942,
+          "p95Ms": 5.4577290000000005,
+          "computeMedianMs": 3.486683,
+          "outputBytesMedian": 14084,
+          "inputBytesMedian": 1460
+        },
+        "typescript-1000": {
+          "medianMs": 126.25086399999998,
+          "p95Ms": 127.88649199999998,
+          "computeMedianMs": 118.042552,
+          "outputBytesMedian": 562934,
+          "inputBytesMedian": 58910
+        },
+        "python-25": {
+          "medianMs": 3.2119649999999638,
+          "p95Ms": 3.45747300000005,
+          "computeMedianMs": 2.670108,
+          "outputBytesMedian": 5207,
+          "inputBytesMedian": 1559
+        },
+        "python-1000": {
+          "medianMs": 99.47782200000006,
+          "p95Ms": 104.96561700000007,
+          "computeMedianMs": 97.18834,
+          "outputBytesMedian": 206957,
+          "inputBytesMedian": 62909
+        },
+        "bash-25": {
+          "medianMs": 1.1778449999999339,
+          "p95Ms": 1.31345599999986,
+          "computeMedianMs": 1.039316,
+          "outputBytesMedian": 8008,
+          "inputBytesMedian": 784
+        },
+        "bash-1000": {
+          "medianMs": 51.44146499999988,
+          "p95Ms": 52.047000000000025,
+          "computeMedianMs": 47.536708,
+          "outputBytesMedian": 319933,
+          "inputBytesMedian": 31909
+        },
+        "rust-25": {
+          "medianMs": 3.1046570000000884,
+          "p95Ms": 3.310463000000027,
+          "computeMedianMs": 2.591482,
+          "outputBytesMedian": 14344,
+          "inputBytesMedian": 1624
+        },
+        "rust-1000": {
+          "medianMs": 92.54856099999984,
+          "p95Ms": 93.55542600000012,
+          "computeMedianMs": 85.910322,
+          "outputBytesMedian": 569044,
+          "inputBytesMedian": 64924
+        },
+        "real-typescript": {
+          "medianMs": 56.03690200000028,
+          "p95Ms": 56.75935799999979,
+          "computeMedianMs": 52.941594,
+          "outputBytesMedian": 149216,
+          "inputBytesMedian": 20028
+        }
+      },
+      "stream": {
+        "bash": {
+          "totalPerClientMedianMs": 130.23811199999818,
+          "updateMedianMs": 3.8689110000000255,
+          "updateP95Ms": 6.736533000000236,
+          "computeMedianMs": 3.42114
+        },
+        "typescript-function": {
+          "totalPerClientMedianMs": 322.25312199999917,
+          "updateMedianMs": 10.4271490000001,
+          "updateP95Ms": 17.625192999999854,
+          "computeMedianMs": 9.420544
+        }
+      },
+      "statistics": [
+        [
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          }
+        ],
+        [
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          }
+        ],
+        [
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          }
+        ]
+      ]
+    },
+    "giallo/10": {
+      "node": "v22.19.0",
+      "memory": {
+        "baseline": {
+          "rss": {
+            "clientsMiB": 635.9609375,
+            "serversMiB": 31.9140625,
+            "totalMiB": 667.82421875,
+            "aboveClientBaselineMiB": 31.9140625
+          },
+          "pss": {
+            "clientsMiB": 211.9169921875,
+            "serversMiB": 29.65234375,
+            "totalMiB": 241.6513671875,
+            "aboveClientBaselineMiB": 29.65234375
+          },
+          "private": {
+            "clientsMiB": 173.05078125,
+            "serversMiB": 29.64453125,
+            "totalMiB": 202.77734375,
+            "aboveClientBaselineMiB": 29.64453125
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "init": {
+          "rss": {
+            "clientsMiB": 637.5,
+            "serversMiB": 47.5859375,
+            "totalMiB": 685.0234375,
+            "aboveClientBaselineMiB": 49.09765625
+          },
+          "pss": {
+            "clientsMiB": 212.861328125,
+            "serversMiB": 45.33984375,
+            "totalMiB": 258.220703125,
+            "aboveClientBaselineMiB": 46.3037109375
+          },
+          "private": {
+            "clientsMiB": 173.9375,
+            "serversMiB": 45.33203125,
+            "totalMiB": 219.2890625,
+            "aboveClientBaselineMiB": 46.23828125
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "bench": {
+          "rss": {
+            "clientsMiB": 669.3046875,
+            "serversMiB": 81.63671875,
+            "totalMiB": 750.953125,
+            "aboveClientBaselineMiB": 114.96484375
+          },
+          "pss": {
+            "clientsMiB": 243.541015625,
+            "serversMiB": 79.375,
+            "totalMiB": 322.962890625,
+            "aboveClientBaselineMiB": 111.0458984375
+          },
+          "private": {
+            "clientsMiB": 204.4921875,
+            "serversMiB": 79.3671875,
+            "totalMiB": 283.90625,
+            "aboveClientBaselineMiB": 110.85546875
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stream": {
+          "rss": {
+            "clientsMiB": 759.0234375,
+            "serversMiB": 81.73046875,
+            "totalMiB": 840.69921875,
+            "aboveClientBaselineMiB": 204.82421875
+          },
+          "pss": {
+            "clientsMiB": 333.701171875,
+            "serversMiB": 79.46875,
+            "totalMiB": 413.169921875,
+            "aboveClientBaselineMiB": 200.8447265625
+          },
+          "private": {
+            "clientsMiB": 294.6640625,
+            "serversMiB": 79.4609375,
+            "totalMiB": 374.125,
+            "aboveClientBaselineMiB": 200.65625
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stress": {
+          "rss": {
+            "clientsMiB": 945.8046875,
+            "serversMiB": 172.8828125,
+            "totalMiB": 1118.80859375,
+            "aboveClientBaselineMiB": 482.8203125
+          },
+          "pss": {
+            "clientsMiB": 518.2431640625,
+            "serversMiB": 170.609375,
+            "totalMiB": 689.0205078125,
+            "aboveClientBaselineMiB": 477.103515625
+          },
+          "private": {
+            "clientsMiB": 478.94921875,
+            "serversMiB": 170.6015625,
+            "totalMiB": 649.71875,
+            "aboveClientBaselineMiB": 476.66796875
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "release": {
+          "rss": {
+            "clientsMiB": 935.0703125,
+            "serversMiB": 173.0078125,
+            "totalMiB": 1108.19921875,
+            "aboveClientBaselineMiB": 472.2109375
+          },
+          "pss": {
+            "clientsMiB": 505.861328125,
+            "serversMiB": 170.6728515625,
+            "totalMiB": 676.701171875,
+            "aboveClientBaselineMiB": 464.7841796875
+          },
+          "private": {
+            "clientsMiB": 466.38671875,
+            "serversMiB": 170.6640625,
+            "totalMiB": 637.21875,
+            "aboveClientBaselineMiB": 464.16796875
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        }
+      },
+      "cases": {
+        "typescript-25": {
+          "medianMs": 30.620711999999997,
+          "p95Ms": 33.584536000000014,
+          "computeMedianMs": 2.877892,
+          "outputBytesMedian": 14084,
+          "inputBytesMedian": 1460
+        },
+        "typescript-1000": {
+          "medianMs": 1127.787394,
+          "p95Ms": 1190.6870689999996,
+          "computeMedianMs": 110.44811,
+          "outputBytesMedian": 562934,
+          "inputBytesMedian": 58910
+        },
+        "python-25": {
+          "medianMs": 30.20017100000041,
+          "p95Ms": 30.82624399999986,
+          "computeMedianMs": 2.713955,
+          "outputBytesMedian": 5207,
+          "inputBytesMedian": 1559
+        },
+        "python-1000": {
+          "medianMs": 948.7301289999996,
+          "p95Ms": 979.5500360000005,
+          "computeMedianMs": 92.469756,
+          "outputBytesMedian": 206957,
+          "inputBytesMedian": 62909
+        },
+        "bash-25": {
+          "medianMs": 12.655133999998725,
+          "p95Ms": 142.1041920000007,
+          "computeMedianMs": 1.303524,
+          "outputBytesMedian": 8008,
+          "inputBytesMedian": 784
+        },
+        "bash-1000": {
+          "medianMs": 449.6444389999997,
+          "p95Ms": 464.99113599999873,
+          "computeMedianMs": 44.818549,
+          "outputBytesMedian": 319933,
+          "inputBytesMedian": 31909
+        },
+        "rust-25": {
+          "medianMs": 23.805763999998817,
+          "p95Ms": 124.62236299999859,
+          "computeMedianMs": 2.247893,
+          "outputBytesMedian": 14344,
+          "inputBytesMedian": 1624
+        },
+        "rust-1000": {
+          "medianMs": 902.3913079999984,
+          "p95Ms": 958.6852529999996,
+          "computeMedianMs": 89.461032,
+          "outputBytesMedian": 569044,
+          "inputBytesMedian": 64924
+        },
+        "real-typescript": {
+          "medianMs": 518.8311360000007,
+          "p95Ms": 624.1902850000006,
+          "computeMedianMs": 51.875936,
+          "outputBytesMedian": 149216,
+          "inputBytesMedian": 20028
+        }
+      },
+      "stream": {
+        "bash": {
+          "totalPerClientMedianMs": 936.9372539999968,
+          "updateMedianMs": 29.57340099999783,
+          "updateP95Ms": 56.92239899999913,
+          "computeMedianMs": 2.944673
+        },
+        "typescript-function": {
+          "totalPerClientMedianMs": 2470.219624999998,
+          "updateMedianMs": 69.46311500000229,
+          "updateP95Ms": 151.42997599999944,
+          "computeMedianMs": 7.380263
+        }
+      },
+      "statistics": [
+        [
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 1170,
+            "id": 1,
+            "ok": true,
+            "requests": 1171
+          }
+        ],
+        [
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 1170,
+            "id": 1,
+            "ok": true,
+            "requests": 1171
+          }
+        ],
+        [
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 1170,
+            "id": 1,
+            "ok": true,
+            "requests": 1171
+          }
+        ]
+      ]
+    },
+    "shiki/1": {
+      "node": "v22.19.0",
+      "memory": {
+        "baseline": {
+          "rss": {
+            "clientsMiB": 63.75390625,
+            "serversMiB": 76.30078125,
+            "totalMiB": 140.0859375,
+            "aboveClientBaselineMiB": 76.30078125
+          },
+          "pss": {
+            "clientsMiB": 31.7490234375,
+            "serversMiB": 44.0771484375,
+            "totalMiB": 75.826171875,
+            "aboveClientBaselineMiB": 44.0771484375
+          },
+          "private": {
+            "clientsMiB": 17.6015625,
+            "serversMiB": 29.8359375,
+            "totalMiB": 47.46875,
+            "aboveClientBaselineMiB": 29.8359375
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "init": {
+          "rss": {
+            "clientsMiB": 63.9140625,
+            "serversMiB": 98.1484375,
+            "totalMiB": 162.08984375,
+            "aboveClientBaselineMiB": 98.3046875
+          },
+          "pss": {
+            "clientsMiB": 31.86328125,
+            "serversMiB": 65.8525390625,
+            "totalMiB": 98.2099609375,
+            "aboveClientBaselineMiB": 65.966796875
+          },
+          "private": {
+            "clientsMiB": 17.69921875,
+            "serversMiB": 51.55859375,
+            "totalMiB": 69.28515625,
+            "aboveClientBaselineMiB": 51.65234375
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "bench": {
+          "rss": {
+            "clientsMiB": 69.9921875,
+            "serversMiB": 160.1015625,
+            "totalMiB": 229.87109375,
+            "aboveClientBaselineMiB": 166.109375
+          },
+          "pss": {
+            "clientsMiB": 38.8095703125,
+            "serversMiB": 127.8056640625,
+            "totalMiB": 165.5908203125,
+            "aboveClientBaselineMiB": 133.8564453125
+          },
+          "private": {
+            "clientsMiB": 23.78125,
+            "serversMiB": 113.51171875,
+            "totalMiB": 137.15625,
+            "aboveClientBaselineMiB": 119.5546875
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stream": {
+          "rss": {
+            "clientsMiB": 79.83203125,
+            "serversMiB": 163.82421875,
+            "totalMiB": 243.44921875,
+            "aboveClientBaselineMiB": 179.6640625
+          },
+          "pss": {
+            "clientsMiB": 47.931640625,
+            "serversMiB": 131.5283203125,
+            "totalMiB": 179.0751953125,
+            "aboveClientBaselineMiB": 147.326171875
+          },
+          "private": {
+            "clientsMiB": 33.62109375,
+            "serversMiB": 117.234375,
+            "totalMiB": 150.64453125,
+            "aboveClientBaselineMiB": 133.01171875
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stress": {
+          "rss": {
+            "clientsMiB": 91.14453125,
+            "serversMiB": 272.23828125,
+            "totalMiB": 362.8671875,
+            "aboveClientBaselineMiB": 299.140625
+          },
+          "pss": {
+            "clientsMiB": 59.2958984375,
+            "serversMiB": 240.5205078125,
+            "totalMiB": 300.4658203125,
+            "aboveClientBaselineMiB": 267.8779296875
+          },
+          "private": {
+            "clientsMiB": 44.87109375,
+            "serversMiB": 225.6484375,
+            "totalMiB": 270.37890625,
+            "aboveClientBaselineMiB": 252.80078125
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "release": {
+          "rss": {
+            "clientsMiB": 90.06640625,
+            "serversMiB": 272.23828125,
+            "totalMiB": 361.7890625,
+            "aboveClientBaselineMiB": 298.0625
+          },
+          "pss": {
+            "clientsMiB": 58.17578125,
+            "serversMiB": 240.509765625,
+            "totalMiB": 299.3359375,
+            "aboveClientBaselineMiB": 266.748046875
+          },
+          "private": {
+            "clientsMiB": 43.73046875,
+            "serversMiB": 225.6484375,
+            "totalMiB": 269.23828125,
+            "aboveClientBaselineMiB": 251.66015625
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        }
+      },
+      "cases": {
+        "typescript-25": {
+          "medianMs": 8.345503000000008,
+          "p95Ms": 10.81318600000003,
+          "computeMedianMs": 7.510985,
+          "outputBytesMedian": 14084,
+          "inputBytesMedian": 1460
+        },
+        "typescript-1000": {
+          "medianMs": 147.56437199999993,
+          "p95Ms": 151.79211799999996,
+          "computeMedianMs": 134.967488,
+          "outputBytesMedian": 562934,
+          "inputBytesMedian": 58910
+        },
+        "python-25": {
+          "medianMs": 3.970798000000059,
+          "p95Ms": 3.989573000000064,
+          "computeMedianMs": 3.35305,
+          "outputBytesMedian": 5207,
+          "inputBytesMedian": 1559
+        },
+        "python-1000": {
+          "medianMs": 117.80663600000003,
+          "p95Ms": 132.02344100000005,
+          "computeMedianMs": 113.735609,
+          "outputBytesMedian": 206957,
+          "inputBytesMedian": 62909
+        },
+        "bash-25": {
+          "medianMs": 1.884853000000021,
+          "p95Ms": 2.5425740000000587,
+          "computeMedianMs": 1.620024,
+          "outputBytesMedian": 8008,
+          "inputBytesMedian": 784
+        },
+        "bash-1000": {
+          "medianMs": 55.28657800000019,
+          "p95Ms": 66.36485599999992,
+          "computeMedianMs": 49.844187,
+          "outputBytesMedian": 319933,
+          "inputBytesMedian": 31909
+        },
+        "rust-25": {
+          "medianMs": 3.4379400000002533,
+          "p95Ms": 3.665768000000071,
+          "computeMedianMs": 2.940308,
+          "outputBytesMedian": 14344,
+          "inputBytesMedian": 1624
+        },
+        "rust-1000": {
+          "medianMs": 123.49981600000001,
+          "p95Ms": 132.49130999999988,
+          "computeMedianMs": 113.350058,
+          "outputBytesMedian": 569044,
+          "inputBytesMedian": 64924
+        },
+        "real-typescript": {
+          "medianMs": 62.63426199999958,
+          "p95Ms": 71.12025399999993,
+          "computeMedianMs": 58.786198,
+          "outputBytesMedian": 149216,
+          "inputBytesMedian": 20028
+        }
+      },
+      "stream": {
+        "bash": {
+          "totalPerClientMedianMs": 150.37599400000045,
+          "updateMedianMs": 4.344969000000219,
+          "updateP95Ms": 8.397950999999921,
+          "computeMedianMs": 3.781665
+        },
+        "typescript-function": {
+          "totalPerClientMedianMs": 346.2038699999989,
+          "updateMedianMs": 11.534353999999894,
+          "updateP95Ms": 18.95024400000011,
+          "computeMedianMs": 10.745025
+        }
+      },
+      "statistics": [
+        [
+          {
+            "id": 1,
+            "ok": true,
+            "requests": 123,
+            "highlights": 117,
+            "cacheHits": 0,
+            "cacheEntries": 0,
+            "cacheBytes": 0
+          }
+        ],
+        [
+          {
+            "id": 1,
+            "ok": true,
+            "requests": 123,
+            "highlights": 117,
+            "cacheHits": 0,
+            "cacheEntries": 0,
+            "cacheBytes": 0
+          }
+        ],
+        [
+          {
+            "id": 1,
+            "ok": true,
+            "requests": 123,
+            "highlights": 117,
+            "cacheHits": 0,
+            "cacheEntries": 0,
+            "cacheBytes": 0
+          }
+        ]
+      ]
+    },
+    "shiki/10": {
+      "node": "v22.19.0",
+      "memory": {
+        "baseline": {
+          "rss": {
+            "clientsMiB": 636.52734375,
+            "serversMiB": 76.67578125,
+            "totalMiB": 713.28125,
+            "aboveClientBaselineMiB": 76.67578125
+          },
+          "pss": {
+            "clientsMiB": 208.99609375,
+            "serversMiB": 33.9951171875,
+            "totalMiB": 243.07421875,
+            "aboveClientBaselineMiB": 33.9951171875
+          },
+          "private": {
+            "clientsMiB": 173.3125,
+            "serversMiB": 30.2734375,
+            "totalMiB": 203.63671875,
+            "aboveClientBaselineMiB": 30.2734375
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "init": {
+          "rss": {
+            "clientsMiB": 638.0078125,
+            "serversMiB": 100.1796875,
+            "totalMiB": 739.0859375,
+            "aboveClientBaselineMiB": 101.7890625
+          },
+          "pss": {
+            "clientsMiB": 209.9072265625,
+            "serversMiB": 57.44140625,
+            "totalMiB": 268.2021484375,
+            "aboveClientBaselineMiB": 58.4765625
+          },
+          "private": {
+            "clientsMiB": 174.16796875,
+            "serversMiB": 53.71484375,
+            "totalMiB": 228.73828125,
+            "aboveClientBaselineMiB": 54.69921875
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "bench": {
+          "rss": {
+            "clientsMiB": 672.40234375,
+            "serversMiB": 175.484375,
+            "totalMiB": 847.88671875,
+            "aboveClientBaselineMiB": 211.359375
+          },
+          "pss": {
+            "clientsMiB": 243.1748046875,
+            "serversMiB": 132.7197265625,
+            "totalMiB": 375.89453125,
+            "aboveClientBaselineMiB": 166.8984375
+          },
+          "private": {
+            "clientsMiB": 207.3125,
+            "serversMiB": 128.9296875,
+            "totalMiB": 336.2421875,
+            "aboveClientBaselineMiB": 162.9296875
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stream": {
+          "rss": {
+            "clientsMiB": 761.5703125,
+            "serversMiB": 177.6328125,
+            "totalMiB": 939.421875,
+            "aboveClientBaselineMiB": 302.89453125
+          },
+          "pss": {
+            "clientsMiB": 332.2998046875,
+            "serversMiB": 134.8681640625,
+            "totalMiB": 467.4296875,
+            "aboveClientBaselineMiB": 258.43359375
+          },
+          "private": {
+            "clientsMiB": 296.4375,
+            "serversMiB": 131.078125,
+            "totalMiB": 427.77734375,
+            "aboveClientBaselineMiB": 254.46484375
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stress": {
+          "rss": {
+            "clientsMiB": 907.51171875,
+            "serversMiB": 323.97265625,
+            "totalMiB": 1218.76953125,
+            "aboveClientBaselineMiB": 584.0078125
+          },
+          "pss": {
+            "clientsMiB": 476.6103515625,
+            "serversMiB": 281.1591796875,
+            "totalMiB": 746.017578125,
+            "aboveClientBaselineMiB": 537.7421875
+          },
+          "private": {
+            "clientsMiB": 440.50390625,
+            "serversMiB": 277.3828125,
+            "totalMiB": 706.1484375,
+            "aboveClientBaselineMiB": 533.58984375
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "release": {
+          "rss": {
+            "clientsMiB": 891.62890625,
+            "serversMiB": 323.97265625,
+            "totalMiB": 1208.12109375,
+            "aboveClientBaselineMiB": 573.359375
+          },
+          "pss": {
+            "clientsMiB": 459.00390625,
+            "serversMiB": 281.076171875,
+            "totalMiB": 733.5888671875,
+            "aboveClientBaselineMiB": 525.3134765625
+          },
+          "private": {
+            "clientsMiB": 422.79296875,
+            "serversMiB": 277.3203125,
+            "totalMiB": 693.5703125,
+            "aboveClientBaselineMiB": 521.01171875
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        }
+      },
+      "cases": {
+        "typescript-25": {
+          "medianMs": 30.020076000000017,
+          "p95Ms": 58.702518999999995,
+          "computeMedianMs": 3.017834,
+          "outputBytesMedian": 14084,
+          "inputBytesMedian": 1460
+        },
+        "typescript-1000": {
+          "medianMs": 1203.0955510000003,
+          "p95Ms": 1270.609137,
+          "computeMedianMs": 114.865415,
+          "outputBytesMedian": 562934,
+          "inputBytesMedian": 58910
+        },
+        "python-25": {
+          "medianMs": 26.67512600000009,
+          "p95Ms": 917.6632360000003,
+          "computeMedianMs": 2.841575,
+          "outputBytesMedian": 5207,
+          "inputBytesMedian": 1559
+        },
+        "python-1000": {
+          "medianMs": 917.0296800000015,
+          "p95Ms": 1155.320278000001,
+          "computeMedianMs": 114.762615,
+          "outputBytesMedian": 206957,
+          "inputBytesMedian": 62909
+        },
+        "bash-25": {
+          "medianMs": 124.10750999999982,
+          "p95Ms": 346.73567,
+          "computeMedianMs": 1.329908,
+          "outputBytesMedian": 8008,
+          "inputBytesMedian": 784
+        },
+        "bash-1000": {
+          "medianMs": 466.2636939999993,
+          "p95Ms": 795.5078709999998,
+          "computeMedianMs": 46.405988,
+          "outputBytesMedian": 319933,
+          "inputBytesMedian": 31909
+        },
+        "rust-25": {
+          "medianMs": 225.8995160000013,
+          "p95Ms": 447.5804850000004,
+          "computeMedianMs": 3.032969,
+          "outputBytesMedian": 14344,
+          "inputBytesMedian": 1624
+        },
+        "rust-1000": {
+          "medianMs": 1148.3575640000017,
+          "p95Ms": 1991.1900810000006,
+          "computeMedianMs": 113.634735,
+          "outputBytesMedian": 569044,
+          "inputBytesMedian": 64924
+        },
+        "real-typescript": {
+          "medianMs": 252.68567600000097,
+          "p95Ms": 871.3394800000024,
+          "computeMedianMs": 58.667188,
+          "outputBytesMedian": 149216,
+          "inputBytesMedian": 20028
+        }
+      },
+      "stream": {
+        "bash": {
+          "totalPerClientMedianMs": 933.3684060000087,
+          "updateMedianMs": 32.379485999997996,
+          "updateP95Ms": 116.13381899999877,
+          "computeMedianMs": 3.362211
+        },
+        "typescript-function": {
+          "totalPerClientMedianMs": 2124.140706000002,
+          "updateMedianMs": 51.729591999999684,
+          "updateP95Ms": 115.93803400000252,
+          "computeMedianMs": 7.387845
+        }
+      },
+      "statistics": [
+        [
+          {
+            "id": 1,
+            "ok": true,
+            "requests": 1176,
+            "highlights": 1170,
+            "cacheHits": 0,
+            "cacheEntries": 0,
+            "cacheBytes": 0
+          }
+        ],
+        [
+          {
+            "id": 1,
+            "ok": true,
+            "requests": 1176,
+            "highlights": 1170,
+            "cacheHits": 0,
+            "cacheEntries": 0,
+            "cacheBytes": 0
+          }
+        ],
+        [
+          {
+            "id": 1,
+            "ok": true,
+            "requests": 1176,
+            "highlights": 1170,
+            "cacheHits": 0,
+            "cacheEntries": 0,
+            "cacheBytes": 0
+          }
+        ]
+      ]
+    },
+    "giallo-sidecars/10": {
+      "node": "v22.19.0",
+      "memory": {
+        "baseline": {
+          "rss": {
+            "clientsMiB": 636.5390625,
+            "serversMiB": 319.015625,
+            "totalMiB": 955.703125,
+            "aboveClientBaselineMiB": 319.015625
+          },
+          "pss": {
+            "clientsMiB": 212.517578125,
+            "serversMiB": 269.3310546875,
+            "totalMiB": 481.8486328125,
+            "aboveClientBaselineMiB": 269.3310546875
+          },
+          "private": {
+            "clientsMiB": 173.5859375,
+            "serversMiB": 265.94921875,
+            "totalMiB": 439.55078125,
+            "aboveClientBaselineMiB": 265.94921875
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "init": {
+          "rss": {
+            "clientsMiB": 638.12890625,
+            "serversMiB": 473.046875,
+            "totalMiB": 1111.0546875,
+            "aboveClientBaselineMiB": 474.66796875
+          },
+          "pss": {
+            "clientsMiB": 213.541015625,
+            "serversMiB": 419.5537109375,
+            "totalMiB": 633.0947265625,
+            "aboveClientBaselineMiB": 420.5771484375
+          },
+          "private": {
+            "clientsMiB": 174.55078125,
+            "serversMiB": 415.66015625,
+            "totalMiB": 590.2109375,
+            "aboveClientBaselineMiB": 416.625
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "bench": {
+          "rss": {
+            "clientsMiB": 727.8515625,
+            "serversMiB": 715.60546875,
+            "totalMiB": 1443.40234375,
+            "aboveClientBaselineMiB": 806.86328125
+          },
+          "pss": {
+            "clientsMiB": 302.078125,
+            "serversMiB": 662.1787109375,
+            "totalMiB": 964.2568359375,
+            "aboveClientBaselineMiB": 751.7392578125
+          },
+          "private": {
+            "clientsMiB": 262.96484375,
+            "serversMiB": 658.28515625,
+            "totalMiB": 921.25,
+            "aboveClientBaselineMiB": 747.6640625
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stream": {
+          "rss": {
+            "clientsMiB": 813.96484375,
+            "serversMiB": 727.3671875,
+            "totalMiB": 1541.2890625,
+            "aboveClientBaselineMiB": 904.75
+          },
+          "pss": {
+            "clientsMiB": 388.19140625,
+            "serversMiB": 673.9521484375,
+            "totalMiB": 1062.1435546875,
+            "aboveClientBaselineMiB": 849.6259765625
+          },
+          "private": {
+            "clientsMiB": 349.078125,
+            "serversMiB": 670.05859375,
+            "totalMiB": 1019.13671875,
+            "aboveClientBaselineMiB": 845.55078125
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "stress": {
+          "rss": {
+            "clientsMiB": 1052.0078125,
+            "serversMiB": 960.2421875,
+            "totalMiB": 2011.18359375,
+            "aboveClientBaselineMiB": 1376.37890625
+          },
+          "pss": {
+            "clientsMiB": 625.2919921875,
+            "serversMiB": 906.732421875,
+            "totalMiB": 1531.0947265625,
+            "aboveClientBaselineMiB": 1320.267578125
+          },
+          "private": {
+            "clientsMiB": 586.05859375,
+            "serversMiB": 902.87109375,
+            "totalMiB": 1487.96875,
+            "aboveClientBaselineMiB": 1316.10546875
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        },
+        "release": {
+          "rss": {
+            "clientsMiB": 1039.6484375,
+            "serversMiB": 961.2421875,
+            "totalMiB": 2000.890625,
+            "aboveClientBaselineMiB": 1364.8671875
+          },
+          "pss": {
+            "clientsMiB": 611.5341796875,
+            "serversMiB": 906.7763671875,
+            "totalMiB": 1518.310546875,
+            "aboveClientBaselineMiB": 1306.1669921875
+          },
+          "private": {
+            "clientsMiB": 572.1875,
+            "serversMiB": 902.88671875,
+            "totalMiB": 1475.07421875,
+            "aboveClientBaselineMiB": 1301.73046875
+          },
+          "swapPss": {
+            "clientsMiB": 0,
+            "serversMiB": 0,
+            "totalMiB": 0,
+            "aboveClientBaselineMiB": 0
+          }
+        }
+      },
+      "cases": {
+        "typescript-25": {
+          "medianMs": 6.640971000000036,
+          "p95Ms": 8.34499100000005,
+          "computeMedianMs": 5.963927,
+          "outputBytesMedian": 14084,
+          "inputBytesMedian": 1460
+        },
+        "typescript-1000": {
+          "medianMs": 210.53218000000004,
+          "p95Ms": 236.1258580000001,
+          "computeMedianMs": 199.828169,
+          "outputBytesMedian": 562934,
+          "inputBytesMedian": 58910
+        },
+        "python-25": {
+          "medianMs": 5.020541999999978,
+          "p95Ms": 9.122043000000076,
+          "computeMedianMs": 4.466385,
+          "outputBytesMedian": 5207,
+          "inputBytesMedian": 1559
+        },
+        "python-1000": {
+          "medianMs": 154.82742200000007,
+          "p95Ms": 175.29743899999994,
+          "computeMedianMs": 152.078199,
+          "outputBytesMedian": 206957,
+          "inputBytesMedian": 62909
+        },
+        "bash-25": {
+          "medianMs": 2.7431839999999283,
+          "p95Ms": 4.888261999999941,
+          "computeMedianMs": 2.289448,
+          "outputBytesMedian": 8008,
+          "inputBytesMedian": 784
+        },
+        "bash-1000": {
+          "medianMs": 83.048002,
+          "p95Ms": 105.81870400000025,
+          "computeMedianMs": 77.361023,
+          "outputBytesMedian": 319933,
+          "inputBytesMedian": 31909
+        },
+        "rust-25": {
+          "medianMs": 5.087465999999949,
+          "p95Ms": 6.631718000000092,
+          "computeMedianMs": 4.667955,
+          "outputBytesMedian": 14344,
+          "inputBytesMedian": 1624
+        },
+        "rust-1000": {
+          "medianMs": 167.8439169999997,
+          "p95Ms": 183.7906380000004,
+          "computeMedianMs": 157.298009,
+          "outputBytesMedian": 569044,
+          "inputBytesMedian": 64924
+        },
+        "real-typescript": {
+          "medianMs": 81.28022899999996,
+          "p95Ms": 111.56130400000029,
+          "computeMedianMs": 77.095879,
+          "outputBytesMedian": 149216,
+          "inputBytesMedian": 20028
+        }
+      },
+      "stream": {
+        "bash": {
+          "totalPerClientMedianMs": 192.38051399999586,
+          "updateMedianMs": 5.77845200000047,
+          "updateP95Ms": 11.862894000000779,
+          "computeMedianMs": 5.137765
+        },
+        "typescript-function": {
+          "totalPerClientMedianMs": 463.72326200000043,
+          "updateMedianMs": 13.248209000000315,
+          "updateP95Ms": 27.969027999999525,
+          "computeMedianMs": 12.414173
+        }
+      },
+      "statistics": [
+        [
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          }
+        ],
+        [
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          }
+        ],
+        [
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          },
+          {
+            "cacheBytes": 0,
+            "cacheEntries": 0,
+            "cacheHits": 0,
+            "highlights": 117,
+            "id": 1,
+            "ok": true,
+            "requests": 118
+          }
+        ]
+      ]
+    }
+  },
+  "controls": {
+    "tree": {
+      "echoMedianMs": 0.2831030000000112,
+      "echoP95Ms": 0.3332510000000184,
+      "sharedCacheComputes": 1,
+      "sharedCacheHits": 9,
+      "zeroComputeHits": 20,
+      "sourceExactLF": true,
+      "special": [
+        {
+          "source": "",
+          "ok": true
+        },
+        {
+          "source": "\n\n",
+          "ok": true
+        },
+        {
+          "source": "const x = \"😀 é 中文\";\n",
+          "ok": true
+        },
+        {
+          "source": "const x = 1;\r\nconst y = 2;\r\n",
+          "ok": true
+        }
+      ],
+      "initializationMs": 53.049366
+    },
+    "syntect": {
+      "echoMedianMs": 0.29322100000001683,
+      "echoP95Ms": 0.5387329999999793,
+      "sharedCacheComputes": 1,
+      "sharedCacheHits": 9,
+      "zeroComputeHits": 20,
+      "sourceExactLF": true,
+      "special": [
+        {
+          "source": "",
+          "ok": true
+        },
+        {
+          "source": "\n\n",
+          "ok": true
+        },
+        {
+          "source": "const x = \"😀 é 中文\";\n",
+          "ok": true
+        },
+        {
+          "source": "const x = 1;\r\nconst y = 2;\r\n",
+          "ok": true
+        }
+      ],
+      "initializationMs": 2.419025
+    },
+    "giallo": {
+      "echoMedianMs": 0.22093200000006163,
+      "echoP95Ms": 0.3194310000000087,
+      "sharedCacheComputes": 1,
+      "sharedCacheHits": 9,
+      "zeroComputeHits": 20,
+      "sourceExactLF": true,
+      "special": [
+        {
+          "source": "",
+          "ok": true
+        },
+        {
+          "source": "\n\n",
+          "ok": true
+        },
+        {
+          "source": "const x = \"😀 é 中文\";\n",
+          "ok": true
+        },
+        {
+          "source": "const x = 1;\r\nconst y = 2;\r\n",
+          "ok": false,
+          "error": "giallo_normalized_line_endings"
+        }
+      ],
+      "initializationMs": 33.640899000000005
+    },
+    "shiki": {
+      "echoMedianMs": 0.30629399999997986,
+      "echoP95Ms": 0.3973279999997885,
+      "sharedCacheComputes": 1,
+      "sharedCacheHits": 9,
+      "zeroComputeHits": 20,
+      "sourceExactLF": true,
+      "special": [
+        {
+          "source": "",
+          "ok": true
+        },
+        {
+          "source": "\n\n",
+          "ok": true
+        },
+        {
+          "source": "const x = \"😀 é 中文\";\n",
+          "ok": true
+        },
+        {
+          "source": "const x = 1;\r\nconst y = 2;\r\n",
+          "ok": true
+        }
+      ],
+      "initializationMs": 67.953256
+    }
+  }
+}
