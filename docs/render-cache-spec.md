@@ -10,6 +10,10 @@ Two independent LRU pools retain custom layouts: ordinary views default to 8 MiB
 
 Cache hits are not free whole-document frames: Pi still assembles/traverses its transcript, unknown self renderers may perform native visibility work, and separator/spinner composition may allocate arrays. Native updates, edit preflight and selection rendering also remain host work. Cold/width/theme builds prepare full required content by design; no off-screen/source-context shortcut or total-process-memory guarantee is implied. See [architecture](architecture.md#cache-separation-and-animation) for the common rendering boundaries.
 
+### Terminal-default projection
+
+Terminal-color synchronization has one latest requested/reported numeric snapshot and one concrete-color projection, outside both LRU pools. It retains no tool/editor owner or width history. Native theme revisions and explicit retries queue source work outside render; unchanged ordinary/Working frames repeat no source read/report/projection/output. Local off stops metadata/application but can sample released profile RGB for remaining cards. Automatic mode adds no feature reports. The zero-row observer and one-shot public query deadlines are not a repeating clock. See the [terminal-color contract](terminal-colors-spec.md).
+
 ### Main input exclusion
 
 The stock main editor is not a transcript-layout cache consumer. Each render projects already-rendered native visible rows into the shared user frame; no draft strings, paste maps, providers or editor layouts enter either LRU. Its weak adapter metadata records only current native width/mouse offset and a call-local border packet. Native wrapping/rendering and working-status animation remain host work; no Toolview editor timer, invalidation subscription or warm-frame zero-work claim is introduced. Off/on preserves the same edit engine rather than exchanging text with a replacement. See the [editor contract](card-frame-spec.md#main-input-editor).

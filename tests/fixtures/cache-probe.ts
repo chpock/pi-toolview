@@ -1,14 +1,15 @@
 // Isolated actual-SDK work/ownership oracle; no real tools or user settings are touched.
 import assert from "node:assert/strict";
 import { stripVTControlCharacters } from "node:util";
-import { Container, ScrollView, Spacer, Text } from "@earendil-works/pi-tui";
+import { Container, ScrollView, Spacer, Text, colorToHex } from "@earendil-works/pi-tui";
 import { renderLayoutFrame } from "../../node_modules/@earendil-works/pi-tui/dist/layout.js";
 import { ToolExecutionComponent } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/tool-execution.js";
 import { UserMessageComponent } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/user-message.js";
 import { initTheme, theme } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
-import toolview, { installToolview } from "../../src/index.ts";
+import toolview, { installToolview, terminalAppearanceTracking } from "../../src/index.ts";
+import { TerminalColors, terminalColorExit } from "../../src/terminal-colors.ts";
 import { InteractiveMode } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js";
-import { CustomEditor, getSelectListTheme, createWriteToolDefinition, SessionManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { CustomEditor, Theme, getSelectListTheme, createWriteToolDefinition, SessionManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 initTheme("dark", false);
 class Root extends Container { requestRender() {} }
@@ -204,5 +205,38 @@ try {
       assert.equal(reference.deref(), undefined, "active runtime/events/next footer must not retain the first public footer component");
       observations.push({ firstFooterCollected: true });
     } finally { for (const callback of handlers.get("session_shutdown") ?? []) callback({}, footerContext); }
+    let lateColorReport: ((colors: { foreground: { r: number; g: number; b: number } }) => void) | undefined;
+    const pendingColorReport = new Promise<never>(() => {});
+    const gcBackgroundRoles = new Set(["selectedBg", "searchMatchBg", "userMessageBg", "customMessageBg", "toolPendingBg", "toolSuccessBg", "toolErrorBg"]);
+    const gcForeground: Record<string, string> = {}, gcBackground: Record<string, string> = {};
+    for (const [role, color] of Object.entries(theme.colors)) (gcBackgroundRoles.has(role) ? gcBackground : gcForeground)[role] = colorToHex(color);
+    gcForeground.text = ""; gcBackground.userMessageBg = "";
+    const colorTheme = new Theme(gcForeground as ConstructorParameters<typeof Theme>[0], gcBackground as ConstructorParameters<typeof Theme>[1], "truecolor", { name: "gc-colors", sourcePath: "/fixture.json" });
+    function colorActor(owner: Root & { terminalColorSchemeNotificationsEnabled: boolean }) {
+      return new TerminalColors({
+        snapshot: () => ({ enabled: true, automatic: terminalAppearanceTracking(owner), configured: "gc-colors", theme: colorTheme }),
+        source: () => "/fixture.json", read: () => '{"colors":{"text":""},"export":{"pageBg":"#123456"}}',
+        write() { owner.requestRender(); }, changed() { owner.requestRender(); },
+        query(callback) { lateColorReport = callback; return pendingColorReport; },
+      });
+    }
+    const retireColorActor = async () => {
+      let owner: (Root & { terminalColorSchemeNotificationsEnabled: boolean }) | undefined = Object.assign(new Root(), { terminalColorSchemeNotificationsEnabled: false });
+      let actor: TerminalColors | undefined = colorActor(owner);
+      const ownerReference = new WeakRef(owner), actorReference = new WeakRef(actor);
+      const exit = terminalColorExit(actorReference); process.on("exit", exit);
+      actor.observe(); await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(actor.stats().reports, 1, "the weak async path is genuinely active before collection");
+      actor.dispose(); actor = undefined; owner = undefined;
+      return { ownerReference, actorReference, exit };
+    };
+    const retired = await retireColorActor();
+    try {
+      for (let i = 0; i < 12; i++) { await new Promise<void>(resolve => setImmediate(resolve)); globalThis.gc!(); }
+      assert.equal(retired.actorReference.deref(), undefined, "pending report and exit listener do not root a retired controller");
+      assert.equal(retired.ownerReference.deref(), undefined, "weak callbacks do not retain its UI owner through host closures");
+      lateColorReport!({ foreground: { r: 1, g: 2, b: 3 } }); retired.exit();
+      observations.push({ retiredColorActorCollected: true, retiredColorOwnerCollected: true });
+    } finally { process.off("exit", retired.exit); }
     console.log(JSON.stringify(observations));
 } finally { controller.restore(); Intl.Segmenter.prototype.segment = original; }

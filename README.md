@@ -49,6 +49,7 @@ Pi loads the TypeScript source directly. No build, fork, copying into `~/.pi`, o
 - Consecutive single-row summaries are adjacent; a wrapped summary introduces one blank row before the following tool. Pi's **Output padding** (0 or 1, default 1) sets the exterior left/right margins of transcript summaries, Bash/edit/write cards and user messages, immediately without reload. Cards retain one fixed interior column per side, a left-only stripe and no hover paint. Output padding does not change Editor padding, the input/status panel or the footer.
 - Ctrl+O remains Pi's global expansion control. In fullscreen mode, completed summaries/edit/write panels expand on click and expandable Bash panels toggle; exterior margins/separators are not targets. Card clicks do not interrupt active selection. Regular mode uses terminal-owned mouse handling, so use Ctrl+O there.
 - One public session footer shows input/output totals, current context count/window/percent, cache read/write and hit rate, cost/subscription, then right-aligned extension statuses. Cwd/branch and model/provider/thinking are omitted there. Indicators/numbers use separate theme roles; CH and context percentages retain their specified effectiveness/fullness colors. Whole statuses move to later rows when needed; only a status wider than a full row is ellipsized, never internally wrapped. Left metric overflow wraps instead of hiding numbers. See the [footer contract](docs/footer-spec.md).
+- Fixed file-backed themes can set terminal defaults from `export.pageBg` and `colors.text`, including variable chains and native color formats. Missing/empty values release only our channels; source errors retain the last valid complete targets. Auto/system modes suspend application and release defaults before Pi queries its profile. A zero-row observer follows native theme/hot-reload updates without polling. RGB calculations use a local concrete projection rather than modifying Pi's Theme. See the [terminal-color contract](docs/terminal-colors-spec.md).
 - Colors follow the active Pi theme and layouts follow the actual viewport width. Tool execution, model-facing results and saved session data are unchanged.
 
 Exact formatting, metadata, geometry and safeguards are defined in the [specifications](#documentation).
@@ -59,6 +60,9 @@ Exact formatting, metadata, geometry and safeguards are defined in the [specific
 /toolview status
 /toolview off
 /toolview on
+/toolview colors status
+/toolview colors off
+/toolview colors on
 /toolview cache
 /toolview cache clear
 /toolview cache limit 4
@@ -78,6 +82,8 @@ Card pressure cannot evict ordinary views. Each component keeps only its latest 
 
 Budgets estimate retained custom data, not upfront allocation or total process memory. Oversized entries are not retained. Reported heap usage is **whole Pi process**, not Toolview. Native host work and transient formatting remain outside these budgets; see the [cache contract](docs/render-cache-spec.md).
 
+`/toolview colors off` stops terminal-default application and theme reads without disabling cards. Remaining presentation can make a one-shot profile RGB query after releasing colors. On retries the current source; global on respects local off. Reload enables the feature again. Releases restore terminal **profile defaults**, not another application's prior dynamic override. Disable the old standalone `theme-background` extension manually: concurrent default-color writers are unsupported.
+
 Controls apply to the current extension runtime only. Disabling restores the original presentation methods, including the editor, without transferring its draft; re-enabling covers existing and future components. Reload creates a fresh enabled runtime.
 
 Use exact, case-sensitive tool names to customize the presentation for one invocation:
@@ -95,9 +101,9 @@ The supported/tested host is **Pi 1.0.0**. One adapter obtains the stable TUI re
 
 This is intentionally a compatibility-sensitive integration. If the inspected component contract cannot be established, Toolview warns and retains native rendering. Runtime restoration does not overwrite hooks subsequently replaced by another extension. Arbitrary extensions wrapping the same private methods and future Pi versions are not guaranteed compatible; run the terminal checks after upgrading.
 
-**Main-input styling is stock-editor-only.** If another extension installs or replaces its own editor (for example, `pi-powerline-footer`), Toolview leaves that editor and its appearance under the owning extension's control. It does not disable the extension or replace its editing behavior. This ownership limitation also disables Toolview's session footer, restoring stock only while we own that slot. Tool and user-message cards retain their own eligibility safeguards. After the stock editor returns, `/toolview on` or reload reinstalls the footer; an ineligible editor cannot reclaim it. Footer-only extensions do not block input styling. Footer replacements instead compete for Pi's single footer slot: the last owner wins. Off restores stock only while Toolview still owns it, never removes a later owner, and cannot restore a previous foreign footer. Publishers using `setStatus` coexist through the shared status map. See the [editor contract](docs/card-frame-spec.md#main-input-editor).
+**Main-input styling is stock-editor-only.** If another extension installs or replaces its own editor (for example, `pi-powerline-footer`), Toolview leaves that editor and its appearance under the owning extension's control. It does not disable the extension or replace its editing behavior. This ownership limitation also disables Toolview's session footer, restoring stock only while we own that slot. Tool and user-message cards retain their own eligibility safeguards. Terminal-default synchronization is global and remains independent of editor/footer ownership. After the stock editor returns, `/toolview on` or reload reinstalls the footer; an ineligible editor cannot reclaim it. Footer-only extensions do not block input styling. Footer replacements instead compete for Pi's single footer slot: the last owner wins. Off restores stock only while Toolview still owns it, never removes a later owner, and cannot restore a previous foreign footer. Publishers using `setStatus` coexist through the shared status map. See the [editor contract](docs/card-frame-spec.md#main-input-editor).
 
-The extension is inactive in print, JSON, and RPC modes. Presentation changes are limited to interactive terminal tools, ordinary user messages, the stock main editor and the session footer, not HTML exports or standalone user shell messages.
+The extension is inactive in print, JSON, and RPC modes. Component restyling applies to interactive terminal tools, ordinary user messages, the stock main editor and the session footer, not HTML exports or standalone user shell messages. Terminal defaults affect the shared terminal. Their eligibility additionally depends on one guarded native renderer flag; missing/incompatible state disables only this feature with a warning.
 
 ## Development
 
@@ -122,6 +128,7 @@ The installed-package smoke test is version-audited and explicitly skips unavail
 - [Edit card specification](docs/edit-card-spec.md) — persisted metadata, syntax, diff format and lifecycle.
 - [Write card specification](docs/write-card-spec.md) — source classification, numbered plain/diff bodies and fallbacks.
 - [Shared frame specification](docs/card-frame-spec.md) — geometry, paint, user cards, main input and click bounds.
+- [Terminal-color specification](docs/terminal-colors-spec.md) — fixed-theme metadata, automatic-mode boundaries, OSC ownership and concrete RGB.
 - [Session-footer specification](docs/footer-spec.md) — native usage/context data, colors, whole-status fitting and ownership.
 - [Render-cache specification](docs/render-cache-spec.md) — invalidation, memory pools, controls and performance guarantees.
 - [Testing and coverage](docs/testing.md) — automated gates, strict native/data controls and coverage limits.

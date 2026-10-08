@@ -10,10 +10,17 @@ import { cardGeometry, insidePanel } from "./card-frame.ts";
 import { renderEditorStatus, type EditorStatusInfo } from "./editor-status.ts";
 import { GitBranchSource } from "./git-branch.ts";
 import { FooterView, footerUsage, type FooterData } from "./footer.ts";
+import { TerminalColors, terminalColorExit } from "./terminal-colors.ts";
 import type { CardTheme } from "./card-theme.ts";
 import { RenderCache, type CacheEntry, type CacheStats } from "./render-cache.ts";
 import { argumentParts, summaryName } from "./summary-args.ts";
 export { describeArgs, sanitize } from "./summary-args.ts";
+let terminalColorDebug: WeakRef<TerminalColors> | undefined;
+/** Primitive current-instance counters for controlled CLI diagnostics; no retained owner. */
+export function terminalColorDiagnostics() {
+  const view = terminalColorDebug?.deref();
+  return view ? { status: view.status(), counters: view.stats() } : undefined;
+}
 
 /** The private contract verified against Pi 1.0.0; never import a second internal class. */
 interface ToolNode extends Component {
@@ -60,6 +67,13 @@ type LiveTui = Component & {
   setFocus?(component: Component | null): void;
 };
 type Palette = CardTheme;
+/** Approved one-field read; never infer absence/unknown shape as fixed mode. */
+export function terminalAppearanceTracking(tui: object): boolean | undefined {
+  try {
+    const value: unknown = Reflect.get(tui, "terminalColorSchemeNotificationsEnabled");
+    return typeof value === "boolean" ? value : undefined;
+  } catch { return undefined; }
+}
 type Render = (this: ToolNode, width: number) => string[];
 type Mouse = (this: ToolNode, event: TuiMouseEvent) => TuiMouseEventResult | undefined;
 
@@ -973,8 +987,46 @@ export default function toolview(pi: ExtensionAPI) {
     return value;
   }
   let controller: ToolviewController | undefined;
-  let enabled = true;
+  let enabled = true, colorsEnabled = true;
   let liveContext: ExtensionContext | undefined;
+  let colors: TerminalColors | undefined;
+  let colorExit: (() => void) | undefined;
+  const colorWidget = "pi-toolview-terminal-colors";
+  function stopColors() {
+    const previous = colors; colors = undefined;
+    if (colorExit) process.off("exit", colorExit);
+    colorExit = undefined;
+    previous?.dispose();
+    if (previous) liveContext?.ui.setWidget(colorWidget, undefined);
+  }
+  function startColors(ctx: ExtensionContext) {
+    if (!enabled || ctx.mode !== "tui") return;
+    if (colors) { colors.observe(); return; }
+    ctx.ui.setWidget(colorWidget, tui => {
+      const reference = new WeakRef(tui);
+      const view = new TerminalColors({
+        snapshot() {
+          const current = liveContext!;
+          return { enabled: enabled && colorsEnabled && current?.mode === "tui", presenting: enabled && current?.mode === "tui", theme: current.ui.theme,
+            configured: pi.getSettings().theme, automatic: reference.deref() ? terminalAppearanceTracking(reference.deref()!) : undefined };
+        },
+        source: name => name ? liveContext?.ui.getAllThemes?.().find(item => item.name === name)?.path : undefined,
+        write: data => {
+          const terminal = reference.deref()?.terminal;
+          if (!terminal || typeof terminal.write !== "function") throw new Error("Terminal writer unavailable");
+          terminal.write(data);
+        },
+        query: late => reference.deref()?.queryTerminalColors({ timeoutMs: 100, onLateReply: late }) ?? Promise.resolve({}),
+        changed: () => reference.deref()?.requestRender(),
+        warn: message => liveContext?.ui.notify(`Pi Toolview colors: ${message}`, "warning"),
+      });
+      colors = view; terminalColorDebug = new WeakRef(view);
+      if (colorsEnabled) { colorExit = terminalColorExit(new WeakRef(view)); process.on("exit", colorExit); }
+      view.observe();
+      return { render() { if (colors === view) view.observe(); return []; }, invalidate() { if (colors === view) view.observe(); } };
+    }, { placement: "belowEditor" });
+  }
+  const palette = () => colors?.palette(liveContext!.ui.theme) ?? liveContext!.ui.theme;
   let directorySource: GitBranchSource | undefined;
   let ownedFooter: FooterView | undefined;
   let footerEpoch = 0;
@@ -1042,6 +1094,7 @@ export default function toolview(pi: ExtensionAPI) {
     footerEpoch++;
     directorySource?.refresh(true);
     if (ctx.mode !== "tui" || !enabled) return;
+    startColors(ctx);
     if (controller?.active) { startFooter(ctx); return; }
     if (cacheMiB === undefined) {
       try { cacheMiB = cacheLimit(String(pi.getFlag("toolview-cache-mb") ?? "8")); }
@@ -1057,7 +1110,7 @@ export default function toolview(pi: ExtensionAPI) {
       const slot = tui.children.length === 7 ? tui.children[6] : undefined;
       if (ctx.ui.getEditorComponent() === undefined && slot instanceof Container && slot.children.length === 1)
         pendingFooter = { slot: new WeakRef(slot), owner: new WeakRef(slot.children[0]!) };
-      controller = installToolview(tui, () => ctx.ui.theme, {
+      controller = installToolview(tui, palette, {
         cards: names("toolview-card"), compact: names("toolview-compact"), cacheMiB, cardCacheMiB,
         outputPad: () => pi.getSettings().outputPad ?? 1,
         nativeEditor: () => liveContext?.ui.getEditorComponent() === undefined,
@@ -1102,13 +1155,31 @@ export default function toolview(pi: ExtensionAPI) {
   pi.on("tool_execution_end", refreshDirectory);
   pi.on("agent_end", refreshDirectory);
   pi.on("session_start", (_event, ctx) => start(ctx));
-  pi.on("session_shutdown", (_event, ctx) => { liveContext = ctx; pendingFooter = undefined; restoreFooter(); controller?.restore(); controller = undefined; liveContext = undefined; });
+  pi.on("session_shutdown", (_event, ctx) => { liveContext = ctx; pendingFooter = undefined; stopColors(); restoreFooter(); controller?.restore(); controller = undefined; liveContext = undefined; });
   pi.registerCommand("toolview", {
-    description: "Control tool presentation and bounded render cache: on, off, status, cache",
+    description: "Control presentation, terminal colors and bounded render cache: on, off, status, colors, cache",
     handler: async (args, ctx) => {
       liveContext = ctx;
       const command = args.trim() || "status";
       const words = command.split(/\s+/u);
+      if (words[0] === "colors") {
+        const action = words[1] ?? "status";
+        if (words.length > 2 || !["on", "off", "status"].includes(action)) {
+          ctx.ui.notify("Usage: /toolview colors on|off|status", "warning"); return;
+        }
+        if (action === "off") {
+          colorsEnabled = false; colors?.observe();
+          if (colorExit) process.off("exit", colorExit); colorExit = undefined;
+        } else if (action === "on") {
+          colorsEnabled = true;
+          if (colors) {
+            if (!colorExit) { colorExit = terminalColorExit(new WeakRef(colors)); process.on("exit", colorExit); }
+            colors.observe(true);
+          } else startColors(ctx);
+        }
+        const state = !enabled ? "off (Toolview off)" : !colorsEnabled ? "off" : ctx.mode !== "tui" ? "unavailable outside terminal mode" : colors?.status().state ?? "starting";
+        ctx.ui.notify(`Pi Toolview colors: ${state}`, "info"); return;
+      }
       if (words[0] === "cache") {
         if (!controller || ctx.mode !== "tui") { ctx.ui.notify("Pi Toolview cache: unavailable outside an initialized terminal runtime", "info"); return; }
         if (words.length === 2 && words[1] === "clear") controller.clearCache();
@@ -1125,9 +1196,9 @@ export default function toolview(pi: ExtensionAPI) {
           processHeapUsedBytes: process.memoryUsage().heapUsed, processMemoryScope: "whole Pi process, not Toolview" })}`, "info");
         return;
       }
-      if (command === "off") { enabled = false; pendingFooter = undefined; restoreFooter(); controller?.restore(); }
+      if (command === "off") { enabled = false; pendingFooter = undefined; stopColors(); restoreFooter(); controller?.restore(); }
       else if (command === "on") { enabled = true; start(ctx); }
-      else if (command !== "status") { ctx.ui.notify("Usage: /toolview on|off|status|cache [clear|limit <MiB>|cards limit <MiB>]", "warning"); return; }
+      else if (command !== "status") { ctx.ui.notify("Usage: /toolview on|off|status|colors on|off|status|cache [clear|limit <MiB>|cards limit <MiB>]", "warning"); return; }
       const status = controller?.active ? "on" : ctx.mode !== "tui" ? "unavailable outside terminal mode" : controller?.reason ?? "off";
       ctx.ui.notify(`Pi Toolview: ${status}`, "info");
     },
