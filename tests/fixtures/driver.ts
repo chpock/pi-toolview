@@ -409,6 +409,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
           prompt?.includes("bash-shape-stream") ? "bash-shape-stream" : prompt?.includes("bash-shapes") ? "bash-shapes" :
           prompt?.includes("long-word-wrap") ? "long-word-wrap" : prompt?.includes("bounded-summaries") ? "bounded-summaries" : prompt?.includes("compact-errors") ? "compact-errors" : prompt?.includes("comma-wrap") ? "comma-wrap" : prompt?.includes("boundary") ? "boundary" : prompt?.includes("multiline") ? "multiline" : prompt?.includes("integration") ? "integration" :
           prompt?.includes("pending") ? "pending" : prompt?.includes("fallback") ? "fallback" :
+          prompt === "run footer-cold" ? "footer-cold" : prompt === "run footer-history" ? "footer-history" : prompt === "run footer-varied" ? "footer-varied" :
           prompt?.includes("future") ? "future" : "suite";
         const results = context.messages.slice(last + 1).filter((m) => m.role === "toolResult");
         record({ type: "model_context", ...(userDiagnostics ? { user: prompt } : {}), results: results.map((m: any) => ({
@@ -418,7 +419,9 @@ export default function terminalDriver(pi: ExtensionAPI) {
         if (["cache-performance", "bash-width", "bash-real", "bash-stream", "suite", "multiline"].includes(scenario) && bashShape) throw new Error("Built-in scenario cannot run with bash-shape opt-in");
         if (scenario === "write-shapes" && !writeShape) throw new Error("write-shapes requires explicit isolated opt-in");
         if (writeShape && scenario !== "write-shapes") throw new Error("write-shape opt-in is isolated from all other scenarios");
-        const calls: Pick<ToolCall, "name" | "arguments">[] = scenario === "write-stock" ? writeStockSuite : scenario === "write-shapes" ? writeShapeSuite : scenario === "edit-performance" ? editPerformanceSuite : scenario === "edit-cards" ? editSuite : scenario === "user-card" ? [
+        if (scenario.startsWith("footer-") && process.env.TOOLVIEW_TEST_FOOTER_HISTORY !== "1") throw new Error("footer-history requests require explicit isolated opt-in");
+        const calls: Pick<ToolCall, "name" | "arguments">[] = scenario === "footer-cold" ? [] : scenario === "footer-history" || scenario === "footer-varied" ?
+          Array.from({ length: scenario === "footer-history" ? 19 : 11 }, () => ({ name: "read", arguments: { path: "a.txt", offset: 1, limit: 1 } })) : scenario === "write-stock" ? writeStockSuite : scenario === "write-shapes" ? writeShapeSuite : scenario === "edit-performance" ? editPerformanceSuite : scenario === "edit-cards" ? editSuite : scenario === "user-card" ? [
           { name: "bash", arguments: { command: "printf 'USER_BASH_OUTPUT\\n'" } },
           { name: "read", arguments: { path: "a.txt" } },
         ] : scenario === "cache-performance" ? cacheSuite : scenario === "bash-width" ? bashWidth : scenario === "bash-real" ? bashReal : scenario === "bash-shapes" ? bashShapes :
@@ -445,6 +448,14 @@ export default function terminalDriver(pi: ExtensionAPI) {
           { name: "tv_unknown", arguments: { query: "future after reload" } },
         ] : suite;
         const step = results.length;
+        if (scenario.startsWith("footer-")) {
+          const rate = scenario === "footer-cold" ? 0 : scenario === "footer-history" ? 10 :
+            [100, 85.7, 71.4, 57.1, 42.9, 28.6, 14.3, 0, 79.96, 94.96, 100, undefined][step];
+          const cacheRead = rate === undefined ? 0 : Math.round(rate * 100);
+          const input = rate === undefined ? 0 : 10000 - cacheRead;
+          message.usage = { input, output: 100, cacheRead, cacheWrite: 0, totalTokens: input + cacheRead + 100,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+        }
         stream.push({ type: "start", partial: message });
         if (step < calls.length) {
           const call = { type: "toolCall" as const, id: `terminal-${last}-${step}`, ...calls[step] };

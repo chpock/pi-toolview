@@ -4236,11 +4236,17 @@ test('footer whole-status fitting colors native data warm counters ownership and
             const x = row.indexOf(value); assert.ok(x >= 0, value);
             for (let i = x + offset; i < x + offset + count; i++) { const cell = dump.cells[y][i]; assert.equal(cell.fgMode, refs[role].fgMode, value); assert.equal(cell.fg, refs[role].fg, value); }
           };
-          for (const value of ['↑', '↓', 'R', 'W', '$']) check(value, 'text');
-          for (const value of ['11M', '1.5M', '272k', '243M']) check(value, 'muted');
-          const context = / (\d+k\/272k) \(/u.exec(row); assert.ok(context); check(context[1], 'text', 0, context[1].indexOf('/'));
+          assert.doesNotMatch(row, /↑|↓|R243|W\d|\$|\(sub\)|\(auto\)/u);
+          check('272k', 'muted'); check('········', 'muted'); check('▂▂', 'warning'); check('[', 'dim'); check(']', 'dim');
+          const context = /^\[[^\]]{10}\] CH86\.4% • (\d+k\/272k) \(/u.exec(row); assert.ok(context); check(context[1], 'text', 0, context[1].indexOf('/'));
           check('/', 'dim'); check('(', 'dim'); check(')', 'dim'); check('CH86.4%', 'warning'); check(' • ', 'dim');
-          check('mc: 104.5K (51%) · idle', 'success');
+          const producer = 'mc: 104.5K (51%) · idle'; check(producer, 'success');
+          const separator = row.indexOf(' • ', row.indexOf(producer) + producer.length);
+          assert.ok(separator > row.indexOf(producer), 'check the producer separator independently of the statistics bullet');
+          for (let i = separator; i < separator + 3; i++) {
+            const cell = dump.cells[y][i]; assert.equal(cell.fgMode, refs.dim.fgMode); assert.equal(cell.fg, refs.dim.fg);
+            assert.equal(cell.bgMode, 0); assert.ok(!cell.bold && !cell.italic && !cell.underline && !cell.inverse);
+          }
           const other = row.indexOf('OTHER_STATUS'); assert.ok(dump.cells[y][other].bold, 'producer attributes remain unchanged');
         }
       }
@@ -4256,7 +4262,13 @@ test('footer whole-status fitting colors native data warm counters ownership and
         assert.ok(live.screen().some(row => row.includes('Auto-compact')), 'actual native settings row is selected');
         live.send('\r\x1b'); await live.settle();
         const changed = await footerObserve(live, `auto-${enabled}`); footerPhysical(changed);
-        assert.equal(changed.rows.map(plain).join('\n').includes('(auto)'), enabled, 'native auto setting changes footer without reload');
+        assert.equal(changed.rows.map(plain).join('\n').includes('(auto off)'), !enabled, 'native auto setting changes footer warning without reload');
+        assert.ok(!changed.rows.map(plain).join('\n').includes('(auto)'), 'enabled auto no longer adds noise');
+        if (!enabled) {
+          const y = footerPhysical(changed), x = changed.screen[y].indexOf('(auto off)'); assert.ok(x >= 0);
+          const warning = await referenceCell(changed.styles.warning), dim = await referenceCell(changed.styles.dim);
+          for (let i = 0; i < '(auto off)'.length; i++) { const ref = i === 0 || i === 9 ? dim : warning; assert.equal(changed.cells[y][x + i].fg, ref.fg); }
+        }
         for (const key of ['scans', 'contextReads', 'aggregations', 'entries']) assert.equal(changed.counters[key], before.counters[key], 'auto is presentation-only, not a history/context invalidation');
       }
       assert.deepEqual(readFileSync(packet.session), bytes, 'status/theme/resize/settings actions do not rewrite saved usage or session data');
@@ -4277,6 +4289,91 @@ test('footer whole-status fitting colors native data warm counters ownership and
       observations.push({ mode, warm: warm.counters, nativeContext: control.context, replayContext: resumed.context });
     }
     writeFileSync(join(artifacts, 'footer-counters.json'), JSON.stringify(observations, null, 2));
+  } finally { for (const terminal of terminals) { await terminal.close(); terminal.dispose(); } }
+});
+
+test('footer cache history tracks every real request including equal CH, cold zero, unknown, colors and replay', { skip: stockOnly, timeout: 180000 }, async () => {
+  const terminals = [];
+  const options = { extraEnv: { TOOLVIEW_TEST_FOOTER: '1', TOOLVIEW_TEST_FOOTER_HISTORY: '1' }, extensions: [join(fixtures, 'footer-driver.ts')] };
+  const reports = dump => dump.entries.filter(e => e.type === 'message' && e.message.role === 'assistant').map(e => {
+    const u = e.message.usage, prompt = u.input + u.cacheRead + u.cacheWrite;
+    return prompt > 0 ? u.cacheRead / prompt * 100 : undefined;
+  });
+  const expected = history => {
+    const last = history.slice(-10), chars = [];
+    for (let i = 0; i < 10 - last.length; i++) chars.push({ glyph: '·', role: 'muted' });
+    for (const raw of last) {
+      const rate = raw === undefined ? undefined : Number(raw.toFixed(1));
+      chars.push(rate === undefined ? { glyph: '·', role: 'muted' } : {
+        glyph: [...'▁▂▃▄▅▆▇█'][Math.round(7 * (1 - rate / 100))], role: rate >= 95 ? 'success' : rate < 80 ? 'error' : 'warning' });
+    }
+    const rate = history.at(-1), ch = rate === undefined ? 'CH—' : 'CH' + rate.toFixed(1) + '%';
+    return { chars, text: '[' + chars.map(x => x.glyph).join('') + '] ' + ch };
+  };
+  const check = async dump => {
+    const y = footerPhysical(dump), text = dump.rows.map(plain)[0], value = expected(reports(dump));
+    assert.ok(text.startsWith(value.text), 'ten saved reports and latest CH precede current context');
+    const suffix = text.slice(value.text.length);
+    if (dump.context) assert.match(suffix, /^ • (?:\d+(?:\.\d+)?[kM]|\?)\/\d+(?:\.\d+)?[kM]/u, 'context follows the cache block');
+    else assert.ok(suffix === '' || suffix === ' • (auto off)', 'no trailing separator without context or auto-off');
+    assert.equal(dump.rows.length, 1, 'statistics is one status, never internally wrapped');
+    const x = text.indexOf('['), refs = Object.fromEntries(await Promise.all(Object.entries(dump.styles).map(async ([role, style]) => [role, await referenceCell(style)])));
+    for (let i = 0; i < 10; i++) {
+      assert.equal(dump.cells[y][x + 1 + i].text, value.chars[i].glyph);
+      assert.equal(dump.cells[y][x + 1 + i].fg, refs[value.chars[i].role].fg);
+      assert.equal(dump.cells[y][x + 1 + i].fgMode, refs[value.chars[i].role].fgMode);
+    }
+    for (const i of [x, x + 11]) assert.equal(dump.cells[y][i].fg, refs.dim.fg);
+    return value.text;
+  };
+  try {
+    for (const mode of ['regular', 'fullscreen']) {
+      const native = new PiTerminal(`footer-history-native-${mode}`, { ...options, mode }); terminals.push(native); await native.ready();
+      const live = new PiTerminal(`footer-history-live-${mode}`, { ...options, mode, workspace: native.work,
+        extraEnv: { ...options.extraEnv, TOOLVIEW_TEST_FOOTER_PRESENTATION: '1' } }); terminals.push(live); await live.ready();
+      let dump = await footerObserve(live, 'empty', 'accounting'); assert.equal(await check(dump), '[··········] CH—');
+      for (const terminal of [native, live]) await terminal.run('footer-cold');
+      dump = await footerObserve(live, 'cold', 'accounting'); assert.equal(await check(dump), '[·········█] CH0.0%');
+      for (const terminal of [native, live]) await terminal.run('footer-history');
+      dump = await footerObserve(live, 'twenty', 'accounting'); assert.equal(reports(dump).length, 21);
+      assert.deepEqual(reports(dump).slice(-20), Array(20).fill(10)); assert.equal(await check(dump), '[▇▇▇▇▇▇▇▇▇▇] CH10.0%');
+      for (const terminal of [native, live]) await terminal.run('footer-varied');
+      dump = await footerObserve(live, 'varied', 'accounting'); assert.equal(reports(dump).length, 33); await check(dump);
+      for (const action of ['light', 'dark']) {
+        await footerObserve(live, action, action); dump = await footerObserve(live, `${action}-colors`, 'accounting'); await check(dump);
+      }
+      const initialRows = dump.rows, file = dump.session, bytes = readFileSync(file), context = dump.context;
+      const warm = await footerObserve(live, 'history-warm');
+      for (let i = 0; i < 4; i++) {
+        const next = await footerObserve(live, `history-hot-${i}`);
+        assert.deepEqual(next.rows, warm.rows); assert.deepEqual(next.counters, warm.counters, 'renders append no cache samples and perform zero history/context/layout work');
+      }
+      const cachePrefix = expected(reports(dump)).text;
+      for (const width of [24, 60, 100]) {
+        await live.resize(width); const narrow = await footerObserve(live, `history-width-${width}`); footerPhysical(narrow);
+        assert.equal(narrow.rows.length, 1, 'our complete status is never internally wrapped');
+        const text = plain(narrow.rows[0]); assert.equal(text.endsWith('…'), width === 24);
+        assert.ok(text.startsWith(cachePrefix), 'narrow clipping keeps the full cache block from the preceding saved-report snapshot before the context tail');
+      }
+      await live.command('/toolview off'); await live.command('/toolview on'); dump = await footerObserve(live, 'history-on', 'accounting');
+      assert.deepEqual(dump.rows, initialRows); await check(dump);
+      await live.command('/reload'); dump = await footerObserve(live, 'history-reload', 'accounting');
+      assert.deepEqual(dump.rows, initialRows); assert.deepEqual(dump.context, context); await check(dump);
+      assert.deepEqual(readFileSync(file), bytes, 'presentation and restoration never rewrite saved report bytes');
+      const liveTraffic = await live.capture('history-traffic'), nativeTraffic = await native.capture('history-traffic');
+      assert.deepEqual(persisted(liveTraffic), persisted(nativeTraffic));
+      const requests = terminal => terminal.events().filter(e => ['call', 'result', 'model_context'].includes(e.type));
+      assert.deepEqual(requests(live), requests(native), 'strict real request/tool/result/native context equality');
+      assert.equal(requests(live).filter(e => e.type === 'model_context').length, 33);
+      assert.equal(requests(live).filter(e => e.type === 'call').length, 30);
+      assert.equal(requests(live).filter(e => e.type === 'result').length, 30);
+      const nativeData = await footerObserve(native, 'history-native-usage', 'accounting');
+      assert.deepEqual(reports(dump), reports(nativeData));
+      const replay = new PiTerminal(`footer-history-replay-${mode}`, { ...options, mode, session: file, workspace: live.work,
+        extraEnv: { ...options.extraEnv, TOOLVIEW_TEST_FOOTER_PRESENTATION: '1' } }); terminals.push(replay); await replay.ready();
+      const resumed = await footerObserve(replay, 'history-resumed', 'accounting'); assert.deepEqual(resumed.rows, initialRows);
+      assert.deepEqual(reports(resumed), reports(dump)); await check(resumed); assert.equal(requests(replay).length, 0);
+    }
   } finally { for (const terminal of terminals) { await terminal.close(); terminal.dispose(); } }
 });
 

@@ -1,5 +1,10 @@
 import type { ContextUsage, SessionEntry, ThemeColor } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
+
+/** Source-only switches; reload after changing them. No runtime setting or command. */
+export const FOOTER_FIELDS = { tokenTotals: false, cacheTotals: false, cost: false };
+const HISTORY_SIZE = 10;
+const BARS = [..."▁▂▃▄▅▆▇█"];
 
 export interface FooterUsage {
   input: number;
@@ -8,6 +13,7 @@ export interface FooterUsage {
   cacheWrite: number;
   cost: number;
   cacheHitRate?: number;
+  cacheHitHistory: readonly (number | undefined)[];
 }
 export interface FooterData {
   usage: FooterUsage;
@@ -20,18 +26,27 @@ const counters = { aggregations: 0, entries: 0, layouts: 0 };
 /** Numeric test observations only; never retains a session/component. */
 export const footerDiagnostics = () => ({ ...counters });
 
-/** Match native cumulative accounting, including abandoned branches and side usage. */
+/** Unknown is not zero; trust normalized Pi usage, not provider capability guesses. */
+function cacheRate(usage: Pick<FooterUsage, "input" | "cacheRead" | "cacheWrite"> | undefined): number | undefined {
+  if (!usage || ![usage.input, usage.cacheRead, usage.cacheWrite].every(n => Number.isFinite(n) && n >= 0)) return undefined;
+  const prompt = usage.input + usage.cacheRead + usage.cacheWrite;
+  return prompt > 0 && Number.isFinite(prompt) ? usage.cacheRead / prompt * 100 : undefined;
+}
+
+/** Match native cumulative accounting; retain ten primary reports, not ten distinct percentages. */
 export function footerUsage(entries: readonly SessionEntry[]): FooterUsage {
   counters.aggregations++;
-  const total: FooterUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+  const history: (number | undefined)[] = [];
+  const total: FooterUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, cacheHitHistory: history };
   for (const entry of entries) {
     counters.entries++;
     let usage;
     if (entry.type === "usage") usage = entry.usage;
     else if (entry.type === "message" && entry.message.role === "assistant") {
       usage = entry.message.usage;
-      const prompt = usage.input + usage.cacheRead + usage.cacheWrite;
-      total.cacheHitRate = prompt > 0 ? usage.cacheRead / prompt * 100 : undefined;
+      total.cacheHitRate = cacheRate(usage);
+      history.push(total.cacheHitRate);
+      if (history.length > HISTORY_SIZE) history.shift();
     } else if (entry.type === "message" && entry.message.role === "toolResult") usage = entry.message.usage;
     else if (entry.type === "compaction" || entry.type === "branch_summary") usage = entry.usage;
     if (!usage) continue;
@@ -57,48 +72,52 @@ export function contextTokens(count: number): string {
   const millions = value < 100 ? Number(value.toPrecision(3)) : Math.round(value);
   return millions.toFixed(millions < 10 ? 2 : millions < 100 ? 1 : 0) + "M";
 }
-function metrics(data: FooterData, theme: FooterTheme): string[] {
+const cacheColor = (rate: number): ThemeColor => rate >= 95 ? "success" : rate < 80 ? "error" : "warning";
+function cacheGauge(history: FooterUsage["cacheHitHistory"], theme: FooterTheme): string {
+  const latest = history.slice(-HISTORY_SIZE);
+  const marks = theme.fg("muted", "·".repeat(HISTORY_SIZE - latest.length)) + latest.map(raw => {
+    if (raw === undefined) return theme.fg("muted", "·");
+    const rate = Number(raw.toFixed(1));
+    return theme.fg(cacheColor(rate), BARS[Math.round(7 * (1 - rate / 100))]!);
+  }).join("");
+  return theme.fg("dim", "[") + marks + theme.fg("dim", "]");
+}
+function metrics(data: FooterData, theme: FooterTheme, fields: typeof FOOTER_FIELDS): string {
   const f = (role: ThemeColor, value: string) => theme.fg(role, value);
   const punctuation = (value: string) => f("dim", value);
   const parens = (value: string, role: ThemeColor = "muted") => punctuation("(") + f(role, value) + punctuation(")");
   const u = data.usage;
-  const parts = [f("text", "↑") + f("muted", tokens(u.input)), f("text", "↓") + f("muted", tokens(u.output))];
+  const parts: string[] = [];
+  if (fields.tokenTotals) parts.push(f("text", "↑") + f("muted", tokens(u.input)), f("text", "↓") + f("muted", tokens(u.output)));
+  const context: string[] = [];
   if (data.context) {
     const c = data.context;
-    parts.push(f("text", c.tokens === null ? "?" : contextTokens(c.tokens)) + punctuation("/") + f("muted", contextTokens(c.contextWindow)));
-    if (c.percent !== null) parts.push(parens(c.percent.toFixed(1) + "%", c.percent > 90 ? "error" : c.percent > 70 ? "warning" : "muted"));
-    if (data.auto) parts.push(parens("auto"));
+    context.push(f("text", c.tokens === null ? "?" : contextTokens(c.tokens)) + punctuation("/") + f("muted", contextTokens(c.contextWindow)));
+    if (c.percent !== null) context.push(parens(c.percent.toFixed(1) + "%", c.percent > 90 ? "error" : c.percent > 70 ? "warning" : "muted"));
   }
-  if (u.cacheRead) parts.push(f("text", "R") + f("muted", tokens(u.cacheRead)));
-  if (u.cacheWrite) parts.push(f("text", "W") + f("muted", tokens(u.cacheWrite)));
-  if ((u.cacheRead > 0 || u.cacheWrite > 0) && u.cacheHitRate !== undefined) {
-    const displayed = u.cacheHitRate.toFixed(1), rate = Number(displayed);
-    parts.push(f(rate >= 95 ? "success" : rate < 80 ? "error" : "warning", "CH" + displayed + "%"));
+  if (!data.auto) context.push(parens("auto off", "warning"));
+  const cache: string[] = [];
+  if (fields.cacheTotals) {
+    if (u.cacheRead) cache.push(f("text", "R") + f("muted", tokens(u.cacheRead)));
+    if (u.cacheWrite) cache.push(f("text", "W") + f("muted", tokens(u.cacheWrite)));
   }
-  if (u.cost || data.subscription) parts.push(f("text", "$") + f("muted", u.cost.toFixed(3)) + (data.subscription ? " " + parens("sub") : ""));
-  return parts;
+  const ch = u.cacheHitRate === undefined ? f("muted", "CH—") : f(cacheColor(Number(u.cacheHitRate.toFixed(1))), "CH" + u.cacheHitRate.toFixed(1) + "%");
+  cache.push(cacheGauge(u.cacheHitHistory, theme) + " " + ch);
+  parts.push(cache.join(" ") + (context.length ? punctuation(" • ") + context.join(" ") : ""));
+  if (fields.cost && (u.cost || data.subscription)) parts.push(f("text", "$") + f("muted", u.cost.toFixed(3)) + (data.subscription ? " " + parens("sub") : ""));
+  return parts.join(" ");
 }
 const RESET = "\x1b[0m";
 const CLOSE_LINK = "\x1b]8;;\x1b\\";
 const isolated = (text: string) => RESET + text + CLOSE_LINK + RESET;
 
 /** Pure width fitting: preserve producer ANSI, never parse extension-specific values. */
-export function renderFooter(width: number, data: FooterData, statuses: readonly (readonly [string, string])[], theme: FooterTheme): string[] {
+export function renderFooter(width: number, data: FooterData, statuses: readonly (readonly [string, string])[], theme: FooterTheme, fields = FOOTER_FIELDS): string[] {
   if (width < 1) return [];
   counters.layouts++;
   const left: string[] = [];
-  let row = "", columns = 0;
-  for (const metric of metrics(data, theme)) {
-    const size = visibleWidth(metric);
-    if (columns && columns + 1 + size > width) { left.push(row); row = ""; columns = 0; }
-    if (size > width) {
-      const wrapped = wrapTextWithAnsi(metric, width);
-      left.push(...wrapped.slice(0, -1)); row = wrapped.at(-1) ?? ""; columns = visibleWidth(row);
-    } else { row += (columns ? " " : "") + metric; columns += (columns ? 1 : 0) + size; }
-  }
-  if (row) left.push(row);
-  const last = left.pop() ?? "";
-  let leftRow = last, leftWidth = visibleWidth(last), right = "", rightWidth = 0;
+  const stats = truncateToWidth(metrics(data, theme, fields), width, theme.fg("dim", "…"));
+  let leftRow = stats, leftWidth = visibleWidth(stats), right = "", rightWidth = 0;
   const flush = () => {
     if (right) left.push(leftRow + " ".repeat(Math.max(0, width - leftWidth - rightWidth)) + right);
     else if (leftRow) left.push(leftRow);

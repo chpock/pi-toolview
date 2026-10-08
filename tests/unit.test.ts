@@ -4554,7 +4554,7 @@ async function footerSetup(foreignEditor = false, selectorAtStartup = false) {
   const manager = SessionManager.inMemory("/footer-probe");
   const model = { id: "FOOTER_MODEL", name: "Footer Model", provider: "footer-provider", contextWindow: 272000 };
   let context: { tokens: number | null; percent: number | null; contextWindow: number } | undefined = { tokens: 104500, percent: 104500 / 272000 * 100, contextWindow: 272000 };
-  let scans = 0, contextReads = 0, auto = true, subscription = true;
+  let scans = 0, contextReads = 0, authReads = 0, auto = true, subscription = true;
   const entries = manager.getEntries.bind(manager);
   manager.getEntries = () => { scans++; return entries(); };
   const statuses = new Map<string, string>([["magic-context", "mc: 104.5K (51%) · idle"]]);
@@ -4581,7 +4581,7 @@ async function footerSetup(foreignEditor = false, selectorAtStartup = false) {
     registerFlag() {}, getFlag() {}, getThinkingLevel: () => "off", getSettings: () => ({ compaction: { enabled: auto } }),
     registerCommand(name: string, options: { handler: Function }) { if (name === "toolview") command = options.handler; } };
   const ctx = { mode: "tui", cwd: "/footer-probe", ui: { ...host.createExtensionUIContext(), notify() {} }, model, sessionManager: manager,
-    modelRegistry: { isUsingOAuth: () => subscription, getProvider: () => ({ auth: { oauth: { isSubscription: true } } }) },
+    modelRegistry: { isUsingOAuth: () => { authReads++; return subscription; }, getProvider: () => { authReads++; return { auth: { oauth: { isSubscription: true } } }; } },
     getContextUsage: readContext, isIdle: () => true };
   const emit = (name: string) => { for (const fn of handlers.get(name) ?? []) fn({}, ctx); };
   const append = (input = 11000000, output = 1500000, cacheRead = 243000000, cacheWrite = 0, cost = 61.761) => manager.appendMessage({
@@ -4592,7 +4592,7 @@ async function footerSetup(foreignEditor = false, selectorAtStartup = false) {
   if (selectorAtStartup) { input.clear(); input.addChild(new Text("NATIVE_RELOAD_BOX", 0, 0)); }
   append(); toolview(pi as unknown as ExtensionAPI); emit("session_start");
   return { root, host, footer, native, ctx, manager, statuses, append, emit, editor, input,
-    render: (width = 140) => footer.children[0]!.render(width), counts: () => ({ scans, contextReads }),
+    render: (width = 140) => footer.children[0]!.render(width), counts: () => ({ scans, contextReads }), authReads: () => authReads,
     context(value: typeof context) { context = value; }, auto(value: boolean) { auto = value; }, subscription(value: boolean) { subscription = value; },
     control: (action: string) => command!(action, ctx), close: () => emit("session_shutdown") };
 }
@@ -4602,7 +4602,9 @@ test("footer uses structured native usage with requested ordering and no cwd/mod
   try {
     const rows = f.render().map(stripVTControlCharacters);
     assert.equal(rows.length, 1);
-    assert.match(rows[0]!, /^↑11M ↓1\.5M 105k\/272k \(38\.4%\) \(auto\) R243M CH95\.7% \$61\.761 \(sub\)/);
+    assert.match(rows[0]!, /^\[·········▁\] CH95\.7% • 105k\/272k \(38\.4%\)/u);
+    assert.doesNotMatch(rows[0]!, /↑|↓|R243|W\d|\$|\(sub\)|\(auto\)/u);
+    assert.equal(f.authReads(), 0, "hidden cost never reads authentication");
     assert.ok(rows[0]!.endsWith("mc: 104.5K (51%) · idle"));
     assert.ok(!rows.join("\n").includes("FOOTER_MODEL")); assert.ok(!rows.join("\n").includes("FOOTER_BRANCH"));
     assert.ok(!rows.join("\n").includes("/footer-probe"));
@@ -4613,16 +4615,18 @@ test("footer moves whole statuses before truncation and right-aligns overflow", 
   const f = await footerSetup();
   try {
     f.statuses.clear(); f.statuses.set("b", "SECOND_STATUS"); f.statuses.set("a", "FIRST_STATUS");
-    const rows = f.render(80).map(stripVTControlCharacters);
+    const rows = f.render(60).map(stripVTControlCharacters);
     assert.ok(rows[0]!.trimEnd().endsWith("FIRST_STATUS"));
-    assert.equal(rows[1], " ".repeat(80 - 13) + "SECOND_STATUS");
-    assert.ok(!rows.join("\n").includes("•"), "no dangling separator at a status row break");
+    assert.equal(rows[1], " ".repeat(60 - 13) + "SECOND_STATUS");
+    for (const row of rows) assert.doesNotMatch(row, /^\s*•|•\s*$/u, "no dangling separator at a status row break");
     f.statuses.clear(); f.statuses.set("x", "LONG_STATUS_" + "界é".repeat(40));
     const narrow = f.render(24).map(stripVTControlCharacters);
     const status = narrow.find(row => row.includes("LONG_STATUS_"))!;
     assert.ok(status.endsWith("…")); assert.ok(visibleWidth(status) <= 24);
     assert.equal(narrow.filter(row => row.includes("LONG_STATUS_")).length, 1);
-    assert.ok(narrow.slice(0, -1).join(" ").includes("$61.761"), "left overflow retains whole metric data");
+    assert.equal(narrow.length, 2, "one truncated statistics row plus one whole producer status row");
+    assert.ok(narrow[0]!.startsWith("[·········▁] CH95.7%") && narrow[0]!.endsWith("…"));
+    assert.ok(!narrow[0]!.includes("105k"), "tail clipping preserves cache information before context");
   } finally { f.close(); }
 });
 
@@ -4635,7 +4639,7 @@ test("footer refreshes nullable context window flags and native cache writes", a
     f.auto(false); f.subscription(false); f.append(5, 6, 0, 12, 0);
     const rows = f.render().map(stripVTControlCharacters).join(" ");
     assert.ok(rows.includes("?/272k")); assert.ok(!rows.includes("(0.0%)")); assert.ok(!rows.includes("(auto)")); assert.ok(!rows.includes("(sub)"));
-    assert.ok(rows.includes("W12"));
+    assert.ok(rows.includes("(auto off)")); assert.ok(rows.includes("CH0.0%")); assert.ok(!rows.includes("W12"));
   } finally { f.close(); }
 });
 
@@ -4649,7 +4653,8 @@ test("footer warm frames avoid session scans and context reads across status wid
     f.append(1, 2, 3, 4, 0); f.render(60);
     assert.deepEqual(f.counts(), { scans: before.scans + 1, contextReads: before.contextReads + 1 });
     const leaf = f.manager.getLeafId()!; f.append(1, 2, 3, 4, 0); f.manager.branch(leaf); f.emit("session_tree");
-    const rows = f.render().map(stripVTControlCharacters).join(" "); assert.ok(rows.includes("W8"), "branch-back must include abandoned cumulative usage even at a previous leaf");
+    const rows = f.render().map(stripVTControlCharacters).join(" ");
+    assert.ok(rows.includes("[·······▁▅▅] CH37.5%"), "branch-back retains reports from abandoned raw history");
   } finally { f.close(); }
 });
 
@@ -4704,14 +4709,15 @@ test("footer physical glyph colors CH displayed thresholds and raw native contex
       for (const role of ["text", "muted", "dim", "success", "warning", "error"] as const) { await write(nativeTheme.fg(role, "X")); refs[role] = fg(0); }
       for (const [rate, chColor] of [[79.94, "error"], [79.96, "warning"], [80, "warning"], [94.94, "warning"], [94.96, "success"], [95, "success"], [100, "success"], [0, "error"]] as const) {
         for (const [percent, percentColor] of [[70, "muted"], [70.01, "warning"], [90, "warning"], [90.01, "error"], [105, "error"]] as const) {
-          const data = { usage: { input: 11e6, output: 1.5e6, cacheRead: 243e6, cacheWrite: 12, cost: 61.761, cacheHitRate: rate },
+          const data = { usage: { input: 11e6, output: 1.5e6, cacheRead: 243e6, cacheWrite: 12, cost: 61.761, cacheHitRate: rate, cacheHitHistory: [rate] },
             context: { tokens: 104500, contextWindow: 272000, percent }, auto: true, subscription: true };
           const row = renderFooter(180, data, [], nativeTheme)[0]!;
           const text = stripVTControlCharacters(row); await write(row);
           const expect = (value: string, role: string) => { const start = text.indexOf(value); assert.ok(start >= 0, value); for (let i = start; i < start + value.length; i++) assert.deepEqual(fg(i), refs[role], `${theme} ${value} ${i}`); };
-          for (const value of ["↑", "↓", "105k", "R", "W", "$"]) expect(value, "text");
-          for (const value of ["11M", "1.5M", "272k", "auto", "243M", "61.761", "sub"]) expect(value, "muted");
-          expect("/", "dim"); expect("(", "dim"); expect(")", "dim");
+          expect("105k", "text"); expect("272k", "muted"); expect("·".repeat(9), "muted");
+          for (const value of ["/", "(", ")", "[", "]", " • "]) expect(value, "dim");
+          const glyph = [..."▁▂▃▄▅▆▇█"][Math.round(7 * (1 - Number(rate.toFixed(1)) / 100))]!;
+          expect(glyph, chColor);
           const ch = text.indexOf("CH"); for (let i = ch; i < ch + ("CH" + rate.toFixed(1) + "%").length; i++) assert.deepEqual(fg(i), refs[chColor]);
           const p = text.indexOf("(" + percent.toFixed(1) + "%)");
           for (let i = p + 1; i < p + 1 + (percent.toFixed(1) + "%").length; i++) assert.deepEqual(fg(i), refs[percentColor]);
@@ -4723,16 +4729,25 @@ test("footer physical glyph colors CH displayed thresholds and raw native contex
 
 test("footer preserves producer ANSI isolates attributes and links and never splits whole statuses", async () => {
   const { renderFooter } = await import("../src/footer.ts"); initTheme("dark");
-  const data = { usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 }, auto: false, subscription: false };
+  const data = { usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, cacheHitHistory: [] }, auto: false, subscription: false };
   const terminal = new xterm.Terminal({ cols: 80, rows: 3, allowProposedApi: true });
   try {
-    const producer = "\x1b[1;41;32mFIRST";
+    const producer = "\x1b[1;3;4;7;41;32mFIRST";
     const rows = renderFooter(80, data, [["a", producer], ["b", "NEXT"]], nativeTheme);
     assert.ok(rows[0]!.includes(producer));
     await new Promise<void>(resolve => terminal.write(rows[0]!, resolve));
     const text = stripVTControlCharacters(rows[0]!); const y = terminal.buffer.active.getLine(0)!;
-    assert.equal(y.getCell(text.indexOf("FIRST"))!.getBgColor(), 1);
-    for (const value of ["•", "NEXT"]) { const cell = y.getCell(text.indexOf(value))!; assert.ok(cell.isBgDefault()); assert.ok(!cell.isBold()); }
+    const first = text.indexOf("FIRST"), separator = text.indexOf("•", first + "FIRST".length);
+    assert.equal(y.getCell(first)!.getBgColor(), 1);
+    assert.ok(separator > first, "test the producer separator, not the earlier statistics bullet");
+    await new Promise<void>(resolve => terminal.write("\r\n" + nativeTheme.fg("dim", "•"), resolve));
+    const reference = terminal.buffer.active.getLine(1)!.getCell(0)!;
+    const cell = y.getCell(separator)!;
+    assert.equal(cell.getFgColorMode(), reference.getFgColorMode()); assert.equal(cell.getFgColor(), reference.getFgColor());
+    for (const x of [separator, text.indexOf("NEXT", separator)]) {
+      const cell = y.getCell(x)!; assert.ok(cell.isBgDefault());
+      assert.ok(!cell.isBold() && !cell.isItalic() && !cell.isUnderline() && !cell.isInverse(), "producer attributes do not escape its boundary");
+    }
     const status = "LINK\x1b]8;;https://example.test\x1b\\label";
     const links = renderFooter(80, data, [["a", status], ["b", "NEXT"]], nativeTheme);
     assert.ok(links[0]!.includes(status + "\x1b]8;;\x1b\\\x1b[0m"));
@@ -4743,7 +4758,7 @@ test("footer preserves producer ANSI isolates attributes and links and never spl
 });
 
 
-test("footer missing context denominator and non-subscription OAuth keep native conditional visibility", async () => {
+test("footer missing context and unknown reports retain dots instead of invented zero", async () => {
   const f = await footerSetup();
   try {
     f.context(undefined); f.emit("session_compact");
@@ -4751,14 +4766,137 @@ test("footer missing context denominator and non-subscription OAuth keep native 
     f.append(0, 0, 0, 0, 0);
     let text = f.render().map(stripVTControlCharacters).join(" ");
     assert.ok(!text.includes("272k")); assert.ok(!text.includes("(auto)"));
-    assert.ok(!text.includes("CH")); assert.ok(!text.includes("(sub)"), "OAuth alone does not mean subscription");
+    assert.ok(text.includes("[········▁·] CH—")); assert.ok(!text.includes("(sub)"));
     f.append(10, 0, 0, 0, 0); text = f.render().map(stripVTControlCharacters).join(" ");
-    assert.ok(text.includes("CH0.0%"), "real zero latest cache rate retains historical native cache visibility");
-    f.ctx.model.provider = "kimi-coding"; f.subscription(false);
-    assert.ok(f.render().map(stripVTControlCharacters).join(" ").includes("(sub)"), "native Kimi exception is independent of OAuth");
+    assert.ok(text.includes("[·······▁·█] CH0.0%"), "real zero is a full error bar even without cache-read totals");
   } finally { f.close(); }
 });
 
+
+test("footer cache history retains ten distinct model reports even at the same percentage", async () => {
+  const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+  const { footerUsage, renderFooter } = await import("../src/footer.ts");
+  const manager = SessionManager.inMemory("/footer-history");
+  const usage = { input: 900, output: 5, cacheRead: 100, cacheWrite: 0, totalTokens: 1005,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+  for (let i = 0; i < 20; i++) manager.appendMessage({ role: "assistant", content: [{ type: "text", text: "SAME_CH_" + i }],
+    api: "openai-responses", provider: "probe", model: "probe", timestamp: i, stopReason: "toolUse", usage });
+  const result = footerUsage(manager.getEntries());
+  assert.deepEqual(result.cacheHitHistory, Array(10).fill(10));
+  assert.equal(result.cacheHitRate, 10);
+  const data = { usage: result, auto: true, subscription: false };
+  assert.equal(stripVTControlCharacters(renderFooter(100, data, [], nativeTheme)[0]!), "[▇▇▇▇▇▇▇▇▇▇] CH10.0%");
+  assert.equal(manager.getEntries().filter(e => e.type === "message").length, 20);
+  for (let i = 0; i < 8; i++) assert.deepEqual(footerUsage(manager.getEntries()).cacheHitHistory, result.cacheHitHistory);
+});
+
+test("footer history orders evicts validates and counts reported errors without mixing side usage", async () => {
+  const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+  const { footerUsage } = await import("../src/footer.ts");
+  const manager = SessionManager.inMemory("/footer-history");
+  const usage = (rate: number) => ({ input: 100 - rate, output: 0, cacheRead: rate, cacheWrite: 0, totalTokens: 100,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } });
+  for (let i = 0; i < 12; i++) manager.appendMessage({ role: "assistant", content: [], api: "openai-responses", provider: "probe",
+    model: "probe", timestamp: i, stopReason: i === 11 ? "error" : "stop", usage: usage(i * 5) });
+  let reports = footerUsage(manager.getEntries()); assert.deepEqual(reports.cacheHitHistory, [10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map(rate => rate / 100 * 100));
+  manager.appendUsage("cache_warm", "probe", "probe", usage(100));
+  manager.appendMessage({ role: "toolResult", toolCallId: "side", toolName: "side", content: [], timestamp: 15, isError: false, usage: usage(100) });
+  manager.appendCompaction("summary", manager.getLeafId(), 100, undefined, true, usage(100));
+  assert.deepEqual(footerUsage(manager.getEntries()).cacheHitHistory, reports.cacheHitHistory);
+  for (const invalid of [usage(NaN), usage(-1), { ...usage(0), input: 0 }, { ...usage(0), input: Infinity }]) {
+    manager.appendMessage({ role: "assistant", content: [], api: "openai-responses", provider: "probe", model: "probe",
+      timestamp: 16, stopReason: "aborted", usage: invalid });
+    reports = footerUsage(manager.getEntries()); assert.equal(reports.cacheHitHistory.at(-1), undefined); assert.equal(reports.cacheHitRate, undefined);
+  }
+  manager.appendMessage({ role: "assistant", content: [], api: "openai-responses", provider: "probe", model: "probe", timestamp: 17,
+    stopReason: "stop", usage: { ...usage(50), input: 25, cacheWrite: 25 } });
+  assert.equal(footerUsage(manager.getEntries()).cacheHitRate, 50, "cache writes belong to the prompt denominator");
+  assert.equal(footerUsage(manager.getEntries()).cacheHitHistory.length, 10);
+});
+
+test("footer fields are source flags defaulting false with retained independent native formatting", async () => {
+  const { FOOTER_FIELDS, renderFooter } = await import("../src/footer.ts");
+  assert.deepEqual(FOOTER_FIELDS, { tokenTotals: false, cacheTotals: false, cost: false });
+  const data = { usage: { input: 11e6, output: 1.5e6, cacheRead: 243e6, cacheWrite: 12, cost: 61.761,
+    cacheHitRate: 95, cacheHitHistory: [95] }, auto: true, subscription: true };
+  for (const tokenTotals of [false, true]) for (const cacheTotals of [false, true]) for (const cost of [false, true]) {
+    const row = stripVTControlCharacters(renderFooter(200, data, [], nativeTheme, { tokenTotals, cacheTotals, cost })[0]!);
+    assert.equal(row.includes("↑11M ↓1.5M"), tokenTotals);
+    assert.equal(row.includes("R243M W12"), cacheTotals);
+    assert.equal(row.includes("$61.761 (sub)"), cost);
+    assert.ok(row.includes("[·········▁] CH95.0%"), "CH never depends on cumulative field flags");
+  }
+});
+
+test("footer cost flag retains native OAuth subscription rules without hidden auth reads", async () => {
+  const { FOOTER_FIELDS } = await import("../src/footer.ts");
+  FOOTER_FIELDS.cost = true;
+  let f: Awaited<ReturnType<typeof footerSetup>> | undefined;
+  try {
+    f = await footerSetup(); assert.ok(f.render().map(stripVTControlCharacters).join(" ").includes("$61.761 (sub)")); assert.ok(f.authReads() > 0);
+    f.ctx.modelRegistry.getProvider = () => ({ auth: { oauth: { isSubscription: false } } });
+    assert.ok(!f.render().map(stripVTControlCharacters).join(" ").includes("(sub)"), "OAuth alone is not subscription");
+    f.ctx.model.provider = "kimi-coding"; f.subscription(false);
+    assert.ok(f.render().map(stripVTControlCharacters).join(" ").includes("(sub)"), "native Kimi exception remains available behind flag");
+  } finally { f?.close(); FOOTER_FIELDS.cost = false; }
+});
+
+test("footer empty cold unknown and auto-off states are distinct and fit exactly one statistics row", async () => {
+  const { footerUsage, renderFooter } = await import("../src/footer.ts");
+  const empty = { usage: footerUsage([]), context: { tokens: 104000, contextWindow: 272000, percent: 38.1 }, auto: true, subscription: false };
+  const text = stripVTControlCharacters(renderFooter(100, empty, [], nativeTheme)[0]!);
+  assert.equal(text, "[··········] CH— • 104k/272k (38.1%)");
+  const disabled = { ...empty, auto: false };
+  assert.equal(stripVTControlCharacters(renderFooter(100, disabled, [], nativeTheme)[0]!), "[··········] CH— • 104k/272k (38.1%) (auto off)");
+  const unknown = { ...disabled, context: { tokens: null, contextWindow: 272000, percent: null } };
+  assert.equal(stripVTControlCharacters(renderFooter(100, unknown, [], nativeTheme)[0]!), "[··········] CH— • ?/272k (auto off)");
+  assert.equal(stripVTControlCharacters(renderFooter(100, { ...empty, context: undefined }, [], nativeTheme)[0]!), "[··········] CH—");
+  assert.equal(stripVTControlCharacters(renderFooter(100, { ...disabled, context: undefined }, [], nativeTheme)[0]!), "[··········] CH— • (auto off)");
+  const sample = { ...empty, context: { tokens: 130000, contextWindow: 272000, percent: 47.9 },
+    usage: { ...empty.usage, cacheHitRate: 98.2, cacheHitHistory: Array(10).fill(98.2) } };
+  assert.equal(stripVTControlCharacters(renderFooter(100, sample, [], nativeTheme)[0]!), "[▁▁▁▁▁▁▁▁▁▁] CH98.2% • 130k/272k (47.9%)");
+  for (const width of [0, 1, 2, 3, 6, 11, 12, 20, 24, visibleWidth(text) - 1, visibleWidth(text), 100]) {
+    const rows = renderFooter(width, empty, [], nativeTheme);
+    assert.equal(rows.length, width ? 1 : 0, "statistics never wrap internally");
+    if (!width) continue;
+    assert.ok(visibleWidth(rows[0]!) <= width);
+    assert.equal(stripVTControlCharacters(rows[0]!).endsWith("…"), width < visibleWidth(text));
+    assert.deepEqual(empty.usage.cacheHitHistory, [], "clipping must not change saved numeric reports");
+  }
+});
+
+test("footer auto-off annotation unknown marks and bracket colors remain semantic in both themes", async () => {
+  const { footerUsage, renderFooter } = await import("../src/footer.ts");
+  const terminal = new xterm.Terminal({ cols: 120, rows: 2, allowProposedApi: true });
+  const write = async (row: string) => { terminal.reset(); await new Promise<void>(resolve => terminal.write(row, resolve)); };
+  try {
+    for (const theme of ["dark", "light"]) {
+      initTheme(theme);
+      const refs: Record<string, number> = {};
+      for (const role of ["dim", "muted", "warning"] as const) { await write(nativeTheme.fg(role, "X")); refs[role] = terminal.buffer.active.getLine(0)!.getCell(0)!.getFgColor(); }
+      const row = renderFooter(120, { usage: footerUsage([]), auto: false, subscription: false }, [], nativeTheme)[0]!;
+      await write(row); const text = stripVTControlCharacters(row);
+      for (const [value, role] of [["(", "dim"], [")", "dim"], ["auto off", "warning"], ["[", "dim"], ["]", "dim"], ["·".repeat(10), "muted"], ["CH—", "muted"], [" • ", "dim"]]) {
+        const x = text.indexOf(value!); assert.ok(x >= 0);
+        for (let i = x; i < x + value!.length; i++) assert.equal(terminal.buffer.active.getLine(0)!.getCell(i)!.getFgColor(), refs[role!]);
+      }
+    }
+  } finally { terminal.dispose(); initTheme("dark"); }
+});
+
+test("footer report updates reconstruct across off-on without counting streaming or warm renders", async () => {
+  const f = await footerSetup();
+  try {
+    const first = f.render(); f.emit("message_update"); assert.equal(f.render(), first);
+    const before = f.counts();
+    for (let i = 0; i < 20; i++) { f.append(900, 10, 100, 0, 0); f.emit("message_end"); f.render(); }
+    let row = f.render().map(stripVTControlCharacters).join(" "); assert.ok(row.includes("[▇▇▇▇▇▇▇▇▇▇] CH10.0%"));
+    assert.deepEqual(f.counts(), { scans: before.scans + 20, contextReads: before.contextReads + 20 });
+    const hot = f.counts(); for (let i = 0; i < 20; i++) f.render(); assert.deepEqual(f.counts(), hot);
+    await f.control("off"); await f.control("on");
+    assert.equal(f.render().map(stripVTControlCharacters).join(" "), row, "history is derived from saved reports, not render timing");
+  } finally { f.close(); }
+});
 
 test("footer stays native when the editor is foreign from startup including explicit on", async () => {
   const f = await footerSetup(true);

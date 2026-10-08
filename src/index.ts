@@ -9,7 +9,7 @@ import { EDITOR_TOP, EDITOR_BOTTOM, renderEditorCard, type EditorLayout } from "
 import { cardGeometry, insidePanel } from "./card-frame.ts";
 import { renderEditorStatus, type EditorStatusInfo } from "./editor-status.ts";
 import { GitBranchSource } from "./git-branch.ts";
-import { FooterView, footerUsage, type FooterData } from "./footer.ts";
+import { FOOTER_FIELDS, FooterView, footerUsage, type FooterData } from "./footer.ts";
 import { TerminalColors, terminalColorExit } from "./terminal-colors.ts";
 import type { CardTheme } from "./card-theme.ts";
 import { RenderCache, type CacheEntry, type CacheStats } from "./render-cache.ts";
@@ -1072,7 +1072,7 @@ export default function toolview(pi: ExtensionAPI) {
         const current = liveContext!;
         const manager = current.sessionManager, session = manager.getSessionId(), leaf = manager.getLeafId(), model = current.model;
         const auto = pi.getSettings().compaction?.enabled ?? true;
-        const subscription = !!model && (model.provider === "kimi-coding" ||
+        const subscription = FOOTER_FIELDS.cost && !!model && (model.provider === "kimi-coding" ||
           (current.modelRegistry.isUsingOAuth(model) && current.modelRegistry.getProvider(model.provider)?.auth.oauth?.isSubscription === true));
         if (!snapshot || !stamp || stamp.epoch !== footerEpoch || stamp.session !== session || stamp.leaf !== leaf || stamp.model !== model) {
           snapshot = { usage: footerUsage(manager.getEntries()), context: current.getContextUsage(), auto, subscription };

@@ -196,7 +196,7 @@ try {
       first.render(80); const reference = new WeakRef(first);
       await footerCommand!("off", footerContext); assert.equal(footerContainer.children[0], nativeFooter);
       await footerCommand!("on", footerContext); assert.notEqual(footerHost.customFooter, first);
-      assert.ok(footerHost.customFooter.render(80)[0].includes("↑"));
+      assert.ok(footerHost.customFooter.render(80)[0].includes("CH—"));
       return reference;
     };
     try {
