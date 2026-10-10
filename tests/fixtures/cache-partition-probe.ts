@@ -48,20 +48,22 @@ try {
   }
   assert.deepEqual(frame("resize", 141).delta, { ordinaryBuilds: 200, cardBuilds: 27 });
   assert.deepEqual(frame("resize-warm", 141).delta, { ordinaryBuilds: 0, cardBuilds: 0 });
-  const ordinary = controller.cacheStats().ordinary;
-  controller.setCardCacheLimitMiB(1);
-  const pressure = frame("card-pressure", 141);
-  assert.ok(pressure.delta.cardBuilds > 0); assert.equal(pressure.delta.ordinaryBuilds, 0);
-  assert.equal(pressure.ordinary.evictions, ordinary.evictions); assert.equal(pressure.ordinary.retainedBytes, ordinary.retainedBytes);
-  controller.setCardCacheLimitMiB(128); frame("refill", 141);
-  assert.deepEqual(frame("refill-warm", 141).delta, { ordinaryBuilds: 0, cardBuilds: 0 });
+  const beforeReplacement = controller.cacheStats();
+  edits[1]!.updateResult({ content: [], details, isError: false });
+  assert.equal(controller.cacheStats().cards.entries, 26, "only the changed component releases its old representation");
+  const replaced = frame("one-card-update", 141);
+  assert.deepEqual(replaced.delta, { ordinaryBuilds: 0, cardBuilds: 1 });
+  assert.equal(replaced.cards.entries, 27);
+  assert.equal(replaced.ordinary.retainedBytes, beforeReplacement.ordinary.retainedBytes);
+  assert.deepEqual(frame("update-warm", 141).delta, { ordinaryBuilds: 0, cardBuilds: 0 });
   const detach = () => {
-    const node = edits[0]!, reference = new WeakRef(node); root.removeChild(node); edits[0] = undefined; return reference;
+    const node = edits[0]!, reference = new WeakRef(node); root.removeChild(node); edits[0] = undefined;
+    assert.equal(controller.cacheStats().cards.entries, 26); return reference;
   };
   const reference = detach(); frame("detached", 141);
   assert.equal(typeof globalThis.gc, "function");
   for (let i = 0; i < 12; i++) { await new Promise<void>(resolve => setImmediate(resolve)); globalThis.gc!(); }
-  assert.equal(reference.deref(), undefined, "card-cache data must not retain a detached edit or its source/component tree");
+  assert.equal(reference.deref(), undefined, "component layouts/accounting must not retain a detached edit or its source/component tree");
   const retained = controller.cacheStats(); assert.ok(retained.cards.entries > 0 && retained.ordinary.entries > 0);
   controller.clearCache(); assert.equal(controller.cacheStats().entries, 0); frame("clear-cold", 141);
   controller.restore(); assert.equal(controller.cacheStats().retainedBytes, 0);

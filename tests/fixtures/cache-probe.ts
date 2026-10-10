@@ -50,14 +50,15 @@ try {
   const expanded = frame("expand", 81); assert.equal(expanded.segments, 1000); assert.equal(expanded.builds, 18);
   assert.equal(frame("same-expand", 81).segments, 0);
   tools[0]!.setExpanded(false); assert.equal(frame("collapse", 81).segments, 11);
-  controller.setCacheLimitMiB(0); controller.setCardCacheLimitMiB(0); assert.equal(controller.cacheStats().retainedBytes, 0);
-  const disabled = frame("zero-budget", 81); assert.equal(disabled.segments, 88); assert.equal(disabled.entries, 0);
-  controller.setCacheLimitMiB(8); controller.setCardCacheLimitMiB(128); frame("refill", 81);
-  // Remove one node while its cached rendered data can still be in the bounded recency list.
+  controller.clearCache(); assert.equal(controller.cacheStats().retainedBytes, 0);
+  const cleared = frame("clear-cold", 81); assert.equal(cleared.segments, 88); assert.equal(cleared.entries, 8);
+  assert.equal(frame("clear-warm", 81).segments, 0);
+  // Remove the first installer and release its representation immediately, before GC.
   // Refresh host mouse layout, which independently owns references to formerly rendered children.
   const detach = () => {
     const removed = tools[0]!, reference = new WeakRef(removed);
     root.removeChild(removed); tools[0] = undefined;
+    assert.equal(controller.cacheStats().entries, 7);
     return reference;
   };
   const reference = detach();
@@ -127,7 +128,8 @@ try {
      draw(); assert.equal(userController.cacheStats().builds, 1);
      draw(); assert.equal(userController.cacheStats().builds, 1);
      const reference = new WeakRef(user);
-     userRoot.removeChild(user); user = undefined; draw();
+     userRoot.removeChild(user); user = undefined;
+     assert.equal(userController.cacheStats().entries, 0); draw();
      for (let i = 0; i < 12; i++) {
        await new Promise<void>((resolve) => setImmediate(resolve)); globalThis.gc!();
      }
@@ -144,7 +146,8 @@ try {
      assert.equal(writeFrame(), 1); const cold = writeController.cacheStats();
      assert.equal(cold.cards.entries, 1); assert.equal(cold.ordinary.entries, 0);
      assert.equal(writeFrame(), 0); assert.equal(writeController.cacheStats().builds, cold.builds);
-     const reference = new WeakRef(writeNode); writeRoot.removeChild(writeNode); writeNode = undefined; writeFrame();
+     const reference = new WeakRef(writeNode); writeRoot.removeChild(writeNode); writeNode = undefined;
+     assert.equal(writeController.cacheStats().entries, 0); writeFrame();
      for (let i = 0; i < 12; i++) { await new Promise<void>(resolve => setImmediate(resolve)); globalThis.gc!(); }
      assert.equal(reference.deref(), undefined, "active write hooks and retained code rows do not own the first write installer");
      observations.push({ firstWriteInstallerCollected: true, writeColdSegments: 1, writeWarmSegments: 0, ...writeController.cacheStats() });

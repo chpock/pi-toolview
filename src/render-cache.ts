@@ -1,68 +1,97 @@
-/** Bounded rendered-data retention. This module never stores component keys or raw tool state. */
-export interface CacheStats {
+/** Component state owns rendered data; this module keeps only weak accounting records. */
+export const LAYOUT_KINDS = ["summary", "bash", "edit", "write", "user"] as const;
+export type LayoutKind = typeof LAYOUT_KINDS[number];
+export interface LayoutMemory {
   retainedBytes: number;
-  limitBytes: number;
+  stringBytes: number;
+  overheadBytes: number;
   entries: number;
+  rows: number;
+}
+export interface CacheStats extends LayoutMemory {
   hits: number;
   misses: number;
   builds: number;
-  evictions: number;
-  skips: number;
+  releases: number;
+  collected: number;
+  byKind: Record<LayoutKind, LayoutMemory>;
 }
 export interface CacheEntry<T> { value?: T; bytes: number }
+interface AccountingRecord extends LayoutMemory {
+  reference: WeakRef<CacheEntry<unknown>>;
+  kind: LayoutKind;
+}
+const emptyMemory = (): LayoutMemory => ({ retainedBytes: 0, stringBytes: 0, overheadBytes: 0, entries: 0, rows: 0 });
+export function layoutMemory(rows: readonly string[]): LayoutMemory {
+  const stringBytes = rows.reduce((total, row) => total + row.length * 2, 0);
+  // Conservative accounting allowance for the entry/weak bookkeeping, rows and array slots.
+  const overheadBytes = 512 + rows.length * 64;
+  return { retainedBytes: stringBytes + overheadBytes, stringBytes, overheadBytes, entries: 1, rows: rows.length };
+}
+export const MEMORY_FIELDS = ["retainedBytes", "stringBytes", "overheadBytes", "entries", "rows"] as const;
 export class RenderCache {
-  private entries = new Map<CacheEntry<unknown>, undefined>();
-  private retainedBytes = 0;
+  private records = new Set<AccountingRecord>();
+  private accounting = new WeakMap<CacheEntry<unknown>, AccountingRecord>();
+  private memory = emptyMemory();
+  private kinds = Object.fromEntries(LAYOUT_KINDS.map(kind => [kind, emptyMemory()])) as Record<LayoutKind, LayoutMemory>;
   private hits = 0;
   private misses = 0;
   private builds = 0;
-  private evictions = 0;
-  private skips = 0;
-  private limitBytes: number;
-  private maxEntries: number;
-  private maxLimitBytes: number;
-  constructor(limitBytes = 8 * 1024 * 1024, maxEntries = 2048, maxLimitBytes = 64 * 1024 * 1024) {
-    this.maxLimitBytes = maxLimitBytes;
-    this.limitBytes = limitBytes; this.maxEntries = maxEntries;
-    this.setLimit(limitBytes);
-  }
+  private releases = 0;
+  private collected = 0;
+  // Only numeric metadata and a weak entry reference are held. Layout release itself
+  // does not depend on this callback: the component's weak state is its sole owner.
+  private finalizer = new FinalizationRegistry<AccountingRecord>(record => this.releaseRecord(record, true));
+
   get<T>(entry: CacheEntry<T> | undefined): T | undefined {
-    if (entry?.value !== undefined && this.entries.has(entry)) {
+    if (entry?.value !== undefined && this.accounting.has(entry)) {
       this.hits++;
-      this.entries.delete(entry); this.entries.set(entry, undefined);
       return entry.value;
     }
     this.misses++; return undefined;
   }
-  put<T>(value: T, rows: readonly string[]): CacheEntry<T> {
+  put<T>(value: T, rows: readonly string[], kind: LayoutKind = "summary"): CacheEntry<T> {
     this.builds++;
-    const bytes = 512 + rows.reduce((size, row) => size + 64 + row.length * 2, 0);
-    const entry: CacheEntry<T> = { bytes };
-    if (bytes > this.limitBytes || !this.maxEntries) { this.skips++; return entry; }
-    while (this.entries.size >= this.maxEntries || this.retainedBytes + bytes > this.limitBytes) this.evict();
-    entry.value = value; this.entries.set(entry, undefined); this.retainedBytes += bytes;
+    const memory = layoutMemory(rows);
+    const entry: CacheEntry<T> = { value, bytes: memory.retainedBytes };
+    const record: AccountingRecord = { ...memory, kind, reference: new WeakRef(entry) };
+    this.records.add(record); this.accounting.set(entry, record);
+    for (const field of MEMORY_FIELDS) {
+      this.memory[field] += memory[field]; this.kinds[kind][field] += memory[field];
+    }
+    this.finalizer.register(entry, record, record);
     return entry;
   }
   drop(entry: CacheEntry<unknown> | undefined) {
     if (!entry) return;
-    if (this.entries.delete(entry)) this.retainedBytes -= entry.bytes;
+    const record = this.accounting.get(entry);
     entry.value = undefined;
+    this.accounting.delete(entry);
+    if (record) this.releaseRecord(record, false);
   }
-  private evict() {
-    const entry = this.entries.keys().next().value;
-    if (entry) { this.drop(entry); this.evictions++; }
-  }
-  setLimit(bytes: number) {
-    if (!Number.isFinite(bytes) || bytes < 0 || bytes > this.maxLimitBytes) throw new RangeError(`Cache limit must be 0–${this.maxLimitBytes / 1024 / 1024} MiB`);
-    this.limitBytes = Math.floor(bytes);
-    while (this.retainedBytes > this.limitBytes) this.evict();
+  private releaseRecord(record: AccountingRecord, collected: boolean) {
+    if (!this.records.delete(record)) return;
+    this.finalizer.unregister(record);
+    for (const field of MEMORY_FIELDS) {
+      this.memory[field] -= record[field]; this.kinds[record.kind][field] -= record[field];
+    }
+    this.releases++;
+    if (collected) this.collected++;
   }
   clear() {
-    for (const entry of this.entries.keys()) entry.value = undefined;
-    this.entries.clear(); this.retainedBytes = 0;
+    for (const record of this.records) {
+      const entry = record.reference.deref();
+      if (entry) entry.value = undefined;
+      this.releaseRecord(record, !entry);
+    }
+    this.accounting = new WeakMap();
   }
   stats(): CacheStats {
-    return { retainedBytes: this.retainedBytes, limitBytes: this.limitBytes, entries: this.entries.size,
-      hits: this.hits, misses: this.misses, builds: this.builds, evictions: this.evictions, skips: this.skips };
+    // On demand only. Finalizers are eventual; a requested snapshot must exclude
+    // entries already collected even if their metadata callback has not run yet.
+    for (const record of this.records) if (!record.reference.deref()) this.releaseRecord(record, true);
+    return { ...this.memory, hits: this.hits, misses: this.misses, builds: this.builds,
+      releases: this.releases, collected: this.collected,
+      byKind: Object.fromEntries(LAYOUT_KINDS.map(kind => [kind, { ...this.kinds[kind] }])) as Record<LayoutKind, LayoutMemory> };
   }
 }

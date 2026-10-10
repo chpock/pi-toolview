@@ -540,6 +540,39 @@ export default function terminalDriver(pi: ExtensionAPI) {
   // Native component update probe is opt-in, UI-only and never mutates model/session objects.
   if (process.env.TOOLVIEW_TEST_CACHE_DIAGNOSTICS === "1") {
     const replacements = new Map<string, { node: any; original: any; replacement: any }>();
+    let detached: { parent: Container; node: ToolExecutionComponent; index: number } | undefined;
+    function restoreDetached() {
+      if (!detached) return;
+      const { parent, node, index } = detached;
+      parent.addChild(node);
+      // Public child order is restored exactly; the adapter repairs its recorded index on normal render.
+      parent.children.splice(parent.children.indexOf(node), 1); parent.children.splice(index, 0, node);
+      detached = undefined;
+    }
+    pi.registerCommand("tv-cache-detach", {
+      description: "Isolated ownership regression: remove/restore a real native tool while retaining the removed owner",
+      handler: async (args, ctx) => {
+        const [id, operation, extra] = args.trim().split(/\s+/u);
+        if (!id || extra || !["remove", "restore"].includes(operation)) throw new Error("Invalid cache detach probe");
+        if (operation === "remove") {
+          if (detached) throw new Error("Restore the removed component first");
+          function find(parent: Container): typeof detached {
+            for (const [index, child] of parent.children.entries()) {
+              if (child instanceof ToolExecutionComponent && Reflect.get(child, "toolCallId") === id)
+                return { parent, node: child, index };
+              if (child instanceof Container) { const found = find(child); if (found) return found; }
+            }
+          }
+          detached = find(tui);
+          if (!detached) throw new Error("Detach probe requires a real attached tool");
+          detached.parent.removeChild(detached.node);
+        } else {
+          if (!detached || Reflect.get(detached.node, "toolCallId") !== id) throw new Error("No matching removed component");
+          restoreDetached();
+        }
+        tui.requestRender(); ctx.ui.notify(`TERMINAL_CACHE_DETACH ${id} ${operation}`, "info");
+      },
+    });
     pi.registerCommand("tv-cache-update", {
       description: "Isolated cache regression: update one native result, reuse it, or restore it",
       handler: async (args, ctx) => {
@@ -577,7 +610,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
     });
     pi.on("session_shutdown", () => {
       for (const { node, original } of replacements.values()) node.updateResult(original, false);
-      replacements.clear();
+      replacements.clear(); restoreDetached();
     });
   }
   pi.registerCommand("tv-dump", {

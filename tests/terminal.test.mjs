@@ -2363,7 +2363,7 @@ test('real CLI: actual-screen complete command width regression', { skip: stockO
 
 // Observable work counters come only from actual /toolview notifications in the live tree.
 // pointer-cache-* deliberately avoids the pre-existing alternate-width dump probes.
-test('real CLI: render cache work counters and bounded retained memory',
+test('real CLI: component-owned layout work counters and released retained memory',
   { skip: stockOnly, timeout: 120000 }, async () => {
     const terminals = [], snapshots = [];
     const start = async (name, options = {}, resizeTall = true) => {
@@ -2375,21 +2375,28 @@ test('real CLI: render cache work counters and bounded retained memory',
       const dump = await terminal.capture(`pointer-cache-${name}`);
       const stats = dump.cacheDiagnostics.at(-1);
       assert.ok(stats, 'real cache command produced a JSON notification in the native tree');
-      assert.deepEqual(Object.keys(stats).sort(), ['retainedBytes', 'limitBytes', 'entries', 'hits', 'misses', 'builds',
-        'evictions', 'skips', 'ordinary', 'cards', 'processHeapUsedBytes', 'processMemoryScope'].sort(), 'diagnostic schema is explicit and bounded');
-      for (const key of ['retainedBytes', 'limitBytes', 'entries', 'hits', 'misses', 'builds', 'evictions', 'skips', 'processHeapUsedBytes'])
+      const numeric = ['retainedBytes', 'stringBytes', 'overheadBytes', 'rows', 'entries', 'hits', 'misses', 'builds', 'releases', 'collected'];
+      const memory = ['retainedBytes', 'stringBytes', 'overheadBytes', 'rows', 'entries'];
+      assert.deepEqual(Object.keys(stats).sort(), [...numeric, 'byKind', 'ordinary', 'cards', 'footerLayout',
+        'presentationRetainedBytes', 'presentationEntries', 'presentationRows', 'memoryScope', 'processHeapUsedBytes', 'processMemoryScope'].sort());
+      for (const key of [...numeric, 'presentationRetainedBytes', 'presentationEntries', 'presentationRows', 'processHeapUsedBytes'])
         assert.ok(Number.isSafeInteger(stats[key]) && stats[key] >= 0, `finite nonnegative diagnostic ${key}`);
       assert.equal(stats.processMemoryScope, 'whole Pi process, not Toolview');
+      assert.match(stats.memoryScope, /estimated Toolview retained/);
       assert.ok(stats.processHeapUsedBytes > 0, 'process heap is sampled, not attributed to Toolview');
-      assert.ok(stats.retainedBytes <= stats.limitBytes, 'retained rendered data never exceeds its current budget');
-      assert.ok(stats.entries <= 4096, 'aggregate entry count never exceeds two bounded pools');
-      for (const pool of ['ordinary', 'cards']) {
-        assert.deepEqual(Object.keys(stats[pool]).sort(), ['retainedBytes', 'limitBytes', 'entries', 'hits', 'misses', 'builds', 'evictions', 'skips'].sort());
-        assert.ok(stats[pool].entries <= 2048 && stats[pool].retainedBytes <= stats[pool].limitBytes);
-        for (const key of Object.keys(stats[pool])) {
-          assert.ok(Number.isSafeInteger(stats[pool][key]) && stats[pool][key] >= 0);
-          assert.equal(stats[key], stats.ordinary[key] + stats.cards[key], `aggregate ${key} equals the two independent pools`);
+      assert.equal(stats.retainedBytes, stats.stringBytes + stats.overheadBytes);
+      assert.equal(stats.presentationRetainedBytes, stats.retainedBytes + stats.footerLayout.retainedBytes);
+      assert.equal(stats.presentationEntries, stats.entries + stats.footerLayout.entries);
+      assert.equal(stats.presentationRows, stats.rows + stats.footerLayout.rows);
+      assert.deepEqual(Object.keys(stats.byKind).sort(), ['summary', 'bash', 'edit', 'write', 'user'].sort());
+      for (const group of ['ordinary', 'cards']) {
+        assert.deepEqual(Object.keys(stats[group]).sort(), [...numeric, 'byKind'].sort());
+        for (const key of numeric) {
+          assert.ok(Number.isSafeInteger(stats[group][key]) && stats[group][key] >= 0);
+          assert.equal(stats[key], stats.ordinary[key] + stats.cards[key], `aggregate ${key} equals both accounting groups`);
         }
+        for (const key of memory)
+          assert.equal(stats[group][key], Object.values(stats[group].byKind).reduce((total, item) => total + item[key], 0));
       }
       snapshots.push({ terminal: terminal.output, name, ...stats });
       return { dump, stats };
@@ -2397,7 +2404,7 @@ test('real CLI: render cache work counters and bounded retained memory',
     const delta = (before, after, builds, label) => {
       assert.equal(after.builds - before.builds, builds, `${label}: exact custom-body builds`);
       assert.equal(after.misses - before.misses, builds, `${label}: each necessary build is one miss`);
-      for (const key of ['hits', 'misses', 'builds', 'evictions', 'skips'])
+      for (const key of ['hits', 'misses', 'builds', 'releases', 'collected'])
         assert.ok(after[key] >= before[key], `${label}: ${key} remains monotonic`);
       assert.ok(after.hits > before.hits, `${label}: unchanged components actually hit the cache`);
     };
@@ -2435,8 +2442,9 @@ test('real CLI: render cache work counters and bounded retained memory',
       await panelCells(wide, 7, 'CACHE_OUTPUT_7_');
       await bashScreenStyle(wide, 'CACHE_OUTPUT_7_0010_ASCII_PAYLOAD', 'toolOutput', 'toolPendingBg');
       let { stats: previous } = await observe(live, 'warm');
-      assert.equal(previous.ordinary.limitBytes, 1024 * 1024, 'initial string CLI ordinary budget is applied');
-      assert.equal(previous.cards.limitBytes, 128 * 1024 * 1024, 'separate card pool defaults to 128 MiB');
+      assert.equal('limitBytes' in previous, false, 'legacy launch budget does not reintroduce eviction');
+      assert.equal(previous.byKind.summary.entries, 2); assert.equal(previous.byKind.user.entries, 1);
+      assert.equal(previous.byKind.bash.entries, 8);
       assert.equal(previous.ordinary.entries, 3); assert.equal(previous.cards.entries, 8);
       assert.equal(wide.users.length, 1, 'one actual user message joins the ten custom tool components');
        assert.equal(previous.entries, 11, 'one latest layout per eight bash, two compact tools and one user card; hidden contributes none');
@@ -2484,6 +2492,21 @@ test('real CLI: render cache work counters and bounded retained memory',
         allBashCards(measured.dump); previous = measured.stats;
       }
       identity(measured.dump, wide);
+      const sessionBeforeDetach = readFileSync(wide.session);
+      await live.command(`/tv-cache-detach ${chosen.id} remove`);
+      measured = await observe(live, 'detached-live-owner');
+      delta(previous, measured.stats, 0, 'removing a retained native owner does not rebuild its neighbors');
+      assert.equal(measured.stats.entries, 10); assert.equal(measured.stats.cards.entries, 7);
+      assert.equal(measured.stats.releases - previous.releases, 1, 'representation is released even while the driver deliberately retains the removed component');
+      assert.ok(!measured.dump.tools.some(tool => tool.id === chosen.id));
+      assert.deepEqual(readFileSync(wide.session), sessionBeforeDetach);
+      previous = measured.stats;
+      await live.command(`/tv-cache-detach ${chosen.id} restore`);
+      measured = await observe(live, 'reattached-live-owner');
+      delta(previous, measured.stats, 1, 'reattachment rebuilds only the removed representation');
+      assert.equal(measured.stats.entries, 11); identity(measured.dump, wide);
+      assert.deepEqual(measured.dump.tools.map(tool => tool.lines), wide.tools.map(tool => tool.lines));
+      assert.deepEqual(readFileSync(wide.session), sessionBeforeDetach); previous = measured.stats;
       await live.resize(24, 320); measured = await observe(live, 'narrow');
       delta(previous, measured.stats, 11, 'width resize affects ten tools and one user card once');
       assert.equal(measured.stats.entries, 11, 'width replacement does not retain historical variants');
@@ -2512,28 +2535,13 @@ test('real CLI: render cache work counters and bounded retained memory',
       delta(previous, measured.stats, 1, 'whole-panel output click replaces expanded layout with preview');
       assert.deepEqual(measured.dump.tools.map((tool) => tool.lines), wide.tools.map((tool) => tool.lines)); previous = measured.stats;
 
-      // Command snapshot precedes its requested frame: reduction/clear must already be observable there.
-      const tiny = await observe(live, 'tiny-limit', '/toolview cache cards limit 0.02');
-      assert.equal(tiny.stats.cards.limitBytes, Math.floor(0.02 * 1024 * 1024));
-      assert.equal(tiny.stats.ordinary.entries, 3);
-      assert.equal(tiny.stats.ordinary.evictions, previous.ordinary.evictions);
-      assert.ok(tiny.stats.evictions > previous.evictions, 'limit reduction immediately evicts retained rendered data');
-      measured = await observe(live, 'tiny-rendered');
-      assert.ok(measured.stats.evictions > tiny.stats.evictions, 'tiny budget exercises real render-time LRU eviction');
-      assert.equal(measured.stats.ordinary.builds, previous.ordinary.builds, 'Bash pressure never rebuilds ordinary summaries/user card');
-      assert.equal(measured.stats.ordinary.evictions, previous.ordinary.evictions);
-      allBashCards(measured.dump); identity(measured.dump, wide);
-      const zeroCards = await observe(live, 'zero-card-limit', '/toolview cache cards limit 0');
-      assert.equal(zeroCards.stats.cards.entries, 0); assert.equal(zeroCards.stats.ordinary.entries, 3);
-      const zero = await observe(live, 'zero-limit', '/toolview cache limit 0');
-      assert.equal(zero.stats.limitBytes, 0); assert.equal(zero.stats.entries, 0); assert.equal(zero.stats.retainedBytes, 0);
-      measured = await observe(live, 'zero-rendered');
-      assert.equal(measured.stats.entries, 0); assert.equal(measured.stats.retainedBytes, 0);
-      assert.ok(measured.stats.builds > zero.stats.builds && measured.stats.skips > zero.stats.skips, 'zero disables retention, not correct rendering');
-      allBashCards(measured.dump); identity(measured.dump, wide);
-      await observe(live, 'ordinary-budget-restored', '/toolview cache limit 1');
-      await observe(live, 'budget-restored', '/toolview cache cards limit 128');
-      measured = await observe(live, 'budget-warm'); assert.equal(measured.stats.entries, 11); previous = measured.stats;
+      // Retired controls cannot evict any representation, including an explicit zero.
+      for (const command of ['/toolview cache cards limit 0.02', '/toolview cache cards limit 0', '/toolview cache limit 0'])
+        await live.command(command);
+      measured = await observe(live, 'retired-limits-ignored');
+      delta(previous, measured.stats, 0, 'retired limit commands preserve component-owned layouts');
+      assert.equal(measured.stats.entries, 11); assert.equal(measured.stats.retainedBytes, previous.retainedBytes);
+      allBashCards(measured.dump); identity(measured.dump, wide); previous = measured.stats;
       const clear = await observe(live, 'clear', '/toolview cache clear');
       assert.equal(clear.stats.entries, 0); assert.equal(clear.stats.retainedBytes, 0);
       assert.equal(clear.stats.builds, previous.builds, 'clear releases data before any next-frame builds');
@@ -2581,13 +2589,24 @@ test('real CLI: render cache work counters and bounded retained memory',
       const replayWarm = await observe(replay, 'replay-warm'); delta(replayCold.stats, replayWarm.stats, 0, 'actual same-session replay warm frames');
       for (const type of ['call', 'result', 'model_context', 'provider_error'])
         assert.equal(replay.events().filter((event) => event.type === type).length, 0, `Toolview replay emits no ${type}`);
+      const regular = await start('cache-performance-regular-replay', { toolview: true, mode: 'regular', session, workspace: live.work });
+      const regularBase = await observe(regular, 'regular-base'); identity(regularBase.dump, wide);
+      assert.equal(regularBase.stats.entries, 11);
+      assert.deepEqual(regularBase.dump.tools.map(tool => tool.lines), wide.tools.map(tool => tool.lines));
+      const regularWarm = await observe(regular, 'regular-warm'); delta(regularBase.stats, regularWarm.stats, 0, 'regular replay unchanged frame');
+      const regularClear = await observe(regular, 'regular-clear', '/toolview cache clear');
+      assert.equal(regularClear.stats.presentationEntries, 0);
+      const regularCold = await observe(regular, 'regular-cold'); delta(regularClear.stats, regularCold.stats, 11, 'regular replay clear rebuild');
+      for (const type of ['call', 'result', 'model_context', 'provider_error'])
+        assert.equal(regular.events().filter(event => event.type === type).length, 0, `regular replay emits no ${type}`);
+      assert.deepEqual(readFileSync(session), sessionBeforeDetach);
       writeFileSync(join(artifacts, 'cache-performance-coverage.json'), JSON.stringify({
         builtInBash: true, installedAFTExecuted: false, calls: 11, results: 11, modelContexts: 12,
         bashCalls: 8, fullOutputLinesPerBash: 1000, customComponents: 11, userCards: 1, hiddenNativeComponents: 1,
         replayCalls: 0, replayResults: 0, replayModelContexts: 0, snapshots,
         checked: ['exact independent body oracle', 'physical panel/theme/output cells', 'native wheel/editor/no-hover frames',
-          'single native result replacement/reused-object/restore', 'one latest width', 'theme rebuild counts', 'one native bash click expansion/collapse',
-          'independent card pressure/eviction preserves ordinary builds/entries', 'zero per-pool retention/skips', 'clear cold rebuild', 'off release/on cold', 'native/replay/session/model identity'],
+          'single native result replacement/reused-object/restore', 'remove retained live owner/release/reinsert exact child order', 'one latest width', 'theme rebuild counts', 'one native bash click expansion/collapse',
+          'regular/fullscreen replay warm and clear counters', 'retired byte/zero limits cannot evict component layouts', 'presentation-kind and footer memory estimates', 'clear cold rebuild', 'off release/on cold', 'native/replay/session/model identity'],
       }, null, 2));
     } finally { for (const terminal of terminals.reverse()) { await terminal.close(); terminal.dispose(); } }
   });
@@ -3024,9 +3043,8 @@ test('real CLI: minified edit keeps linear ANSI size, warm work, exact traffic a
       await terminal.command('/toolview cache');
       const dump = await terminal.capture(`pointer-minified-${name}`), stats = dump.cacheDiagnostics.at(-1);
       assert.ok(stats);
-      assert.equal(stats.ordinary.limitBytes, 8 * 1024 * 1024, 'ordinary default remains 8 MiB');
-      assert.equal(stats.cards.limitBytes, 128 * 1024 * 1024, 'diff uses the separate 128 MiB card pool');
-      assert.equal(stats.limitBytes, 136 * 1024 * 1024, 'aggregate budget is the sum, not the old shared limit');
+      assert.equal('limitBytes' in stats, false, 'component-owned diffs have no admission or byte limit');
+      assert.equal(stats.byKind.edit.entries, 1, 'memory is attributed to the rendered edit representation');
       assert.equal(stats.cards.entries, 1, 'the actual minified diff is retained in the card pool');
       return { dump, stats };
     };
@@ -3040,7 +3058,8 @@ test('real CLI: minified edit keeps linear ANSI size, warm work, exact traffic a
       const warm = await observe(live, 'warm'); check(warm.dump);
       const again = await observe(live, 'again'); check(again.dump);
       assert.equal(again.stats.builds, warm.stats.builds, 'unchanged real frames do no custom rebuilds');
-      assert.equal(again.stats.skips, warm.stats.skips, 'the formerly oversized minified card is not rejected');
+      assert.equal(again.stats.cards.entries, 1); assert.equal(again.stats.cards.retainedBytes, warm.stats.cards.retainedBytes,
+        'unchanged minified body remains retained with no admission-limit exception');
       for (const width of [140, 100]) {
         await live.resize(width); check(await live.capture(`pointer-minified-width-${width}`), width <= 120);
       }
@@ -3063,7 +3082,7 @@ test('real CLI: minified edit keeps linear ANSI size, warm work, exact traffic a
         assert.equal(replay.events().filter((event) => ['call', 'result', 'model_context'].includes(event.type)).length, 0);
       }
       writeFileSync(join(artifacts, 'edit-performance-coverage.json'), JSON.stringify({ calls: 2, results: 2, modelContexts: 3,
-        defaultBudgetMiB: 8, warmBuildsBefore: warm.stats.builds, warmBuildsAfter: again.stats.builds,
+        componentOwnedRetention: true, warmBuildsBefore: warm.stats.builds, warmBuildsAfter: again.stats.builds,
         snapshots, identity: 'exact traffic, persisted metadata, session bytes and regular/fullscreen replay',
         scope: 'actual built-in edit/read; no cache policy change, truncation or timing threshold' }, null, 2));
     } finally { for (const terminal of terminals.reverse()) { await terminal.close(); terminal.dispose(); } }

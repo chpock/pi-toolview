@@ -95,7 +95,7 @@ A content row is a row belonging to the tool visualization, excluding an extensi
 
 A fullscreen primary click on **any content row** of a completed compact call expands that call. Separator rows, pending/partial calls and wheel events do not trigger expansion. Coordinates forwarded to native handlers account for any added separator. Ctrl+O, native collapse, reload, enable/disable and history reconstruction continue to use Pi's existing mechanisms.
 
-Custom rows and neighbor metadata follow the [bounded render-cache contract](render-cache-spec.md). Unchanged UI frames reuse formatting/wrapping; width/Output-padding/state/theme changes rebuild affected content without a multi-width history. Visibility remains native-authoritative, including the verified stock-edit fast path described in [architecture](architecture.md#native-visibility).
+Custom rows and neighbor metadata follow the [component-owned render-cache contract](render-cache-spec.md). Unchanged UI frames reuse formatting/wrapping; width/Output-padding/state/theme changes rebuild affected content without a multi-width history. Visibility remains native-authoritative, including the verified stock-edit fast path described in [architecture](architecture.md#native-visibility).
 
 ## 8. Representative logical summaries
 

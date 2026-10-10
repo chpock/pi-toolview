@@ -12,7 +12,7 @@ import { GitBranchSource } from "./git-branch.ts";
 import { FOOTER_FIELDS, FooterView, footerUsage, type FooterData } from "./footer.ts";
 import { TerminalColors, terminalColorExit } from "./terminal-colors.ts";
 import type { CardTheme } from "./card-theme.ts";
-import { RenderCache, type CacheEntry, type CacheStats } from "./render-cache.ts";
+import { RenderCache, LAYOUT_KINDS, MEMORY_FIELDS, type LayoutKind, type LayoutMemory, type CacheEntry, type CacheStats } from "./render-cache.ts";
 import { argumentParts, summaryName } from "./summary-args.ts";
 export { describeArgs, sanitize } from "./summary-args.ts";
 let terminalColorDebug: WeakRef<TerminalColors> | undefined;
@@ -81,8 +81,6 @@ export interface ToolviewOptions {
   cards?: readonly string[];
   compact?: readonly string[];
   warn?: (reason: string) => void;
-  cacheMiB?: number;
-  cardCacheMiB?: number;
   /** Current effective Pi Output padding (0 or 1); no settings mutation. */
   outputPad?: () => number;
   /** Do not compete with a public editor factory owned by another extension. */
@@ -104,8 +102,6 @@ export interface ToolviewController {
   renderEditorStatus(width: number, info: EditorStatusInfo): string[];
   cacheStats(): ToolviewCacheStats;
   clearCache(): void;
-  setCacheLimitMiB(value: number): void;
-  setCardCacheLimitMiB(value: number): void;
 }
 const DEFAULT_CARDS = ["bash", "powershell", "write", "edit"];
 // The public factory exposes the stable stock renderer functions; no execution or file I/O.
@@ -232,8 +228,8 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
   let active = false;
   let reason: string | undefined;
   const parents = new WeakMap<Component, { parent: Container; index: number }>();
-  const cache = new RenderCache((options.cacheMiB ?? 8) * 1024 * 1024);
-  const cardCache = new RenderCache((options.cardCacheMiB ?? 128) * 1024 * 1024, 2048, 128 * 1024 * 1024);
+  const cache = new RenderCache();
+  const cardCache = new RenderCache();
   type Layout = { rows: string[]; framed?: boolean; native?: boolean };
   type SummaryLayout = Layout & { prefixLength: number; prefixLeft: number; prefixSpace: boolean };
   // One plain snapshot per normal transcript pass; direct component visits read live settings.
@@ -300,6 +296,7 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
   const originalAdd = Container.prototype.addChild;
   const containerRender = Object.getOwnPropertyDescriptor(Container.prototype, "render")!;
   const containerClear = Container.prototype.clear;
+  const containerRemove = Container.prototype.removeChild;
   const spacerRender = Object.getOwnPropertyDescriptor(Spacer.prototype, "render")!;
   let widgetSpacerPass: { spacer: Spacer; width: number; rows?: number; blank?: boolean } | undefined;
   let upperWidgetRows = new WeakMap<Container, { width: number; rows: number; spacer: WeakRef<Spacer> }>();
@@ -321,7 +318,7 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
       kind === "edit" || kind === "write" ? theme.colors : undefined,
       kind === "edit" || kind === "write" ? theme.style : undefined, kind === "edit" || kind === "write" ? theme.bg : undefined];
   }
-  function memo<T extends Layout>(node: ToolNode, kind: string, width: number, theme: Palette, directory: string | undefined, padding: number, build: () => T): T {
+  function memo<T extends Layout>(node: ToolNode, kind: LayoutKind, width: number, theme: Palette, directory: string | undefined, padding: number, build: () => T): T {
     const signature = layoutSignature(node, kind, width, theme, directory, padding);
     const state = states.get(node);
     const matches = state && signature.every((value, index) => value === state.signature[index]);
@@ -332,7 +329,7 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     // Select by the materialized presentation, not tool name: inline/native file fallback is ordinary.
     const pool = kind === "bash" || ((kind === "edit" || kind === "write") && value.framed && !value.native) ? cardCache : cache;
     if (!matches) pool.get(undefined); // Attribute exactly one miss to the target pool.
-    states.set(node, { signature, pool, entry: pool.put(value, value.rows) });
+    states.set(node, { signature, pool, entry: pool.put(value, value.rows, kind) });
     return value;
   }
   const bashLayout = (node: ToolNode, width: number) => {
@@ -344,7 +341,7 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     const context = node.getRenderContext() as { cwd?: unknown } | undefined;
     const cwd = typeof context?.cwd === "string" ? context.cwd : undefined;
     const padding = outputPadding();
-    return memo(node, node.toolName, width, theme, cwd, padding, () => renderFileCard(node, cwd, width, theme,
+    return memo(node, node.toolName as "edit" | "write", width, theme, cwd, padding, () => renderFileCard(node, cwd, width, theme,
       theme.colors && theme.style ? (code, path) => highlightCode(code, getLanguageFromPath(path)) : undefined, padding) ??
       { rows: nativeRows(node, width), framed: false, native: true });
   };
@@ -379,9 +376,16 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     cacheStats: () => {
       const ordinary = cache.stats(), cards = cardCache.stats();
       return { ordinary, cards,
-        retainedBytes: ordinary.retainedBytes + cards.retainedBytes, limitBytes: ordinary.limitBytes + cards.limitBytes,
-        entries: ordinary.entries + cards.entries, hits: ordinary.hits + cards.hits, misses: ordinary.misses + cards.misses,
-        builds: ordinary.builds + cards.builds, evictions: ordinary.evictions + cards.evictions, skips: ordinary.skips + cards.skips };
+        retainedBytes: ordinary.retainedBytes + cards.retainedBytes,
+        stringBytes: ordinary.stringBytes + cards.stringBytes, overheadBytes: ordinary.overheadBytes + cards.overheadBytes,
+        rows: ordinary.rows + cards.rows, entries: ordinary.entries + cards.entries,
+        hits: ordinary.hits + cards.hits, misses: ordinary.misses + cards.misses, builds: ordinary.builds + cards.builds,
+        releases: ordinary.releases + cards.releases, collected: ordinary.collected + cards.collected,
+        byKind: Object.fromEntries(LAYOUT_KINDS.map(kind => {
+          const memory = { ...ordinary.byKind[kind] };
+          for (const field of MEMORY_FIELDS) memory[field] += cards.byKind[kind][field];
+          return [kind, memory];
+        })) as Record<LayoutKind, LayoutMemory> };
     },
     renderEditorStatus(width, info) {
       const editor = statusEditor?.deref(), state = editor && editorStates.get(editor);
@@ -396,14 +400,14 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
       catch { fail("Toolview could not render editor status; native rendering restored"); return []; }
     },
     clearCache,
-    setCacheLimitMiB: (value) => cache.setLimit(value * 1024 * 1024),
-    setCardCacheLimitMiB: (value) => cardCache.setLimit(value * 1024 * 1024),
     restore() {
       if (!active && !patches.size && !userPatches.size && !editorPatches.size) return;
       active = false;
       stopSpinner(); animated.clear(); animationRefs = new WeakMap();
       clearCache();
       if (Container.prototype.addChild === patchedAdd) Container.prototype.addChild = originalAdd;
+      if (Container.prototype.clear === patchedClear) Container.prototype.clear = containerClear;
+      if (Container.prototype.removeChild === patchedRemove) Container.prototype.removeChild = containerRemove;
       if (Container.prototype.render === observeWidgetRows) Object.defineProperty(Container.prototype, "render", containerRender);
       if (Spacer.prototype.render === observeWidgetSpacer) Object.defineProperty(Spacer.prototype, "render", spacerRender);
       upperWidgetRows = new WeakMap(); nativeStatusRows = new WeakMap(); widgetSpacerPass = undefined;
@@ -687,7 +691,7 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
       const value = cache.get(state.entry); if (value) return value;
     } else { cache.drop(state?.entry); cache.get(undefined); }
     const value = renderUserCard(width, node.outputPad, theme, (size) => originalRender.call(node, size), padding);
-    userStates.set(node, { signature, entry: cache.put(value, value.rows) });
+    userStates.set(node, { signature, entry: cache.put(value, value.rows, "user") });
     return value;
   }
   function installUser(node: UserNode) {
@@ -829,7 +833,7 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     const slots = managedEditorSlots(editor);
     if (!slots) return undefined;
     const group = slots[3] as Container, spacer = group.children[0];
-    if (group.render !== observeWidgetRows || group.clear !== containerClear || group.addChild !== patchedAdd ||
+    if (group.render !== observeWidgetRows || group.clear !== patchedClear || group.addChild !== patchedAdd ||
       !spacer || Object.getPrototypeOf(spacer) !== Spacer.prototype || spacer.render !== observeWidgetSpacer)
       return undefined;
     return group;
@@ -953,6 +957,22 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     // A whole prebuilt subtree can be attached during history reconstruction.
     visit(child, this, this.children.length - 1);
   }
+  function releaseTree(node: Component) {
+    if (candidate(node)) { forget(node); removeAnimation(node); }
+    else if (userCandidate(node)) forgetUser(node);
+    parents.delete(node);
+    if (node instanceof Container) for (const child of node.children) releaseTree(child);
+  }
+  function patchedRemove(this: Container, child: Component) {
+    containerRemove.call(this, child);
+    // A component already moved to another attached parent keeps its current layout.
+    if (!this.children.includes(child) && !attached(child)) releaseTree(child);
+  }
+  function patchedClear(this: Container) {
+    const children = this.children;
+    containerClear.call(this);
+    for (const child of children) if (!this.children.includes(child) && !attached(child)) releaseTree(child);
+  }
 
   if (!(tui instanceof Container) || typeof tui.requestRender !== "function") {
     fail("The live Pi TUI does not share the host Container; native rendering retained");
@@ -963,6 +983,8 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     visit(tui);
     if (active) {
       Container.prototype.addChild = patchedAdd;
+      Container.prototype.clear = patchedClear;
+      Container.prototype.removeChild = patchedRemove;
       Object.defineProperty(Container.prototype, "render", { ...containerRender, value: observeWidgetRows });
       Object.defineProperty(Spacer.prototype, "render", { ...spacerRender, value: observeWidgetSpacer });
       installingEditorHooks = false;
@@ -978,14 +1000,9 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
 export default function toolview(pi: ExtensionAPI) {
   pi.registerFlag("toolview-card", { type: "string", description: "Additional comma-separated tool names that retain native cards" });
   pi.registerFlag("toolview-compact", { type: "string", description: "Comma-separated tool names that use compact summaries instead of native cards" });
-  pi.registerFlag("toolview-cache-mb", { type: "string", description: "Ordinary render-cache budget in MiB (0–64; default 8)" });
-  pi.registerFlag("toolview-card-cache-mb", { type: "string", description: "Bash/edit/write-card render-cache budget in MiB (0–128; default 128)" });
-  let cacheMiB: number | undefined, cardCacheMiB: number | undefined;
-  function cacheLimit(text: string, maximum = 64): number {
-    const value = Number(text);
-    if (!text.trim() || !Number.isFinite(value) || value < 0 || value > maximum) throw new RangeError(`Cache limit must be 0–${maximum} MiB`);
-    return value;
-  }
+  const retiredBudgetFlags = ["toolview-cache-mb", "toolview-card-cache-mb"];
+  for (const flag of retiredBudgetFlags) pi.registerFlag(flag, { type: "string", description: "Deprecated and ignored: layouts are retained per component without eviction limits" });
+  let warnedBudgetFlags = false;
   let controller: ToolviewController | undefined;
   let enabled = true, colorsEnabled = true;
   let liveContext: ExtensionContext | undefined;
@@ -1096,13 +1113,10 @@ export default function toolview(pi: ExtensionAPI) {
     if (ctx.mode !== "tui" || !enabled) return;
     startColors(ctx);
     if (controller?.active) { startFooter(ctx); return; }
-    if (cacheMiB === undefined) {
-      try { cacheMiB = cacheLimit(String(pi.getFlag("toolview-cache-mb") ?? "8")); }
-      catch { ctx.ui.notify("Pi Toolview: invalid --toolview-cache-mb; using 8 MiB", "warning"); cacheMiB = 8; }
-    }
-    if (cardCacheMiB === undefined) {
-      try { cardCacheMiB = cacheLimit(String(pi.getFlag("toolview-card-cache-mb") ?? "128"), 128); }
-      catch { ctx.ui.notify("Pi Toolview: invalid --toolview-card-cache-mb; using 128 MiB", "warning"); cardCacheMiB = 128; }
+    if (!warnedBudgetFlags) {
+      warnedBudgetFlags = true;
+      for (const flag of retiredBudgetFlags) if (pi.getFlag(flag) !== undefined)
+        ctx.ui.notify(`Pi Toolview: --${flag} is ignored; layouts are retained per component without eviction limits`, "warning");
     }
     // A public widget factory exposes the actual live tree, including bundled CLI classes.
     // Remove the empty widget immediately: it is not part of our layout.
@@ -1111,7 +1125,7 @@ export default function toolview(pi: ExtensionAPI) {
       if (ctx.ui.getEditorComponent() === undefined && slot instanceof Container && slot.children.length === 1)
         pendingFooter = { slot: new WeakRef(slot), owner: new WeakRef(slot.children[0]!) };
       controller = installToolview(tui, palette, {
-        cards: names("toolview-card"), compact: names("toolview-compact"), cacheMiB, cardCacheMiB,
+        cards: names("toolview-card"), compact: names("toolview-compact"),
         outputPad: () => pi.getSettings().outputPad ?? 1,
         nativeEditor: () => liveContext?.ui.getEditorComponent() === undefined,
         editorStatus: true,
@@ -1157,7 +1171,7 @@ export default function toolview(pi: ExtensionAPI) {
   pi.on("session_start", (_event, ctx) => start(ctx));
   pi.on("session_shutdown", (_event, ctx) => { liveContext = ctx; pendingFooter = undefined; stopColors(); restoreFooter(); controller?.restore(); controller = undefined; liveContext = undefined; });
   pi.registerCommand("toolview", {
-    description: "Control presentation, terminal colors and bounded render cache: on, off, status, colors, cache",
+    description: "Control presentation, terminal colors and component-layout diagnostics: on, off, status, colors, cache",
     handler: async (args, ctx) => {
       liveContext = ctx;
       const command = args.trim() || "status";
@@ -1182,23 +1196,24 @@ export default function toolview(pi: ExtensionAPI) {
       }
       if (words[0] === "cache") {
         if (!controller || ctx.mode !== "tui") { ctx.ui.notify("Pi Toolview cache: unavailable outside an initialized terminal runtime", "info"); return; }
-        if (words.length === 2 && words[1] === "clear") controller.clearCache();
-        else if (words.length === 3 && words[1] === "limit") {
-          try { const value = cacheLimit(words[2]); controller.setCacheLimitMiB(value); cacheMiB = value; }
-          catch { ctx.ui.notify("Pi Toolview: cache limit must be 0–64 MiB", "warning"); return; }
-        } else if (words.length === 4 && words[1] === "cards" && words[2] === "limit") {
-          try { const value = cacheLimit(words[3], 128); controller.setCardCacheLimitMiB(value); cardCacheMiB = value; }
-          catch { ctx.ui.notify("Pi Toolview: card cache limit must be 0–128 MiB", "warning"); return; }
+        if (words.length === 2 && words[1] === "clear") { controller.clearCache(); ownedFooter?.clear(); }
+        else if (words[1] === "limit" || (words[1] === "cards" && words[2] === "limit")) {
+          ctx.ui.notify("Pi Toolview: cache limits have been removed; layouts are retained per component. Use /toolview cache [clear]", "warning"); return;
         } else if (words.length !== 1) {
-          ctx.ui.notify("Usage: /toolview cache [clear|limit <MiB>|cards limit <MiB>]", "warning"); return;
+          ctx.ui.notify("Usage: /toolview cache [clear]", "warning"); return;
         }
-        ctx.ui.notify(`Pi Toolview cache: ${JSON.stringify({ ...controller.cacheStats(),
+        const stats = controller.cacheStats();
+        const footerLayout = ownedFooter?.retainedMemory() ?? { retainedBytes: 0, stringBytes: 0, overheadBytes: 0, entries: 0, rows: 0 };
+        ctx.ui.notify(`Pi Toolview cache: ${JSON.stringify({ ...stats, footerLayout,
+          presentationRetainedBytes: stats.retainedBytes + footerLayout.retainedBytes,
+          presentationEntries: stats.entries + footerLayout.entries, presentationRows: stats.rows + footerLayout.rows,
+          memoryScope: "estimated Toolview retained transcript and footer layouts; excludes native caches, source/signature data and transient rendering",
           processHeapUsedBytes: process.memoryUsage().heapUsed, processMemoryScope: "whole Pi process, not Toolview" })}`, "info");
         return;
       }
       if (command === "off") { enabled = false; pendingFooter = undefined; stopColors(); restoreFooter(); controller?.restore(); }
       else if (command === "on") { enabled = true; start(ctx); }
-      else if (command !== "status") { ctx.ui.notify("Usage: /toolview on|off|status|colors on|off|status|cache [clear|limit <MiB>|cards limit <MiB>]", "warning"); return; }
+      else if (command !== "status") { ctx.ui.notify("Usage: /toolview on|off|status|colors on|off|status|cache [clear]", "warning"); return; }
       const status = controller?.active ? "on" : ctx.mode !== "tui" ? "unavailable outside terminal mode" : controller?.reason ?? "off";
       ctx.ui.notify(`Pi Toolview: ${status}`, "info");
     },

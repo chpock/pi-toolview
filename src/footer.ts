@@ -1,5 +1,6 @@
 import type { ContextUsage, SessionEntry, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
+import { layoutMemory, type LayoutMemory } from "./render-cache.ts";
 
 /** Source-only switches; reload after changing them. No runtime setting or command. */
 export const FOOTER_FIELDS = { tokenTotals: false, cacheTotals: false, cost: false };
@@ -159,6 +160,10 @@ export class FooterView implements Component {
       this.statuses.length === statuses.length && this.statuses.every(([key, value], i) => key === statuses[i]?.[0] && value === statuses[i]?.[1])) return this.rows;
     this.width = width; this.data = data; this.theme = theme; this.statuses = statuses;
     return this.rows = renderFooter(width, data, statuses, theme);
+  }
+  /** On-demand retained-row estimate; never reads session data or rebuilds the footer. */
+  retainedMemory(): LayoutMemory {
+    return this.rows ? layoutMemory(this.rows) : { retainedBytes: 0, stringBytes: 0, overheadBytes: 0, entries: 0, rows: 0 };
   }
   invalidate(): void { this.rows = undefined; }
   clear(): void { this.rows = undefined; this.data = undefined; this.theme = undefined; this.statuses = []; }

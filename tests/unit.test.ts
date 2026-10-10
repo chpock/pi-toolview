@@ -319,8 +319,16 @@ test("spinner clock stops on native zero-row visibility and render failure", (t)
 });
 
 test("spinner attachment follows stable TUI renderer replacement without probes, writes or orphan redraws", (t) => {
-  t.mock.timers.enable({ apis: ["setInterval"] });
-  const intervals = t.mock.method(globalThis, "setInterval"), clears = t.mock.method(globalThis, "clearInterval");
+  // Node22 MockTimers reschedules an interval cleared inside its own callback.
+  // Model only this lifecycle with explicit active handles; native cancellation is proven separately.
+  const callbacks = new Map<NodeJS.Timeout, () => void>();
+  const intervals = t.mock.method(globalThis, "setInterval", (callback: () => void, milliseconds: number) => {
+    assert.equal(milliseconds, 100);
+    const handle = { unref() { return this; } } as NodeJS.Timeout;
+    callbacks.set(handle, callback); return handle;
+  });
+  const clears = t.mock.method(globalThis, "clearInterval", (handle: NodeJS.Timeout) => { callbacks.delete(handle); });
+  const tick = () => { for (const [handle, callback] of [...callbacks]) if (callbacks.has(handle)) callback(); };
   const noop = () => {};
   const terminal: Terminal = { columns: 80, rows: 20, kittyProtocolActive: false, start: noop, stop: noop,
     drainInput: async () => {}, write: noop, moveBy: noop, hideCursor: noop, showCursor: noop,
@@ -341,15 +349,16 @@ test("spinner attachment follows stable TUI renderer replacement without probes,
   const first = new Tool("read"); first.result = undefined; current.addChild(first);
   const controller = installToolview(reference, () => color);
   try {
-    first.render(80); t.mock.timers.tick(100); assert.equal(intervals.mock.calls.length, 1);
+    first.render(80); tick(); assert.equal(intervals.mock.calls.length, 1);
     current = roots[1]!; const before = [...requests];
-    t.mock.timers.tick(100);
+    tick();
     assert.equal(clears.mock.calls.length, 1); assert.deepEqual(requests, before, "old root cannot keep redrawing a replacement renderer");
     const second = new Tool("custom"); second.result = undefined; current.addChild(second);
     assert.ok(second.render(80).at(-1)!.startsWith(" ⠋ "));
-    t.mock.timers.tick(100); assert.equal(intervals.mock.calls.length, 2);
+    tick(); assert.equal(intervals.mock.calls.length, 2);
     assert.equal(requests[1], before[1]! + 1); assert.equal(requests[0], before[0]);
     second.updateResult({ content: [] }); assert.equal(clears.mock.calls.length, 2);
+    assert.equal(callbacks.size, 0);
   } finally { controller.restore(); }
 });
 
@@ -1817,7 +1826,7 @@ test("unchanged UI frames reuse custom layout; one tool update does not rebuild 
     root.render(81); assert.equal(controller.cacheStats().builds, 17);
     controller.clearCache(); assert.equal(controller.cacheStats().retainedBytes, 0);
     root.render(81); assert.equal(controller.cacheStats().builds, 25);
-    controller.setCacheLimitMiB(0); controller.setCardCacheLimitMiB(0); assert.equal(controller.cacheStats().entries, 0);
+    root.clear(); assert.equal(controller.cacheStats().entries, 0);
     controller.restore(); assert.equal(controller.cacheStats().retainedBytes, 0);
   } finally { controller.restore(); Intl.Segmenter.prototype.segment = original; }
 });
@@ -1843,22 +1852,20 @@ test("reused mutable arguments and results invalidate only through native update
 });
 
 
-test("render cache bounds retained bytes/entries and drops evicted values without retaining owners", () => {
-  const cache = new RenderCache(2000, 2);
+test("render cache accounts weak component-owned entries and releases values explicitly", () => {
+  const cache = new RenderCache();
   const a = cache.put({ rows: ["a"] }, ["a"]), b = cache.put({ rows: ["b"] }, ["b"]);
   assert.equal(cache.stats().entries, 2); cache.get(a);
   const c = cache.put({ rows: ["c"] }, ["c"]);
-  assert.equal(b.value, undefined); assert.ok(a.value); assert.ok(c.value);
-  assert.ok(cache.stats().retainedBytes <= 2000); assert.equal(cache.stats().evictions, 1);
-  assert.deepEqual(Object.keys(a).sort(), ["bytes", "value"], "recency entries contain no owner, raw source or closure fields");
-  cache.setLimit(600); assert.ok(cache.stats().retainedBytes <= 600); assert.equal(cache.stats().entries, 1);
+  assert.ok(b.value); assert.ok(a.value); assert.ok(c.value);
+  assert.equal(cache.stats().entries, 3);
+  assert.deepEqual(Object.keys(a).sort(), ["bytes", "value"], "entries contain no owner, raw source or closure fields");
+  cache.drop(b); assert.equal(b.value, undefined); assert.equal(cache.stats().entries, 2);
   cache.clear(); assert.equal(a.value, undefined); assert.equal(c.value, undefined);
   assert.equal(cache.stats().retainedBytes, 0); assert.equal(cache.stats().entries, 0);
-  const big = cache.put({ rows: ["x".repeat(1000)] }, ["x".repeat(1000)]);
-  assert.equal(big.value, undefined); assert.equal(cache.stats().skips, 1);
-  cache.setLimit(0); const zero = cache.put({ rows: ["z"] }, ["z"]);
-  assert.equal(zero.value, undefined); assert.equal(cache.stats().retainedBytes, 0);
-  for (const limit of [-1, NaN, Infinity, 65 * 1024 * 1024]) assert.throws(() => cache.setLimit(limit), RangeError);
+  const rows = ["x".repeat(1000)], big = cache.put({ rows }, rows);
+  assert.equal(cache.get(big)?.rows, rows); assert.equal(cache.stats().entries, 1);
+  cache.clear(); assert.equal(big.value, undefined);
 });
 
 test("cache lifecycle restores inherited/owned invalidation methods and respects later owners", () => {
@@ -1893,29 +1900,29 @@ test("new theme and expansion/structure changes do not leave stale cache geometr
 });
 
 
-test("optional cache diagnostics distinguish retained estimates from whole-process heap and validate controls", async () => {
+test("optional layout diagnostics distinguish retained estimates from whole-process heap and reject retired controls", async () => {
   const h = extensionHarness("tui", { "toolview-cache-mb": "0.01" });
   const command = h.commands.get("toolview")!.handler;
   const stats = () => JSON.parse(h.notices.at(-1)!.replace("Pi Toolview cache: ", ""));
   try {
     h.events.get("session_start")!({}, h.ctx); h.root.render(80);
+    assert.ok(h.notices.some(text => /toolview-cache-mb is ignored/u.test(text)));
     await command("cache", h.ctx);
-    const first = stats(); assert.equal(first.ordinary.limitBytes, Math.floor(0.01 * 1024 * 1024)); assert.ok(first.entries > 0);
-    assert.ok(first.retainedBytes <= first.limitBytes); assert.ok(first.processHeapUsedBytes > 0);
-    assert.match(first.processMemoryScope, /whole Pi process, not Toolview/);
-    await command("cache clear", h.ctx); assert.equal(stats().entries, 0); assert.equal(stats().retainedBytes, 0);
-    h.root.render(80); await command("cache limit 0", h.ctx); assert.equal(stats().retainedBytes, 0); assert.equal(stats().ordinary.limitBytes, 0);
-    await command("off", h.ctx); await command("on", h.ctx); await command("cache", h.ctx); assert.equal(stats().ordinary.limitBytes, 0);
-    for (const invalid of ["cache limit -1", "cache limit 65", "cache limit NaN", "cache wrong", "cache limit 1 extra"] ) {
-      await command(invalid, h.ctx); assert.match(h.notices.at(-1)!, /limit must be|Usage:/);
+    const first = stats(); assert.ok(first.entries > 0); assert.ok(first.processHeapUsedBytes > 0);
+    assert.equal(first.retainedBytes, first.stringBytes + first.overheadBytes);
+    assert.equal(first.presentationRetainedBytes, first.retainedBytes + first.footerLayout.retainedBytes);
+    assert.match(first.memoryScope, /estimated Toolview retained/u);
+    assert.match(first.processMemoryScope, /whole Pi process, not Toolview/u);
+    assert.equal("limitBytes" in first, false);
+    for (const invalid of ["cache limit 0", "cache limit -1", "cache cards limit 0", "cache wrong", "cache limit 1 extra"] ) {
+      await command(invalid, h.ctx); assert.match(h.notices.at(-1)!, /limits have been removed|Usage:/);
     }
+    await command("cache", h.ctx); assert.equal(stats().retainedBytes, first.retainedBytes);
+    await command("cache clear", h.ctx); assert.equal(stats().entries, 0); assert.equal(stats().retainedBytes, 0);
+    h.root.render(80); await command("off", h.ctx); await command("on", h.ctx); h.root.render(80);
+    await command("cache", h.ctx); assert.equal(stats().entries, first.entries);
+    assert.equal(h.notices.filter(text => /toolview-cache-mb is ignored/u.test(text)).length, 1, "legacy warning is runtime-local, not repeated on every frame/on");
   } finally { h.events.get("session_shutdown")!({}, h.ctx); }
-  const bad = extensionHarness("tui", { "toolview-cache-mb": "NaN" });
-  try {
-    bad.events.get("session_start")!({}, bad.ctx); assert.ok(bad.notices.some((text) => /invalid.*using 8 MiB/u.test(text)));
-    await bad.commands.get("toolview")!.handler("cache", bad.ctx);
-    assert.equal(JSON.parse(bad.notices.at(-1)!.replace("Pi Toolview cache: ", "")).ordinary.limitBytes, 8 * 1024 * 1024);
-  } finally { bad.events.get("session_shutdown")!({}, bad.ctx); }
 });
 
 
@@ -2006,8 +2013,9 @@ test("user-card cache performs no native Markdown work on unchanged frames and c
     assert.equal(controller.cacheStats().entries, 1, "only the latest width is retained");
     controller.clearCache(); user.render(24); assert.equal(controller.cacheStats().builds, 5);
     assert.equal(controller.cacheStats().entries, 1);
-    controller.setCacheLimitMiB(0); user.render(24); user.render(24);
-    assert.equal(controller.cacheStats().builds, 7); assert.equal(controller.cacheStats().entries, 0);
+    root.removeChild(user); assert.equal(controller.cacheStats().entries, 0);
+    root.addChild(user); user.render(24); user.render(24);
+    assert.equal(controller.cacheStats().builds, 6); assert.equal(controller.cacheStats().entries, 1);
   } finally { controller.restore(); }
 });
 
@@ -2644,16 +2652,18 @@ test("edit Multiply colors are calculated once per render, not once per fragment
 test("edit predecessor spacing never builds an unretained diff body", () => {
   const edit = new Tool("edit", { path: "example.ts" }), following = new Tool();
   edit.result = { content: [], details: { diff: editDiff } };
-  const { root, controller } = setup([edit, following], { cacheMiB: 0, cardCacheMiB: 0 });
+  const { root, controller } = setup([edit, following]);
   try {
     following.render(80);
     assert.equal(controller.cacheStats().builds, 1, "spacing alone builds only the following summary");
     controller.clearCache();
     const before = controller.cacheStats().builds;
     const rows = root.render(80);
-    assert.equal(controller.cacheStats().builds - before, 2, "one edit body plus one summary, even without retention");
-    assert.equal(controller.cacheStats().entries, 0);
+    assert.equal(controller.cacheStats().builds - before, 2, "one edit body plus one summary after clearing retention");
+    assert.equal(controller.cacheStats().entries, 2);
+    const warm = controller.cacheStats().builds;
     assert.equal(following.render(80)[0], "", "the framed predecessor still supplies its separator");
+    assert.equal(controller.cacheStats().builds, warm);
     assert.ok(rows.some((row) => row.includes("← Edited example.ts")));
   } finally { controller.restore(); }
 });
@@ -2661,7 +2671,7 @@ test("edit predecessor spacing never builds an unretained diff body", () => {
 test("ignored edit mouse events do not build an unretained diff", () => {
   const edit = new Tool("edit", { path: "example.ts" });
   edit.result = { content: [], details: { diff: editDiff } };
-  const { root, controller } = setup([edit], { cacheMiB: 0, cardCacheMiB: 0 });
+  const { root, controller } = setup([edit]);
   try {
     const before = controller.cacheStats().builds;
     edit.handleMouse({ ...mouse(1), button: "right" });
@@ -2710,7 +2720,7 @@ test("metadata-only edit measurement preserves render classification and separat
 test("edit spacing and rejected events keep native delegation for malformed metadata", () => {
   const edit = new Tool("edit", { path: "example.ts" }), next = new Tool();
   edit.result = { content: [], details: { patch: "@@ -1 +1 @@\n-old\n" } };
-  const { controller, original } = setup([edit, next], { cacheMiB: 0, cardCacheMiB: 0 });
+  const { controller, original } = setup([edit, next]);
   try {
     assert.equal(next.render(80)[0], "", "native multirow predecessor still owns separation");
     const builds = controller.cacheStats().builds;
@@ -2952,15 +2962,14 @@ test("split caches classify rendered Bash/diff bodies separately from all ordina
   const controller = installToolview(root, () => nativeTheme);
   try {
     const empty = controller.cacheStats();
-    assert.equal(empty.ordinary.limitBytes, 8 * 1024 * 1024);
-    assert.equal(empty.cards.limitBytes, 128 * 1024 * 1024);
-    assert.equal(empty.retainedBytes, 0, "budgets do not preallocate retained bodies");
+    assert.equal(empty.retainedBytes, 0, "component storage does not preallocate retained bodies");
+    assert.equal("limitBytes" in empty, false);
     root.render(100);
     const cold = controller.cacheStats();
     assert.equal(cold.ordinary.entries, 5, "read, pending/error edit, inline heading and user card are ordinary");
     assert.equal(cold.cards.entries, 2, "only Bash and actual diff bodies enter the card cache");
     assert.equal(cold.entries, 7);
-    for (const key of Object.keys(cold.ordinary) as (keyof typeof cold.ordinary)[])
+    for (const key of ["retainedBytes", "stringBytes", "overheadBytes", "rows", "entries", "hits", "misses", "builds", "releases", "collected"] as const)
       assert.equal(cold[key], cold.ordinary[key] + cold.cards[key], `aggregate ${key} equals both pools`);
     root.render(100); const warm = controller.cacheStats();
     assert.equal(warm.ordinary.builds, cold.ordinary.builds); assert.equal(warm.cards.builds, cold.cards.builds);
@@ -2977,77 +2986,62 @@ test("split caches classify rendered Bash/diff bodies separately from all ordina
   } finally { controller.restore(); }
 });
 
-test("split cache eviction and zero budgets never discard the other pool", () => {
+test("component storage retains both accounting groups until their owners are removed", () => {
   const summaries = Array.from({ length: 20 }, (_, i) => new Tool("read", { path: `small_${i}.txt` }));
   const cards = Array.from({ length: 3 }, (_, i) => {
     const node = bashTool(`card_${i}`);
     node.result = { content: [{ type: "text", text: Array.from({ length: 30 }, () => "x".repeat(70)).join("\n") }] };
     return node;
   });
-  const { controller } = setup([...summaries, ...cards]);
+  const { root, controller } = setup([...summaries, ...cards]);
   try {
     const rows = summaries.map(node => node.render(80));
-    cards[0]!.render(80);
-    const baseline = controller.cacheStats();
-    controller.setCardCacheLimitMiB(baseline.cards.retainedBytes / 1024 / 1024);
+    cards[0]!.render(80); const baseline = controller.cacheStats();
     cards[1]!.render(80); cards[2]!.render(80);
-    const pressure = controller.cacheStats();
-    assert.equal(pressure.cards.evictions - baseline.cards.evictions, 2);
-    assert.equal(pressure.cards.entries, 1);
-    assert.equal(pressure.ordinary.evictions, baseline.ordinary.evictions);
-    assert.equal(pressure.ordinary.retainedBytes, baseline.ordinary.retainedBytes);
-    for (const [i, node] of summaries.entries()) assert.strictEqual(node.render(80), rows[i], "card pressure leaves compact arrays retained");
+    const retained = controller.cacheStats();
+    assert.equal(retained.cards.entries, 3);
+    assert.equal(retained.ordinary.retainedBytes, baseline.ordinary.retainedBytes);
+    for (const [i, node] of summaries.entries()) assert.strictEqual(node.render(80), rows[i]);
     assert.equal(controller.cacheStats().ordinary.builds, baseline.ordinary.builds);
-    controller.setCacheLimitMiB(0);
-    const zeroOrdinary = controller.cacheStats(); assert.equal(zeroOrdinary.ordinary.entries, 0); assert.equal(zeroOrdinary.cards.entries, 1);
-    cards[2]!.render(80); assert.equal(controller.cacheStats().cards.builds, zeroOrdinary.cards.builds);
-    controller.setCacheLimitMiB(8); summaries[0]!.render(80);
-    controller.setCardCacheLimitMiB(0);
-    const zeroCards = controller.cacheStats(); assert.equal(zeroCards.cards.entries, 0); assert.equal(zeroCards.ordinary.entries, 1);
-    summaries[0]!.render(80); assert.equal(controller.cacheStats().ordinary.builds, zeroCards.ordinary.builds);
-    cards[2]!.render(80); assert.equal(controller.cacheStats().cards.skips, zeroCards.cards.skips + 1);
-    controller.restore(); assert.equal(controller.cacheStats().entries, 0);
+    root.removeChild(summaries[0]!);
+    assert.equal(controller.cacheStats().ordinary.entries, 19); assert.equal(controller.cacheStats().cards.entries, 3);
+    root.removeChild(cards[0]!);
+    assert.equal(controller.cacheStats().cards.entries, 2); assert.equal(controller.cacheStats().ordinary.entries, 19);
+    root.clear(); assert.equal(controller.cacheStats().entries, 0);
   } finally { controller.restore(); }
 });
 
-test("forced compact Bash/edit stay ordinary and cards admit bodies above the ordinary budget", () => {
+test("forced compact Bash/edit stay ordinary and large bodies remain component-owned",  () => {
   const bash = bashTool("echo compact"), edit = new Tool("edit", { path: "compact.ts" });
   edit.result = { content: [], details: { diff: editDiff } };
   const { root, controller } = setup([bash, edit], { compact: ["bash", "edit"] });
   try {
     root.render(100); assert.equal(controller.cacheStats().ordinary.entries, 2); assert.equal(controller.cacheStats().cards.entries, 0);
   } finally { controller.restore(); }
-  const large = new RenderCache(128 * 1024 * 1024, 2048, 128 * 1024 * 1024);
+  const large = new RenderCache();
   const rows = ["x".repeat(5 * 1024 * 1024)]; const entry = large.put({ rows }, rows);
   assert.ok(entry.bytes > 8 * 1024 * 1024); assert.ok(large.get(entry));
-  assert.throws(() => large.setLimit(129 * 1024 * 1024), RangeError);
   large.clear(); assert.equal(entry.value, undefined);
 });
 
-test("split cache diagnostics and controls preserve independent budgets across off/on", async () => {
+test("layout diagnostics preserve group attribution and ignore retired launch budgets across off/on", async () => {
   const h = extensionHarness("tui", { "toolview-cache-mb": "0.1", "toolview-card-cache-mb": "128" });
   h.root.addChild(bashTool("card"));
   const command = h.commands.get("toolview")!.handler;
   const stats = () => JSON.parse(h.notices.at(-1)!.replace("Pi Toolview cache: ", ""));
   try {
     h.events.get("session_start")!({}, h.ctx); h.root.render(80); await command("cache", h.ctx);
-    assert.equal(stats().ordinary.limitBytes, Math.floor(0.1 * 1024 * 1024)); assert.equal(stats().cards.limitBytes, 128 * 1024 * 1024);
-    await command("cache cards limit 0", h.ctx); assert.equal(stats().cards.entries, 0); assert.equal(stats().ordinary.entries, 1);
-    await command("cache limit 0", h.ctx); assert.equal(stats().limitBytes, 0); assert.equal(stats().cards.limitBytes, 0);
-    await command("off", h.ctx); await command("on", h.ctx); await command("cache", h.ctx); assert.equal(stats().limitBytes, 0);
-    await command("cache cards limit 128", h.ctx); h.root.render(80); await command("cache", h.ctx);
-    assert.equal(stats().ordinary.entries, 0); assert.equal(stats().cards.entries, 1);
-    for (const invalid of ["cache cards limit 129", "cache cards limit -1", "cache cards limit NaN", "cache cards limit 1 extra", "cache cards wrong"] ) {
-      await command(invalid, h.ctx); assert.match(h.notices.at(-1)!, /limit must be|Usage:/);
+    assert.equal(stats().ordinary.entries, 1); assert.equal(stats().cards.entries, 1);
+    assert.equal(stats().byKind.summary.entries, 1); assert.equal(stats().byKind.bash.entries, 1);
+    for (const retired of ["cache cards limit 129", "cache cards limit -1", "cache cards limit NaN", "cache cards limit 0"] ) {
+      await command(retired, h.ctx); assert.match(h.notices.at(-1)!, /limits have been removed/);
     }
+    await command("cache", h.ctx); assert.equal(stats().entries, 2);
+    await command("off", h.ctx); await command("on", h.ctx); h.root.render(80); await command("cache", h.ctx);
+    assert.equal(stats().entries, 2);
+    assert.equal(h.notices.filter(text => /toolview-card-cache-mb is ignored/u.test(text)).length, 1);
     await command("cache clear", h.ctx); assert.equal(stats().entries, 0);
   } finally { h.events.get("session_shutdown")!({}, h.ctx); }
-  const bad = extensionHarness("tui", { "toolview-card-cache-mb": "129" });
-  try {
-    bad.events.get("session_start")!({}, bad.ctx);
-    assert.ok(bad.notices.some(text => /invalid.*using 128 MiB/u.test(text)));
-    await bad.commands.get("toolview")!.handler("cache", bad.ctx); assert.equal(JSON.parse(bad.notices.at(-1)!.replace("Pi Toolview cache: ", "")).cards.limitBytes, 128 * 1024 * 1024);
-  } finally { bad.events.get("session_shutdown")!({}, bad.ctx); }
 });
 
 
@@ -3412,9 +3406,9 @@ test("write failure skips metadata/payload, uses only error paint and tears down
   } finally { controller.restore(); }
 });
 
-test("write measurement and rejected clicks never build source and card pool zero stays independent", (t) => {
+test("write measurement and rejected clicks never build source and repeated body renders stay warm",  (t) => {
   const tool = new Tool("write", { path: "example.ts", content: "LONG_SOURCE_" + "x".repeat(1000) }), follower = new Tool();
-  const { root, controller } = setup([tool, follower], { cardCacheMiB: 0 });
+  const { root, controller } = setup([tool, follower]);
   const segments = t.mock.method(Intl.Segmenter.prototype, "segment");
   try {
     follower.render(80); const builds = controller.cacheStats().builds;
@@ -3424,9 +3418,10 @@ test("write measurement and rejected clicks never build source and card pool zer
     assert.ok(!segments.mock.calls.some(call => String(call.arguments[0]).startsWith("LONG_SOURCE_")));
     assert.equal(controller.cacheStats().builds, builds);
     const ordinary = controller.cacheStats().ordinary.builds;
-    tool.render(80); tool.render(80); assert.equal(controller.cacheStats().cards.entries, 0);
+    tool.render(80); const bodyBuilds = controller.cacheStats().builds;
+    tool.render(80); assert.equal(controller.cacheStats().cards.entries, 1); assert.equal(controller.cacheStats().builds, bodyBuilds);
     assert.equal(controller.cacheStats().ordinary.builds, ordinary);
-    controller.setCardCacheLimitMiB(128); root.render(80);
+    root.render(80);
     const warm = controller.cacheStats(); segments.mock.resetCalls(); root.render(80);
     assert.equal(controller.cacheStats().builds, warm.builds); assert.equal(segments.mock.calls.length, 0);
     assert.equal(warm.cards.entries, 1); assert.equal(warm.ordinary.entries, 1);

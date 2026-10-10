@@ -85,22 +85,21 @@ The three `FOOTER_FIELDS` source flags in `src/footer.ts` default to `false`: `t
 /toolview colors on
 /toolview cache
 /toolview cache clear
-/toolview cache limit 4
-/toolview cache cards limit 128
 ```
 
-Rendered layouts use two independent least-recently-used caches, each capped at 2048 entries:
+Each transcript component owns its latest prepared presentation through weak component state, much like Pi's `Text` retains its latest rendered rows. There is **no entry-count or byte-limit eviction**: an unchanged attached component reuses its rows regardless of transcript age or the size of other presentations. Width/Output-padding/theme and relevant state changes replace its previous layout, not accumulate variants. The execution spinner changes only its prefix and has no idle timer.
 
-| Pool | Default budget | Contents |
-| --- | ---: | --- |
-| `ordinary` | 8 MiB | Summaries, user cards, edit headings and edit/write native fallback |
-| `cards` | 128 MiB | Collapsed/expanded Bash, successful edit diffs and write frames |
+Removing a component/subtree through native `Container.removeChild` or `clear` releases its presentation immediately, even if another caller still holds the component. Otherwise component collection also releases its weakly owned layout. Accounting retains only weak references/numbers, with eventual finalizer cleanup and on-demand snapshots; it cannot keep components or rendered strings alive. Detached/replaced layouts do not accumulate.
 
-Card pressure cannot evict ordinary views. Each component keeps only its latest width/state; unchanged frames reuse prepared rows. Actual width/Output-padding/theme and relevant state changes rebuild affected content. The execution spinner changes only its prefix and has no idle timer.
+`/toolview cache` reports:
+- Transcript totals and `byKind` breakdown for `summary`, `bash`, `edit`, `write` and `user`: retained-byte estimates, strings/overhead, saved entries and visual rows.
+- The `ordinary` and `cards` accounting groups (not bounded pools), plus hits, misses, builds, releases and GC-only `collected` accounting cleanups.
+- `footerLayout` and combined `presentationRetainedBytes`, `presentationEntries` and `presentationRows`. The main editor retains no Toolview row cache.
+- Whole-Pi `processHeapUsedBytes`, explicitly **not** Toolview attribution.
 
-`/toolview cache` reports each pool and their aggregate. `clear` releases both; `limit <MiB>` changes ordinary retention (0–64) and `cards limit <MiB>` changes card retention (0–128). Zero disables only the selected pool. Optional `--toolview-cache-mb` and `--toolview-card-cache-mb` set initial limits. Limits survive off/on but are not persisted; reload returns to launch/default limits.
+`/toolview cache clear` releases transcript and footer layouts; the next requested frame rebuilds them on demand. The former `cache limit` commands warn without changing retention. Legacy `--toolview-cache-mb` / `--toolview-card-cache-mb` flags are recognized only to warn that they are ignored, preserving launch compatibility without silently reintroducing limits. These commands write no settings.
 
-Budgets estimate retained custom data, not upfront allocation or total process memory. Oversized entries are not retained. Reported heap usage is **whole Pi process**, not Toolview. Native host work and transient formatting remain outside these budgets; see the [cache contract](docs/render-cache-spec.md).
+Estimates are not exact V8 heap measurements: native caches, raw/signature data and transient rendering are excluded, and strings may be shared. Memory necessarily grows with the current **live retained transcript**, but no detached-owner or width/state history is intentionally retained. No fixed total-process memory bound is claimed. See the [cache contract](docs/render-cache-spec.md).
 
 `/toolview colors off` stops terminal-default application and theme reads without disabling cards. Remaining presentation can make a one-shot profile RGB query after releasing colors. On retries the current source; global on respects local off. Reload enables the feature again. Releases restore terminal **profile defaults**, not another application's prior dynamic override. Disable the old standalone `theme-background` extension manually: concurrent default-color writers are unsupported.
 
@@ -117,7 +116,7 @@ pi -e ./src/index.ts --toolview-compact write
 
 ## Compatibility
 
-The supported/tested host is **Pi 1.0.0**. One adapter obtains the stable TUI reference through a public widget factory and narrowly wraps private component rendering, normalized tool clicks, UI updates, stock-editor presentation and child attachment. Native methods still execute; no tool execution or raw input is intercepted. Host libraries are not bundled or privately imported. See [architecture](docs/architecture.md) for the integration and ownership boundaries.
+The supported/tested host is **Pi 1.0.0**. One adapter obtains the stable TUI reference through a public widget factory and narrowly wraps private component rendering, normalized tool clicks, UI updates, stock-editor presentation and child attachment/removal. Native methods still execute; no tool execution or raw input is intercepted. Host libraries are not bundled or privately imported. See [architecture](docs/architecture.md) for the integration and ownership boundaries.
 
 This is intentionally a compatibility-sensitive integration. If the inspected component contract cannot be established, Toolview warns and retains native rendering. Runtime restoration does not overwrite hooks subsequently replaced by another extension. Arbitrary extensions wrapping the same private methods and future Pi versions are not guaranteed compatible; run the terminal checks after upgrading.
 
@@ -150,7 +149,7 @@ The installed-package smoke test is version-audited and explicitly skips unavail
 - [Shared frame specification](docs/card-frame-spec.md) — geometry, paint, user cards, main input and click bounds.
 - [Terminal-color specification](docs/terminal-colors-spec.md) — fixed-theme metadata, automatic-mode boundaries, OSC ownership and concrete RGB.
 - [Session-footer specification](docs/footer-spec.md) — native usage/context data, colors, whole-status fitting and ownership.
-- [Render-cache specification](docs/render-cache-spec.md) — invalidation, memory pools, controls and performance guarantees.
+- [Render-cache specification](docs/render-cache-spec.md) — invalidation, component ownership, memory diagnostics and performance guarantees.
 - [Testing and coverage](docs/testing.md) — automated gates, strict native/data controls and coverage limits.
 
 These documents describe the current project. Run evidence and working review reports belong in gitignored `.test-artifacts/`, not in the documentation tree.
