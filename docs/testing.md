@@ -29,6 +29,8 @@ node --test --test-name-pattern='write cards' --test-concurrency=1 tests/termina
 node --test --test-name-pattern='^footer ' --test-concurrency=1 tests/terminal.test.mjs
 node --test --test-name-pattern='^terminal colors:' --test-concurrency=1 tests/terminal.test.mjs
 node --test --test-name-pattern='^Output padding settings' --test-concurrency=1 tests/terminal.test.mjs
+node --test tests/spinner-scheduler.test.ts
+node --test --test-name-pattern='^real CLI: spinner' --test-concurrency=1 tests/terminal.test.mjs
 node --test --test-name-pattern='^main editor user-card|^belowEditor|^editor padding|^aboveEditor widget|^foreign editor extension' --test-concurrency=1 tests/terminal.test.mjs
 node --test --test-name-pattern='long-word summaries|comma wrap points|width-21 colored-segment boundary|complete multiline summaries' --test-concurrency=1 tests/terminal.test.mjs
 ```
@@ -40,6 +42,7 @@ Test names, scenario switches and audited package versions live in the test sour
 | Layer | Purpose |
 | --- | --- |
 | `tests/unit.test.ts` | Pure formatting/geometry/state regressions, actual SDK integration, compatibility guards and ownership/counter tests |
+| `tests/spinner-scheduler.test.ts` | Actual-SDK compact tools with deterministic time/document visits: host-frame reuse, fallback/pending/cancellation, successful-return boundary and same-pass phase |
 | `tests/component-layouts.test.ts`, `tests/fixtures/component-layout-probe.ts` | Count/byte-pressure warm scans, actual-SDK native removal/clear while removed owners remain held, weak rendered-data/accounting GC and exact presentation-kind arithmetic |
 | `tests/fixtures/cache-probe.ts` | Actual-SDK viewport work and first-installer collection with an active adapter, including an active execution clock, retained write-source rows and the stock input editor |
 | `tests/fixtures/cache-partition-probe.ts` | Actual-SDK mixed transcript, ordinary/card accounting, isolated card replacement and detached-edit collection |
@@ -109,7 +112,9 @@ Use observable work counters, not timings as the sole proof:
 
 Alternate-width manual dump probes intentionally replace the latest-width cache. Diagnostic scenarios suppress those probes when measuring warm frames; generic captures keep them for width coverage. Spinner diagnostics also avoid width-zero probes, which intentionally stop animation participation. Native asynchronous startup/grammar invalidation can add cold work; establish a controlled cache-clear epoch before asserting exact warm deltas.
 
-Spinner checks prove one shared 100 ms clock, one request per tick regardless of participant count, unchanged custom builds on ticks, real screen glyph movement, immediate final/expansion/off/restore stop and zero idle ticks/requests. They also retain cancellation, native full-information, replay and active-first-installer GC controls. No total CPU/latency or O(1) host-layout claim follows from these counters.
+Spinner checks distinguish host-driven prefix changes from fallback wakes. Deterministic SDK visits every 80 ms must yield zero Toolview requests, changing time-based prefixes and unchanged custom builds. A 100 ms silence deadline makes one request regardless of participant count, queues no duplicate while awaiting a document visit, and rearms from successful return rather than a fixed interval phase. Verify one shared deadline, a call-local phase for slow passes, no acknowledgement from mere requests/direct tool/unrelated renders or failed document visits, obsolete callback rejection, silent-detachment pruning on host-driven passes, lifecycle stops and zero idle resources/requests. The isolated actual-SDK `spinner-gc-probe.ts` also holds the real unreferenced Node handle and production callback until the last owner is collected, then dispatches expiry: zero rearming, requests and retained entries. Only dispatch is controlled, so early expiry cannot release an accidentally captured owner and make GC falsely pass. Native clock identity/lifecycle controls remain unchanged.
+
+The real CLI spinner scenario runs in both regular and fullscreen modes. During native `Working`, prove physically moving compact glyphs with zero added Toolview requests/wakes. Use public `setWorkingIndicator({ frames: ["●"] })` to stop native animation while the actual tool remains running, then prove moving physical glyphs and exactly one request per eligible fallback wake; restoring native animation suppresses fallback again. The fixture observes production timeout allocation/cancellation/expiry/unref counts separately: at most one pending deadline, and `starts - cancels - ticks == active`; cancellation/rearming is not an animation wake. Sampling physical frames does not call `render` or submit diagnostic commands. Retain unchanged body/invalidation counters, native partial/full-information, completion/cancellation/off/on/reload/replay, strict tool/model/session equality, UI-only session-byte equality and active-first-installer GC. A direct document diagnostic still counts as the accepted layout signal; these tests do not establish a public after-present hook, precise physical cadence, total CPU/latency or O(1) host layout.
 
 ## Installed-extension profile and limits
 

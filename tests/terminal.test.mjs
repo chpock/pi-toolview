@@ -1090,15 +1090,25 @@ test('real CLI: width-21 colored-segment boundary preserves content and exact in
     }
   });
 
-test('real CLI: spinner ticks reuse cached work, stop on off/completion/cancellation, and leave idle/replay clock-free',
-  { skip: stockOnly, timeout: 120000 }, async () => {
+for (const mode of ['regular', 'fullscreen']) test(`real CLI: spinner shares Working frames and falls back only during host silence (${mode})`,
+  { skip: stockOnly, timeout: 180000 }, async () => {
     const terminals = [];
     const start = async (name, options = {}) => {
-      const terminal = new PiTerminal(name, { ...options, extraEnv: { TOOLVIEW_TEST_SPINNER_DIAGNOSTICS: '1' } });
-      terminals.push(terminal); await terminal.ready(); return terminal;
+      const terminal = new PiTerminal(`${name}-${mode}`, { ...options, mode, extraEnv: { TOOLVIEW_TEST_SPINNER_DIAGNOSTICS: '1' } });
+      terminals.push(terminal); await terminal.ready(); await terminal.resize(100, 240); return terminal;
     };
     const busyCapture = (terminal, name) => terminal.capture(name, { animated: true });
     const normalTraffic = (terminal) => terminal.events().filter((event) => ['call', 'result', 'model_context'].includes(event.type));
+    const runningRow = terminal => terminal.screen().find(row => /^ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] tv_stream \[query="gated"\]$/u.test(row));
+    const physicalFrames = async terminal => {
+      const distinct = new Set();
+      for (let i = 0; i < 5; i++) {
+        await terminal.settle(true); const row = runningRow(terminal);
+        assert.ok(row, 'a real PTY frame, without any diagnostic render, contains the running glyph');
+        distinct.add(row[1]);
+      }
+      assert.ok(distinct.size >= 2, 'physical first cell really animates'); return [...distinct];
+    };
     const assertBusy = async (dump) => {
       const tool = byName(dump, 'tv_stream')[0];
       assert.equal(tool.executionStarted, true); assert.equal(tool.partial, true);
@@ -1113,8 +1123,11 @@ test('real CLI: spinner ticks reuse cached work, stop on off/completion/cancella
         { fg: expected.fg, fgMode: expected.fgMode, dim: expected.dim });
       assert.ok(['', ' '].includes(dump.cells[y][dump.width - 1].text));
       assert.ok(!dump.screen.some((row) => row.includes('STREAM_PARTIAL')));
-      assert.equal(dump.spinnerStats.active, 1); assert.equal(dump.spinnerStats.maxActive, 1);
-      assert.ok(dump.spinnerStats.intervals.every((delay) => delay === 100));
+      const stats = dump.spinnerStats;
+      assert.equal(stats.maxActive, 1); assert.ok(stats.active <= 1, 'one deadline, or a pending host request');
+      assert.equal(stats.starts - stats.cancels - stats.ticks, stats.active, 'all allocated deadlines are cancelled, fired or still pending');
+      assert.equal(stats.unrefs, stats.starts, 'every shared deadline is unreferenced');
+      assert.ok(stats.delays.every(delay => delay === 100));
       return dump.cells[y][1].text;
     };
     try {
@@ -1132,48 +1145,65 @@ test('real CLI: spinner ticks reuse cached work, stop on off/completion/cancella
       assert.equal(argumentsOnly.spinnerStats.starts, 0); assert.equal(argumentsOnly.spinnerStats.ticks, 0);
       assert.equal(lines(argumentsOnly.tools[0])[0], ' → read a.txt');
       writeFileSync(join(live.output, 'provider-go'), 'go'); await live.event('tool_gate');
+      live.send('/toolview cache\r'); await live.settle(true);
+      const warm = await busyCapture(live, 'working-warm'); await assertBusy(warm);
+      const builds = warm.cacheDiagnostics.at(-1).builds, bytesRunning = readFileSync(warm.session);
+      const hostFrames = await physicalFrames(live);
+      live.send('/toolview cache\r'); await live.settle(true);
+      const hot = await busyCapture(live, 'working-hot'); await assertBusy(hot);
+      assert.equal(hot.spinnerStats.ticks, 0, 'regular native Working frames never let fallback fire');
+      assert.equal(hot.spinnerStats.requests, 0, 'Toolview adds zero UI requests while native Working supplies frames');
+      assert.ok(hot.spinnerStats.starts > warm.spinnerStats.starts, 'real host document visits rearm the one-shot deadline');
+      assert.equal(hot.cacheDiagnostics.at(-1).builds, builds, 'host-driven animation builds no custom body');
+      assert.deepEqual(readFileSync(warm.session), bytesRunning);
+      // A one-frame public Working configuration stops only Pi's native animation.
+      // The still-running real tool must continue moving via Toolview's fallback.
+      live.send('/tv-spinner-working static\r'); await live.event('spinner_working');
       await live.event('spinner_tick_checkpoint');
       live.send('/toolview cache\r'); await live.settle(true);
-      const warm = await busyCapture(live, 'warm'); await assertBusy(warm);
-      const builds = warm.cacheDiagnostics.at(-1).builds;
+      const fallbackWarm = await busyCapture(live, 'fallback-warm'); await assertBusy(fallbackWarm);
+      const fallbackFrames = await physicalFrames(live);
       await live.event('spinner_tick_checkpoint', 2);
       live.send('/toolview cache\r'); await live.settle(true);
-      const hot = await busyCapture(live, 'hot'); await assertBusy(hot);
-      assert.ok(hot.spinnerStats.ticks > warm.spinnerStats.ticks);
-      assert.equal(hot.cacheDiagnostics.at(-1).builds, builds, 'real animation frames perform zero custom body rebuilds');
-      assert.equal(hot.spinnerStats.requests - warm.spinnerStats.requests, hot.spinnerStats.ticks - warm.spinnerStats.ticks,
-        'each observed clock tick requests exactly one normal render');
-      assert.equal(hot.spinnerStats.starts, warm.spinnerStats.starts, 'hot animation starts no new timers');
-      assert.equal(hot.spinnerStats.stops, warm.spinnerStats.stops, 'hot animation never restarts its clock');
-      assert.ok(Object.keys(hot.spinnerWork.widths).every((key) => key.endsWith(':100')), 'clock-work observations never perform synthetic alternate-width renders');
-      assert.equal(hot.spinnerWork.invalidations, warm.spinnerWork.invalidations, 'ticks cause no native tool invalidation');
-      const runningStarts = hot.spinnerStats.starts, runningStops = hot.spinnerStats.stops;
-      // Full frames reach xterm in the real PTY stream, not merely component render() snapshots.
-      const distinct = new Set();
-      for (let i = 0; i < 4; i++) { await live.settle(true); distinct.add(await assertBusy(await busyCapture(live, `phase-${i}`))); }
-      assert.ok(distinct.size >= 2, 'physical first cell really animates');
+      const fallbackHot = await busyCapture(live, 'fallback-hot'); await assertBusy(fallbackHot);
+      assert.ok(fallbackHot.spinnerStats.ticks > fallbackWarm.spinnerStats.ticks);
+      assert.equal(fallbackHot.spinnerStats.requests - fallbackWarm.spinnerStats.requests,
+        fallbackHot.spinnerStats.ticks - fallbackWarm.spinnerStats.ticks, 'each eligible fallback wake requests exactly one frame');
+      assert.equal(fallbackHot.cacheDiagnostics.at(-1).builds, builds, 'fallback-driven animation builds no custom body');
+      assert.ok(Object.keys(fallbackHot.spinnerWork.widths).every(key => key.endsWith(':100')), 'clock diagnostics never render alternate widths');
+      assert.equal(fallbackHot.spinnerWork.invalidations, hot.spinnerWork.invalidations, 'fallback requests no native tool invalidation');
+      assert.deepEqual(readFileSync(warm.session), bytesRunning);
+      live.send('/tv-spinner-working animated\r'); await live.event('spinner_working', 2); await live.settle(true);
+      const sharedAgain = await busyCapture(live, 'working-restored'); await assertBusy(sharedAgain);
+      await physicalFrames(live);
+      const sharedHot = await busyCapture(live, 'working-restored-hot'); await assertBusy(sharedHot);
+      assert.equal(sharedHot.spinnerStats.ticks, sharedAgain.spinnerStats.ticks, 'restoring Working suppresses fallback again');
+      assert.equal(sharedHot.spinnerStats.requests, sharedAgain.spinnerStats.requests);
+      assert.deepEqual(readFileSync(warm.session), bytesRunning);
       live.send('/toolview off\r'); await live.settle(true);
-      const off = await busyCapture(live, 'off'); assert.equal(off.spinnerStats.active, 0); assert.equal(off.spinnerStats.stops, runningStops + 1);
+      const off = await busyCapture(live, 'off'); assert.equal(off.spinnerStats.active, 0);
+      assert.equal(off.spinnerStats.starts - off.spinnerStats.cancels - off.spinnerStats.ticks, 0);
       assert.deepEqual(toolLines(off), toolLines(nativePartial), 'off delegates actual partial information exactly to native');
       const offAgain = await busyCapture(live, 'off-again'); assert.deepEqual(offAgain.spinnerStats, off.spinnerStats, 'zero Toolview ticks/redraws while off despite active native animation');
       live.send('/toolview on\r'); await live.settle(true);
-      const on = await busyCapture(live, 'on'); await assertBusy(on); assert.equal(on.spinnerStats.starts, runningStarts + 1);
+      const on = await busyCapture(live, 'on'); await assertBusy(on); assert.ok(on.spinnerStats.starts > off.spinnerStats.starts);
       writeFileSync(join(live.output, 'tool-go'), 'go'); await live.event('agent_end');
       const complete = await live.capture('complete'); assert.equal(complete.spinnerStats.active, 0);
-      assert.equal(complete.spinnerStats.stops, runningStops + 2); assert.equal(lines(byName(complete, 'tv_stream')[0])[0], ' ⚙ tv_stream [query="gated"]');
+      assert.equal(complete.spinnerStats.starts - complete.spinnerStats.cancels - complete.spinnerStats.ticks, 0);
+      assert.equal(lines(byName(complete, 'tv_stream')[0])[0], ' ⚙ tv_stream [query="gated"]');
       const idleAgain = await live.capture('idle-again'); assert.deepEqual(idleAgain.spinnerStats, complete.spinnerStats, 'zero ticks and zero spinner render requests after completion');
       const traffic = normalTraffic(live); assert.deepEqual(traffic, normalTraffic(stock));
-      assert.equal(traffic.filter((event) => event.type === 'call').length, 2);
-      assert.equal(traffic.filter((event) => event.type === 'result').length, 2);
-      assert.equal(traffic.filter((event) => event.type === 'model_context').length, 3);
+      assert.equal(traffic.filter(event => event.type === 'call').length, 2);
+      assert.equal(traffic.filter(event => event.type === 'result').length, 2);
+      assert.equal(traffic.filter(event => event.type === 'model_context').length, 3);
       assert.deepEqual(persisted(complete), persisted(native));
-      const bytes = readFileSync(complete.session), starts = live.events().filter((event) => event.type === 'start').length;
+      const bytes = readFileSync(complete.session), starts = live.events().filter(event => event.type === 'start').length;
       await live.command('/reload'); await live.event('start', starts + 1);
       const reloaded = await live.capture('reloaded'); assert.equal(reloaded.spinnerStats.starts, 0);
-      assert.ok(complete.tools[1].before.some((entry) => entry.kind === 'ThemedText' && entry.lines.some((row) => row.includes('Pi Toolview: on'))),
+      assert.ok(complete.tools[1].before.some(entry => entry.kind === 'ThemedText' && entry.lines.some(row => row.includes('Pi Toolview: on'))),
         'live on-command notification is a visible native sibling, not persisted session data');
       assert.equal(complete.tools[1].lines[0], '', 'visible notification requires one native-text separator');
-      assert.ok(reloaded.tools[1].before.some((entry) => entry.name === 'read'));
+      assert.ok(reloaded.tools[1].before.some(entry => entry.name === 'read'));
       assert.deepEqual(reloaded.tools[0].lines, complete.tools[0].lines);
       assert.deepEqual(reloaded.tools[1].lines, complete.tools[1].lines.slice(1), 'reload removes only the separator for the vanished on-notification; call bytes stay exact');
       assert.deepEqual(readFileSync(complete.session), bytes);
@@ -1181,7 +1211,6 @@ test('real CLI: spinner ticks reuse cached work, stop on off/completion/cancella
       const resumed = await replay.capture('replay'); assert.equal(resumed.spinnerStats.starts, 0); assert.equal(resumed.spinnerStats.ticks, 0);
       assert.deepEqual(toolLines(resumed), toolLines(reloaded)); assert.deepEqual(persisted(resumed), persisted(native));
       assert.deepEqual(readFileSync(complete.session), bytes);
-      // Real cancellation produces a final error and stops the restarted clock without waiting for normal tool completion.
       for (const terminal of [stock, live]) {
         rmSync(join(terminal.output, 'provider-go')); rmSync(join(terminal.output, 'tool-go'));
         terminal.send('run pending-abort\r'); await terminal.event('provider_gate', 2);
@@ -1195,11 +1224,13 @@ test('real CLI: spinner ticks reuse cached work, stop on off/completion/cancella
       assert.deepEqual(normalTraffic(live), normalTraffic(stock), 'cancellation also preserves exact real tool/model traffic');
       assert.deepEqual(persisted(aborted), persisted(abortedNative));
       const afterAbort = await live.capture('after-abort'); assert.deepEqual(afterAbort.spinnerStats, aborted.spinnerStats);
-      writeFileSync(join(artifacts, 'spinner-coverage.json'), JSON.stringify({
-        normalCalls: 2, normalResults: 2, normalModelContexts: 3, buildsBefore: builds, buildsAfter: hot.cacheDiagnostics.at(-1).builds,
-        runningClock: hot.spinnerStats, stoppedClock: complete.spinnerStats, abortedClock: aborted.spinnerStats,
-        physicalFrames: [...distinct], idleRequestsAdded: 0, idleTicksAdded: 0,
-        controls: ['native partial/complete', 'pre-execution zero clocks', 'hot cached animation', 'off/on while running', 'completion idle', 'reload', 'same-session replay', 'native cancellation traffic'],
+      writeFileSync(join(artifacts, `spinner-coverage-${mode}.json`), JSON.stringify({
+        mode, normalCalls: 2, normalResults: 2, normalModelContexts: 3, buildsBefore: builds, buildsAfter: fallbackHot.cacheDiagnostics.at(-1).builds,
+        sharedClock: hot.spinnerStats, fallbackClock: fallbackHot.spinnerStats, sharedAgain: sharedHot.spinnerStats,
+        stoppedClock: complete.spinnerStats, abortedClock: aborted.spinnerStats,
+        hostPhysicalFrames: hostFrames, fallbackPhysicalFrames: fallbackFrames, idleRequestsAdded: 0, idleTicksAdded: 0,
+        controls: ['native partial/complete', 'pre-execution zero clocks', 'Working reuse with zero extra requests', 'static Working fallback',
+          'restored Working suppression', 'hot cached animation', 'off/on while running', 'completion idle', 'reload', 'same-session replay', 'native cancellation traffic'],
       }, null, 2));
     } finally { for (const terminal of terminals.reverse()) { await terminal.close(); terminal.dispose(); } }
   });

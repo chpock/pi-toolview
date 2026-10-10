@@ -43,7 +43,7 @@ export default function terminalDriver(pi: ExtensionAPI) {
     return text + "\n\nTRANSFORMED_USER";
   });
   const spinnerDiagnostics = process.env.TOOLVIEW_TEST_SPINNER_DIAGNOSTICS === "1";
-  const spinnerStats = { starts: 0, stops: 0, active: 0, maxActive: 0, ticks: 0, requests: 0, intervals: [] as number[] };
+  const spinnerStats = { starts: 0, cancels: 0, active: 0, maxActive: 0, ticks: 0, requests: 0, unrefs: 0, delays: [] as number[] };
   let insideSpinnerTick = false;
   const spinnerWork = { widths: {} as Record<string, number>, invalidations: 0 };
   const observedSpinnerNodes = new WeakSet<object>();
@@ -55,29 +55,42 @@ export default function terminalDriver(pi: ExtensionAPI) {
     spinnerWork.invalidations++;
     return Object.getPrototypeOf(this).invalidate.call(this);
   }
-  const spinnerHandles = new Set<ReturnType<typeof setInterval>>();
-  const nativeInterval = globalThis.setInterval, nativeClear = globalThis.clearInterval;
+  const spinnerHandles = new Set<ReturnType<typeof setTimeout>>();
+  const nativeTimeout = globalThis.setTimeout, nativeClear = globalThis.clearTimeout;
   let nativeRequest: (() => void) | undefined;
   if (spinnerDiagnostics) {
-    globalThis.setInterval = ((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
-      if (callback.name !== "tickSpinner") return nativeInterval(callback, delay, ...args);
-      const handle = nativeInterval(function (this: unknown, ...values: unknown[]) {
+    globalThis.setTimeout = ((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
+      if (callback.name !== "tickSpinner") return nativeTimeout(callback, delay, ...args);
+      const handle = nativeTimeout(function (this: unknown, ...values: unknown[]) {
+        spinnerHandles.delete(handle); spinnerStats.active = spinnerHandles.size;
         spinnerStats.ticks++; insideSpinnerTick = true;
         try { callback.apply(this, values); }
         finally { insideSpinnerTick = false; }
         if ([4, 20].includes(spinnerStats.ticks)) record({ type: "spinner_tick_checkpoint", ticks: spinnerStats.ticks });
       }, delay, ...args);
+      const unref = handle.unref;
+      handle.unref = function () { spinnerStats.unrefs++; return unref.call(this); };
       spinnerHandles.add(handle); spinnerStats.starts++; spinnerStats.active = spinnerHandles.size;
-      spinnerStats.maxActive = Math.max(spinnerStats.maxActive, spinnerStats.active); spinnerStats.intervals.push(delay ?? 0);
+      spinnerStats.maxActive = Math.max(spinnerStats.maxActive, spinnerStats.active); spinnerStats.delays.push(delay ?? 0);
       return handle;
-    }) as typeof setInterval;
-    globalThis.clearInterval = ((handle: ReturnType<typeof setInterval>) => {
-      if (spinnerHandles.delete(handle)) { spinnerStats.stops++; spinnerStats.active = spinnerHandles.size; }
+    }) as typeof setTimeout;
+    globalThis.clearTimeout = ((handle: ReturnType<typeof setTimeout>) => {
+      if (spinnerHandles.delete(handle)) { spinnerStats.cancels++; spinnerStats.active = spinnerHandles.size; }
       nativeClear(handle);
-    }) as typeof clearInterval;
+    }) as typeof clearTimeout;
     pi.on("session_shutdown", () => {
-      globalThis.setInterval = nativeInterval; globalThis.clearInterval = nativeClear;
+      globalThis.setTimeout = nativeTimeout; globalThis.clearTimeout = nativeClear;
       if (nativeRequest && tui) tui.requestRender = nativeRequest;
+    });
+    pi.registerCommand("tv-spinner-working", {
+      description: "Control native Working animation through its public API for fallback coverage",
+      handler: async (mode, ctx) => {
+        if (mode === "static") ctx.ui.setWorkingIndicator({ frames: ["●"] });
+        else if (mode === "animated") ctx.ui.setWorkingIndicator(undefined);
+        else throw new Error("Expected static or animated");
+        record({ type: "spinner_working", mode });
+        ctx.ui.notify(`SPINNER_WORKING_${mode}`, "info");
+      },
     });
   }
   async function gate(name: string, signal?: AbortSignal) {

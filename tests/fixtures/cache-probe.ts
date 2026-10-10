@@ -107,7 +107,7 @@ try {
       assert.deepEqual(warm.map((row) => row.slice(3)), cold.map((row) => row.slice(3)));
       assert.equal(spinnerController.cacheStats().builds, builds, "actual SDK animation changes no cached argument layout");
     }
-    assert.ok(glyphs.size >= 3, "real timer advances the actual SDK viewport prefix");
+    assert.ok(glyphs.size >= 3, "elapsed time advances the actual SDK viewport prefix independently of fallback wakes");
     const stillRunning = new ToolExecutionComponent("custom", "spinner-still-running", { query: "keep clock active" },
       undefined, undefined, spinnerRoot as never, "/tmp");
     spinnerRoot.addChild(stillRunning); stillRunning.markExecutionStarted(); spinnerFrame();

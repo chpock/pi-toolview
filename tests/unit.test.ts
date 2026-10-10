@@ -221,8 +221,9 @@ test("completion marker constant can restore success and failure symbols without
 });
 
 test("one execution-only spinner clock changes prefixes without rebuilding cached summaries and stops immediately", (t) => {
-  t.mock.timers.enable({ apis: ["setInterval"] });
-  const intervals = t.mock.method(globalThis, "setInterval"), clears = t.mock.method(globalThis, "clearInterval");
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  t.mock.method(performance, "now", () => Date.now());
+  const intervals = t.mock.method(globalThis, "setTimeout"), clears = t.mock.method(globalThis, "clearTimeout");
   const first = new Tool("read", { path: "a.txt", query: "x".repeat(90) }), second = new Tool("custom", { drop: "1,2,3,4" });
   first.result = second.result = undefined; first.executionStarted = second.executionStarted = false;
   const { root, controller } = setup([first, second]);
@@ -243,28 +244,31 @@ test("one execution-only spinner clock changes prefixes without rebuilding cache
     for (let frame = 0; frame < 4; frame++) {
       t.mock.timers.tick(100);
       assert.equal(root.requests, requests + frame + 1, "one ordinary render request per clock tick, not per tool");
+      root.render(30); // Acknowledge the requested host visit and rearm its fallback.
       const rows = first.render(30).map(plain); seen.add(rows[0]![1]!);
       assert.deepEqual(rows.map((row) => row.slice(3)), initial.map((row) => row.slice(3)), "every argument/continuation is unchanged");
       assert.equal(controller.cacheStats().builds, builds, "ticks cause no custom layout rebuilds or global invalidation");
     }
     assert.equal(seen.size, 4);
+    const armed = intervals.mock.calls.length;
     first.updateResult({ isError: true, content: [{ type: "text", text: "PARTIAL" }] }, true);
-    first.render(30); assert.equal(intervals.mock.calls.length, 1, "partial failure keeps the existing clock");
+    first.render(30); assert.equal(intervals.mock.calls.length, armed, "partial failure keeps the existing deadline");
     first.updateResult({ content: [] }); assert.equal(clears.mock.calls.length, 0, "other running tool keeps the clock alive");
     assert.ok(first.render(30).map(plain)[0]!.startsWith(" → read"));
     second.updateResult({ isError: true, content: [{ type: "text", text: "FULL_ERROR" }] });
     assert.equal(clears.mock.calls.length, 1, "final result stops the last clock before another render");
     const finalRequests = root.requests; t.mock.timers.tick(100000); assert.equal(root.requests, finalRequests, "zero redraws during idle");
     assert.equal(second.render(80).at(-1), ' ⚙ custom [drop="1,2,3,4"]');
-    second.updateResult(undefined); second.render(80); assert.equal(intervals.mock.calls.length, 2);
+    second.updateResult(undefined); second.render(80); assert.equal(intervals.mock.calls.length, armed + 1);
     controller.restore(); assert.equal(clears.mock.calls.length, 2);
     const restored = root.requests; t.mock.timers.tick(100000); assert.equal(root.requests, restored, "restore cancels animation, not just its output");
   } finally { controller.restore(); }
 });
 
 test("spinner clock ignores native/hidden/image/expanded/zero-width tools and drops detached subtrees", (t) => {
-  t.mock.timers.enable({ apis: ["setInterval"] });
-  const intervals = t.mock.method(globalThis, "setInterval"), clears = t.mock.method(globalThis, "clearInterval");
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  t.mock.method(performance, "now", () => Date.now());
+  const intervals = t.mock.method(globalThis, "setTimeout"), clears = t.mock.method(globalThis, "clearTimeout");
   const tool = new Tool("custom"), branch = new Container(); branch.addChild(tool);
   tool.result = undefined;
   const { root, controller } = setup([branch]);
@@ -278,15 +282,16 @@ test("spinner clock ignores native/hidden/image/expanded/zero-width tools and dr
     tool.setExpanded(true); assert.equal(clears.mock.calls.length, 1, "expansion stops immediately");
     tool.setExpanded(false); tool.render(80); assert.equal(intervals.mock.calls.length, 2);
     tool.hideComponent = true; const hidden = root.requests; t.mock.timers.tick(100);
-    assert.equal(clears.mock.calls.length, 2); assert.equal(root.requests, hidden, "hidden call gets no spinner redraw");
+    assert.equal(clears.mock.calls.length, 1, "the expired timeout is no longer a pending handle");
+    assert.equal(root.requests, hidden, "hidden call gets no spinner redraw");
     tool.hideComponent = false; tool.render(80);
-    tool.updateResult({ content: [{ type: "image" }] }, true); assert.equal(clears.mock.calls.length, 3);
-    tool.updateResult(undefined); tool.render(80); tool.render(0); assert.equal(clears.mock.calls.length, 4);
+    tool.updateResult({ content: [{ type: "image" }] }, true); assert.equal(clears.mock.calls.length, 2);
+    tool.updateResult(undefined); tool.render(80); tool.render(0); assert.equal(clears.mock.calls.length, 3);
     tool.render(80); root.removeChild(branch);
     const detached = root.requests; t.mock.timers.tick(100);
-    assert.equal(clears.mock.calls.length, 5); assert.equal(root.requests, detached, "detached subtree cannot keep a clock running");
+    assert.equal(clears.mock.calls.length, 4); assert.equal(root.requests, detached, "detached subtree cannot keep a clock running");
     root.addChild(branch); tool.render(80); assert.equal(intervals.mock.calls.length, 6);
-    controller.restore(); assert.equal(clears.mock.calls.length, 6);
+    controller.restore(); assert.equal(clears.mock.calls.length, 5);
     const inactive = root.requests; t.mock.timers.tick(100000); assert.equal(root.requests, inactive);
   } finally { controller.restore(); }
   const native = new Tool("bash", { command: "sleep 1" }); native.result = undefined;
@@ -296,8 +301,9 @@ test("spinner clock ignores native/hidden/image/expanded/zero-width tools and dr
 });
 
 test("spinner clock stops on native zero-row visibility and render failure", (t) => {
-  t.mock.timers.enable({ apis: ["setInterval"] });
-  const intervals = t.mock.method(globalThis, "setInterval"), clears = t.mock.method(globalThis, "clearInterval");
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  t.mock.method(performance, "now", () => Date.now());
+  const intervals = t.mock.method(globalThis, "setTimeout"), clears = t.mock.method(globalThis, "clearTimeout");
   class SelfTool extends Tool {
     visible = true;
     getRenderShell() { return "self"; }
@@ -319,21 +325,25 @@ test("spinner clock stops on native zero-row visibility and render failure", (t)
 });
 
 test("spinner attachment follows stable TUI renderer replacement without probes, writes or orphan redraws", (t) => {
-  // Node22 MockTimers reschedules an interval cleared inside its own callback.
-  // Model only this lifecycle with explicit active handles; native cancellation is proven separately.
+  // Explicit one-shot handles isolate stable-proxy lifecycle from host scheduling.
   const callbacks = new Map<NodeJS.Timeout, () => void>();
-  const intervals = t.mock.method(globalThis, "setInterval", (callback: () => void, milliseconds: number) => {
+  let now = 0; t.mock.method(performance, "now", () => now);
+  const intervals = t.mock.method(globalThis, "setTimeout", (callback: () => void, milliseconds: number) => {
     assert.equal(milliseconds, 100);
     const handle = { unref() { return this; } } as NodeJS.Timeout;
     callbacks.set(handle, callback); return handle;
   });
-  const clears = t.mock.method(globalThis, "clearInterval", (handle: NodeJS.Timeout) => { callbacks.delete(handle); });
-  const tick = () => { for (const [handle, callback] of [...callbacks]) if (callbacks.has(handle)) callback(); };
+  const clears = t.mock.method(globalThis, "clearTimeout", (handle: NodeJS.Timeout) => { callbacks.delete(handle); });
+  const tick = () => {
+    now += 100;
+    for (const [handle, callback] of [...callbacks]) if (callbacks.delete(handle)) callback();
+  };
   const noop = () => {};
   const terminal: Terminal = { columns: 80, rows: 20, kittyProtocolActive: false, start: noop, stop: noop,
     drainInput: async () => {}, write: noop, moveBy: noop, hideCursor: noop, showCursor: noop,
     clearLine: noop, clearFromCursor: noop, clearScreen: noop, setTitle: noop, setProgress: noop };
   const roots = [new TuiAltScreen(terminal, false), new TuiMainScreen(terminal, false)], requests = [0, 0];
+  const documents = roots.map(() => new Container()); roots[0]!.addChild(documents[0]!);
   roots.forEach((root, index) => { root.requestRender = () => { requests[index]!++; }; });
   let current = roots[0]!;
   const reference = new Proxy({}, {
@@ -346,25 +356,27 @@ test("spinner attachment follows stable TUI renderer replacement without probes,
     defineProperty: () => { throw new Error("No receiver probe"); },
     getPrototypeOf: () => Reflect.getPrototypeOf(current),
   }) as TuiAltScreen;
-  const first = new Tool("read"); first.result = undefined; current.addChild(first);
+  const first = new Tool("read"); first.result = undefined; documents[0]!.addChild(first);
   const controller = installToolview(reference, () => color);
   try {
     first.render(80); tick(); assert.equal(intervals.mock.calls.length, 1);
-    current = roots[1]!; const before = [...requests];
-    tick();
-    assert.equal(clears.mock.calls.length, 1); assert.deepEqual(requests, before, "old root cannot keep redrawing a replacement renderer");
-    const second = new Tool("custom"); second.result = undefined; current.addChild(second);
+    current = roots[1]!; current.addChild(documents[1]!); const before = [...requests];
+    documents[1]!.render(80); tick();
+    assert.equal(callbacks.size, 0); assert.deepEqual(requests, before, "old root cannot keep redrawing a replacement renderer");
+    const second = new Tool("custom"); second.result = undefined; documents[1]!.addChild(second);
     assert.ok(second.render(80).at(-1)!.startsWith(" ⠋ "));
     tick(); assert.equal(intervals.mock.calls.length, 2);
     assert.equal(requests[1], before[1]! + 1); assert.equal(requests[0], before[0]);
-    second.updateResult({ content: [] }); assert.equal(clears.mock.calls.length, 2);
+    documents[1]!.render(80); // The new renderer acknowledges its pending request.
+    second.updateResult({ content: [] }); assert.equal(clears.mock.calls.length, 1);
     assert.equal(callbacks.size, 0);
   } finally { controller.restore(); }
 });
 
 test("extension off and shutdown cancel active clocks; non-TUI loading starts none", async (t) => {
-  t.mock.timers.enable({ apis: ["setInterval"] });
-  const intervals = t.mock.method(globalThis, "setInterval"), clears = t.mock.method(globalThis, "clearInterval");
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  t.mock.method(performance, "now", () => Date.now());
+  const intervals = t.mock.method(globalThis, "setTimeout"), clears = t.mock.method(globalThis, "clearTimeout");
   const h = extensionHarness("tui"), tool = new Tool(); tool.result = undefined; h.root.addChild(tool);
   try {
     h.events.get("session_start")!({}, h.ctx); h.root.render(80); assert.equal(intervals.mock.calls.length, 1);
@@ -1116,7 +1128,9 @@ test("summary long-word preserves Unicode graphemes, all text, failure styles, c
   } finally { controller.restore(); }
 });
 
-test("compact summaries reserve one right column before wrapping at every usable width", () => {
+test("compact summaries reserve one right column before wrapping at every usable width", (t) => {
+  // Geometry/cache equality is independent of elapsed animation; keep the whole-row comparison strict.
+  t.mock.method(performance, "now", () => 0);
   const tool = new Tool("custom", { path: "文件/🦀/é".repeat(8), drop: "1,2,3,5,8,13,21", query: "x".repeat(60) });
   const next = new Tool("read", { path: "b.txt" });
   const { controller } = setup([tool, next]);
@@ -1939,6 +1953,16 @@ test("actual SDK viewport caches work and permits detached tool collection with 
 });
 
 
+test("actual SDK last spinner participant is collected with its live callback and leaves no fallback", () => {
+  const probe = spawnSync(process.execPath, ["--expose-gc", "tests/fixtures/spinner-gc-probe.ts"], { encoding: "utf8", timeout: 20000 });
+  assert.equal(probe.status, 0, probe.stderr);
+  const record = JSON.parse(probe.stdout);
+  assert.deepEqual(record, { lastParticipantCollected: true, callbackRetainedDuringGc: true,
+    starts: 1, active: 0, requestsAddedAfterGc: 0, entries: 0, retainedBytes: 0 });
+  mkdirSync(".test-artifacts/spinner-render", { recursive: true });
+  writeFileSync(".test-artifacts/spinner-render/last-participant-gc.json", JSON.stringify(record, null, 2));
+});
+
 test("forced compact Bash invalidates all displayed parameters on reused mutable argument updates", () => {
   const args = { command: "echo ok", timeout: 1 }, tool = new Tool("bash", args);
   const { root, controller } = setup([tool], { compact: ["bash"] });
@@ -2734,8 +2758,9 @@ test("edit spacing and rejected events keep native delegation for malformed meta
 
 
 test("edit uses ordinary summaries until final success and follows the shared spinner lifecycle", (t) => {
-  t.mock.timers.enable({ apis: ["setInterval"] });
-  const starts = t.mock.method(globalThis, "setInterval"), stops = t.mock.method(globalThis, "clearInterval");
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  t.mock.method(performance, "now", () => Date.now());
+  const starts = t.mock.method(globalThis, "setTimeout"), stops = t.mock.method(globalThis, "clearTimeout");
   const edit = new Tool("edit", { path: "example.ts", query: "q".repeat(60), edits: [{ oldText: "old", newText: "new" }] });
   edit.result = undefined; edit.isPartial = true; edit.executionStarted = false;
   const next = new Tool("read", { path: "next.txt" });
@@ -2750,11 +2775,12 @@ test("edit uses ordinary summaries until final success and follows the shared sp
     edit.updateArgs({ ...edit.args, path: "directory/long-file-name/example.ts" });
     assert.equal(next.render(24)[0], "", "a genuinely wrapped path still determines separation");
     edit.updateArgs({ ...edit.args, path: "example.ts" });
+    root.render(140); // Warm both components at the width used by the host animation pass.
     edit.markExecutionStarted();
     assert.ok(spinnerFrames.includes(plain(edit.render(140)[0]!).trim()[0]!));
     assert.equal(starts.mock.calls.length, 1);
     const builds = controller.cacheStats().builds;
-    t.mock.timers.tick(100); edit.render(140);
+    t.mock.timers.tick(100); root.render(140);
     assert.equal(controller.cacheStats().builds, builds, "spinner frames reuse summary layout");
     const proposed = { get patch(): string { return assert.fail("partial/failure custom presentation must not inspect proposed diff"); } };
     edit.updateResult({ content: [{ type: "text", text: "PARTIAL_BODY" }], details: proposed, isError: true }, true);
@@ -2772,7 +2798,7 @@ test("edit uses ordinary summaries until final success and follows the shared sp
     edit.updateResult({ content: [{ type: "text", text: "FAILURE_BODY" }], isError: true, details: proposed });
     const failure = edit.render(140).map(plain).join("");
     assert.match(failure, /← edit example.ts/); assert.doesNotMatch(failure, /┃|← Edited|FAILURE_BODY|const after/);
-    assert.equal(starts.mock.calls.length, 1, "no clock for final failure");
+    assert.equal(starts.mock.calls.length, 2, "the acknowledged fallback has rearmed once, with no clock for final failure");
     const offset = edit.render(140)[0] === "" ? 1 : 0;
     assert.equal(edit.handleMouse(mouse(offset, 140))?.handled, true);
     assert.deepEqual(edit.render(140), original.call(edit, 140), "failed summary opens unchanged native details");
@@ -3060,7 +3086,8 @@ const summarySegments = new Intl.Segmenter(undefined, { granularity: "grapheme" 
 const summaryLength = (text: string) => [...summarySegments.segment(text)].length;
 
 test("bounded compact edit path bypasses every other argument and preserves lifecycle/native safeguards", (t) => {
-  t.mock.timers.enable({ apis: ["setInterval"] });
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  t.mock.method(performance, "now", () => Date.now());
   const args = { path: "src/my file.ts", pattern: "not the title", get edits(): never { return assert.fail("path-only edit must not inspect payloads"); },
     get query(): never { return assert.fail("path-only edit must not inspect ordinary fields"); } };
   assert.equal(describeArgs("edit", args), '"src/my file.ts"');
@@ -3243,7 +3270,8 @@ test("write success selects Created/Edited/Replaced/Wrote from saved source, not
 });
 
 test("write lifecycle is path-only compact until final success, including proposed partial/error metadata", (t) => {
-  t.mock.timers.enable({ apis: ["setInterval"] });
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  t.mock.method(performance, "now", () => Date.now());
   const tool = new Tool("write", { path: "example.ts", content: "PAYLOAD_NEVER_IN_SUMMARY" });
   tool.result = undefined; tool.executionStarted = false;
   const { root, controller, original } = setup([tool]);
@@ -3389,8 +3417,9 @@ test("write metadata/native/compact/image/hidden guards remain authoritative in 
 });
 
 test("write failure skips metadata/payload, uses only error paint and tears down its shared clock", (t) => {
-  t.mock.timers.enable({ apis: ["setInterval"] });
-  const starts = t.mock.method(globalThis, "setInterval"), stops = t.mock.method(globalThis, "clearInterval");
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  t.mock.method(performance, "now", () => Date.now());
+  const starts = t.mock.method(globalThis, "setTimeout"), stops = t.mock.method(globalThis, "clearTimeout");
   const tool = new Tool("write", { path: "example.ts", get content(): string { return assert.fail("failure must not read payload"); } });
   tool.result = undefined;
   const root = new Root(); root.addChild(tool); const roles: string[] = [];

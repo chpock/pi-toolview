@@ -237,12 +237,15 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
   const outputPadding = () => passOutputPad ?? (options.outputPad?.() === 0 ? 0 : 1);
   const animated = new Set<WeakRef<ToolNode>>();
   let animationRefs = new WeakMap<ToolNode, WeakRef<ToolNode>>();
-  let spinnerTimer: ReturnType<typeof setInterval> | undefined;
-  let spinnerFrame = 0;
+  let spinnerTimer: ReturnType<typeof setTimeout> | undefined;
+  let spinnerEpoch: number | undefined, passSpinnerTime: number | undefined;
+  let spinnerGeneration = 0, spinnerPending = false;
   function stopSpinner() {
-    if (spinnerTimer !== undefined) clearInterval(spinnerTimer);
+    if (spinnerTimer !== undefined) clearTimeout(spinnerTimer);
     spinnerTimer = undefined;
-    spinnerFrame = 0;
+    spinnerGeneration++; // Cancel callbacks already queued for the old deadline/lifecycle.
+    spinnerPending = false;
+    spinnerEpoch = undefined;
   }
   function removeAnimation(node: ToolNode) {
     const reference = animationRefs.get(node);
@@ -264,26 +267,49 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     return true;
   }
   const executing = (node: ToolNode) => node.executionStarted && (node.isPartial || !node.result) && eligible(node);
-  function tickSpinner() {
+  function pruneAnimation() {
     // Only the small weak set of painted running calls, never a full transcript traversal.
     for (const reference of animated) {
       const node = reference.deref();
       if (!node) animated.delete(reference);
       else if (!executing(node) || !attached(node)) removeAnimation(node);
     }
-    if (!animated.size) { stopSpinner(); return; }
-    spinnerFrame = (spinnerFrame + 1) % SPINNER_FRAMES.length;
-    tui.requestRender(); // No global/native invalidation and no custom layout rebuild.
+    if (!animated.size) stopSpinner();
+  }
+  function armSpinner() {
+    if (!active || !animated.size || spinnerPending) return;
+    if (spinnerTimer !== undefined) clearTimeout(spinnerTimer);
+    const generation = ++spinnerGeneration;
+    // Native Working already drives whole-document frames. This is a fallback
+    // after 100ms without a successful document visit, not another periodic clock.
+    // Construct it here, never in animate(node)'s component-containing scope.
+    spinnerTimer = setTimeout(function tickSpinner() {
+      if (!active || generation !== spinnerGeneration) return;
+      spinnerTimer = undefined;
+      pruneAnimation();
+      if (!animated.size) return;
+      spinnerPending = true; // Wait for the host visit; do not flood a delayed/stopped TUI.
+      tui.requestRender(); // No global/native invalidation or custom body rebuild.
+    }, SPINNER_INTERVAL_MS);
+    spinnerTimer.unref?.();
+  }
+  function finishSpinnerPass() {
+    if (!active) return;
+    // Also prune on host-driven passes: Working may prevent the fallback from
+    // ever firing, so timeout-only cleanup would keep silent detachments alive.
+    pruneAnimation();
+    spinnerPending = false;
+    armSpinner();
   }
   function animate(node: ToolNode) {
     if (!executing(node) || !attached(node)) { removeAnimation(node); return; }
     if (!animationRefs.has(node)) {
       const reference = new WeakRef(node); animationRefs.set(node, reference); animated.add(reference);
     }
-    if (spinnerTimer === undefined) {
-      spinnerTimer = setInterval(tickSpinner, SPINNER_INTERVAL_MS);
-      spinnerTimer.unref?.();
-    }
+    spinnerEpoch ??= passSpinnerTime ?? performance.now();
+    // Normal document passes arm once on successful return. Direct tool visits
+    // may start participation, but cannot acknowledge/postpone an existing frame.
+    if (passSpinnerTime === undefined && spinnerTimer === undefined) armSpinner();
   }
   let states = new WeakMap<ToolNode, { signature: unknown[]; entry: CacheEntry<Layout>; pool: RenderCache }>();
   const forget = (node: ToolNode) => { const state = states.get(node); state?.pool.drop(state.entry); states.delete(node); };
@@ -546,7 +572,10 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     const layout = summaryLayout(node, width);
     animate(node);
     if (!executing(node) || !layout.rows.length) return layout.rows;
-    const frame = SPINNER_FRAMES[spinnerFrame]!;
+    // Time, not fallback ticks, advances the glyph even when all frames come
+    // from Working. One call-local sample keeps parallel calls in phase.
+    const now = passSpinnerTime ?? performance.now();
+    const frame = SPINNER_FRAMES[Math.floor((now - (spinnerEpoch ?? now)) / SPINNER_INTERVAL_MS) % SPINNER_FRAMES.length]!;
     const prefix = getTheme().fg("dim", " ".repeat(layout.prefixLeft) + frame + (layout.prefixSpace ? " " : ""));
     return [prefix + layout.rows[0]!.slice(layout.prefixLength), ...layout.rows.slice(1)];
   }
@@ -845,8 +874,20 @@ export function installToolview(tui: LiveTui, getTheme: () => Palette, options: 
     if (!active || !document || passOutputPad !== undefined) return observeContainerRows.call(this, width);
     try { passOutputPad = outputPadding(); }
     catch { fail("Pi Output padding could not be read; native rendering restored"); return containerRender.value.call(this, width) as string[]; }
-    try { return observeContainerRows.call(this, width); }
-    finally { passOutputPad = undefined; }
+    // Pi exposes no after-present event. A successful document render is the
+    // available signal, not proof of terminal output; diagnostic document visits
+    // count too. Never observe requestRender(), individual cards or private timers.
+    passSpinnerTime = performance.now();
+    let completed = false;
+    try {
+      const rows = observeContainerRows.call(this, width);
+      completed = true;
+      return rows;
+    } finally {
+      passOutputPad = undefined;
+      passSpinnerTime = undefined;
+      if (completed) finishSpinnerPass(); // A failed pass must not postpone fallback.
+    }
   }
   function observeContainerRows(this: Container, width: number): string[] {
     const position = active && parents.get(this);
